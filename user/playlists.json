@@ -1,0 +1,20 @@
+[
+  {
+    "id": "morning-soft-start",
+    "name": "早晨轻启动",
+    "description": "温暖、低刺激、适合开始一天。",
+    "seeds": ["warm morning indie", "soft acoustic sunrise", "light city pop"]
+  },
+  {
+    "id": "focus-coding",
+    "name": "写代码专注",
+    "description": "稳定节奏、少人声、适合持续工作。",
+    "seeds": ["instrumental focus", "minimal electronic", "lofi coding"]
+  },
+  {
+    "id": "night-downshift",
+    "name": "晚间降速",
+    "description": "低密度、空间感、适合收尾。",
+    "seeds": ["ambient pop night", "soft piano electronic", "dreamy downtempo"]
+  }
+]
