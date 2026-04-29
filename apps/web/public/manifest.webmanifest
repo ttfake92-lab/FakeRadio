@@ -1,0 +1,9 @@
+{
+  "name": "FakeRadio",
+  "short_name": "FakeRadio",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0d10",
+  "theme_color": "#0d0d10",
+  "description": "本地优先的大模型个人音乐电台"
+}
