@@ -1,2 +1,2 @@
-export * from "./contracts/radio";
-export * from "./events/stream";
+export * from "./contracts/radio.js";
+export * from "./events/stream.js";

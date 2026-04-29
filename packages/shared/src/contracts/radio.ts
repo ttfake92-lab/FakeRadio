@@ -19,7 +19,18 @@ export const ContextFragmentSchema = z.object({
   source: z.enum(["system", "user", "environment", "memory", "request", "execution"])
 });
 
-export const DjDecisionSchema = z.object({
+export type DjDecision = {
+  say: string;
+  play: {
+    query?: string;
+    trackId?: string;
+    reason: string;
+  };
+  reason: string;
+  segue: string;
+};
+
+const DjDecisionBaseSchema = z.object({
   say: z.string().min(1),
   play: z
     .object({
@@ -32,6 +43,27 @@ export const DjDecisionSchema = z.object({
     }),
   reason: z.string().min(1),
   segue: z.string().min(1)
+});
+
+export const DjDecisionSchema = DjDecisionBaseSchema.transform((decision): DjDecision => {
+  const play: DjDecision["play"] = {
+    reason: decision.play.reason
+  };
+
+  if (decision.play.query !== undefined) {
+    play.query = decision.play.query;
+  }
+
+  if (decision.play.trackId !== undefined) {
+    play.trackId = decision.play.trackId;
+  }
+
+  return {
+    say: decision.say,
+    play,
+    reason: decision.reason,
+    segue: decision.segue
+  };
 });
 
 export const TtsResultSchema = z.object({
@@ -102,7 +134,6 @@ export const HealthResponseSchema = z.object({
 
 export type Track = z.infer<typeof TrackSchema>;
 export type ContextFragment = z.infer<typeof ContextFragmentSchema>;
-export type DjDecision = z.infer<typeof DjDecisionSchema>;
 export type TtsResult = z.infer<typeof TtsResultSchema>;
 export type NowResponse = z.infer<typeof NowResponseSchema>;
 export type NextResponse = z.infer<typeof NextResponseSchema>;

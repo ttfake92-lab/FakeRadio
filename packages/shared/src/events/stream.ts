@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NowResponseSchema, TrackSchema } from "../contracts/radio";
+import { NowResponseSchema, TrackSchema } from "../contracts/radio.js";
 
 export const StreamEventSchema = z.discriminatedUnion("type", [
   z.object({
