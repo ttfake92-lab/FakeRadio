@@ -2,14 +2,14 @@
 
 ## 目标
 
-FakeRadio 是一个本地优先、由大模型驱动的个人音乐电台。它遵循参考图里的架构：PWA 播放器连接本地 Node.js 服务，本地服务负责协调用户品味文件、音乐搜索与播放、语音合成、环境输入、节奏调度、持久化状态，以及像个人 DJ 一样工作的 LLM 大脑。
+FakeRadio 是一个本地优先、由大模型驱动的个人音乐电台。它采用“播放器界面 + 本地服务中枢 + 多个能力 adapter + 大模型编排器”的架构：PWA 播放器连接本地 Node.js 服务，本地服务负责协调用户品味文件、音乐搜索与播放、语音合成、环境输入、节奏调度、持久化状态，以及像个人 DJ 一样工作的 LLM 大脑。
 
 本设计先创建“架构完整版”的项目骨架。真实服务商接入可以在后续实现中放到稳定的 adapter 接口之后。
 
 ## 成功标准
 
 - `/Users/tt/projects/FakeRadio` 是一个独立 git 仓库。
-- 项目结构能清楚复现参考流程：PWA 播放器、本地服务、用户上下文、LLM 大脑、音乐 adapter、语音与 I/O adapter、状态、调度器、HTTP/WebSocket contract。
+- 项目结构能清楚覆盖目标流程：PWA 播放器、本地服务、用户上下文、LLM 大脑、音乐 adapter、语音与 I/O adapter、状态、调度器、HTTP/WebSocket contract。
 - 第一版骨架包含目录边界、TypeScript package 布局、API contract、配置样例、prompt/user 文件和说明文档。
 - 外部服务都通过可替换 adapter 表达，不把具体产品逻辑硬编码进核心流程。
 - 后续的人或 agent 可以直接从文档继续实现，不需要反向猜架构意图。
@@ -24,13 +24,13 @@ FakeRadio 是一个本地优先、由大模型驱动的个人音乐电台。它�
 - 状态设计：SQLite 保存持久事件与状态，Markdown/JSON 文件保存可编辑的用户品味和日程偏好。
 - 第一版实现不调用真实的 Netease、FishAudio、Feishu、Weather、UPnP 或 LLM API，只定义 adapter 和可 mock 的 contract。
 
-## 参考流程核验
+## 目标流程文字化说明
 
-第二张参考图可以复现为四层系统。
+系统由四层组成：外部上下文、本地大脑、运行时 context window、交互层。后续实现只依赖本节文字描述。
 
 ### 第一层：外部上下文
 
-参考项：
+流程要素：
 
 - `USER/`：`taste.md`、`routines.md`、`playlists.json`、`mood-rules.md`。
 - `BRAIN`：类似 Claude Code 的模型进程，输出 JSON。
@@ -52,7 +52,7 @@ FakeRadio 映射：
 
 ### 第二层：本地大脑
 
-参考项：
+流程要素：
 
 - `router.js`：意图分流。
 - `context.js`：从 taste、routines、环境、历史和 system prompt 组装提示词。
@@ -70,11 +70,11 @@ FakeRadio 映射：
 - `server/src/tts/tts-cache.ts`：把 DJ 口播转换为可复用的缓存音频路径。
 - `server/src/state/`：数据库 schema、repository、文件偏好加载器。
 
-这一层可以复现，因为参考图里的脚本名会变成职责明确的模块。
+这一层可以复现，因为核心脚本职责会变成职责明确的模块。
 
 ### 第三层：运行时 Context Window
 
-参考片段：
+流程片段：
 
 - System prompt。
 - 用户语料。
@@ -107,11 +107,11 @@ type DjDecision = {
 };
 ```
 
-这能复现参考图里的模型步骤：`compute(fragments) -> { say, play, reason, segue }`，随后解析播放队列、合成 TTS，并通过 WebSocket 广播 now-playing。
+这能复现核心模型步骤：`compute(fragments) -> { say, play, reason, segue }`，随后解析播放队列、合成 TTS，并通过 WebSocket 广播 now-playing。
 
 ### 第四层：交互层
 
-参考项：
+流程要素：
 
 - localhost 上的 PWA。
 - Player、Profile、Settings 三个视图。
@@ -128,7 +128,7 @@ FakeRadio 映射：
 - `server/src/realtime/stream.ts`：WebSocket 事件，广播 now-playing、queue、DJ speech、diagnostics。
 - `apps/web/src/lib/api-client.ts`：本地 server contract 的客户端封装。
 
-这一层可以复现，因为第一版 public contract 保留了参考图里的核心 endpoint。
+这一层可以复现，因为第一版 public contract 保留了个人音乐电台闭环所需的核心 endpoint。
 
 ## 架构
 
@@ -246,7 +246,7 @@ FakeRadio/
 - `GET /api/plan/today`：当天的 scheduler 计划。
 - `WS /stream`：now-playing、queue、DJ speech、chat、diagnostics 事件。
 
-route 列表刻意保留参考图里的接口，只额外添加 `GET /api/health` 用于本地诊断。
+route 列表保留个人音乐电台闭环所需接口，只额外添加 `GET /api/health` 用于本地诊断。
 
 ## Adapter 边界
 
