@@ -1,0 +1,21 @@
+{
+  "name": "fakeradio",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "dev": "concurrently -k -n server,web -c blue,green \"pnpm --filter @fakeradio/server dev\" \"pnpm --filter @fakeradio/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.1",
+    "concurrently": "^9.1.2",
+    "only-allow": "^1.2.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
