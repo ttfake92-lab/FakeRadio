@@ -1,3 +1,4 @@
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import {
@@ -9,6 +10,7 @@ import {
   StreamEventSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema,
+  type NowResponse,
   type Track
 } from "@fakeradio/shared";
 import {
@@ -20,6 +22,7 @@ import {
   createMockWeatherAdapter
 } from "../adapters/index.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
+import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { buildTodayPlan } from "../scheduler/radio-scheduler.js";
 
 const PLAYLISTS = [
@@ -33,6 +36,9 @@ const PLAYLISTS = [
 
 export async function createRadioServer() {
   const app = Fastify({ logger: false });
+  await app.register(cors, {
+    origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/]
+  });
   await app.register(websocket);
 
   const llm = createMockLlmAdapter();
@@ -41,8 +47,21 @@ export async function createRadioServer() {
   const weather = createMockWeatherAdapter();
   const calendar = createMockCalendarAdapter();
   const devices = createMockDeviceAdapter();
+  const stream = createStreamBroadcaster();
   let currentTrack: Track | null = null;
+  let currentDj: NowResponse["dj"] = {
+    say: "FakeRadio 准备好了。"
+  };
   const queue = await music.recommend({ mood: "warm morning indie", limit: 3 });
+
+  const buildNowResponse = () =>
+    NowResponseSchema.parse({
+      playback: currentTrack ? "playing" : "idle",
+      track: currentTrack,
+      dj: currentDj,
+      queue,
+      updatedAt: new Date().toISOString()
+    });
 
   app.get("/api/health", async () =>
     HealthResponseSchema.parse({
@@ -60,17 +79,7 @@ export async function createRadioServer() {
     })
   );
 
-  app.get("/api/now", async () =>
-    NowResponseSchema.parse({
-      playback: currentTrack ? "playing" : "idle",
-      track: currentTrack,
-      dj: {
-        say: currentTrack ? `正在播放 ${currentTrack.title}` : "FakeRadio 准备好了。"
-      },
-      queue,
-      updatedAt: new Date().toISOString()
-    })
-  );
+  app.get("/api/now", async () => buildNowResponse());
 
   app.get("/api/next", async () => {
     const weatherSnapshot = await weather.current();
@@ -94,13 +103,29 @@ export async function createRadioServer() {
     });
     const candidates = await music.search(decision.play.query ?? "warm morning indie");
     const track = await music.resolve(candidates[0] ?? queue[0]!);
+    const ttsResult = await tts.synthesize(decision.say);
     currentTrack = track;
+    currentDj = {
+      say: decision.say,
+      audioUrl: ttsResult.audioUrl,
+      segue: decision.segue
+    };
+    const now = buildNowResponse();
+    stream.broadcast({ type: "now-playing", payload: now });
+    stream.broadcast({ type: "queue-updated", payload: { queue } });
+    stream.broadcast({
+      type: "dj-speech",
+      payload: {
+        text: decision.say,
+        audioUrl: ttsResult.audioUrl
+      }
+    });
 
     return NextResponseSchema.parse({
       decision,
       track,
       queue,
-      tts: await tts.synthesize(decision.say)
+      tts: ttsResult
     });
   });
 
@@ -142,6 +167,8 @@ export async function createRadioServer() {
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(new Date())));
 
   app.get("/stream", { websocket: true }, (connection) => {
+    const removeClient = stream.add(connection);
+    connection.on("close", removeClient);
     const event = StreamEventSchema.parse({
       type: "diagnostic",
       payload: {

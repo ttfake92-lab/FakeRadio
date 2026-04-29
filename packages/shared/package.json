@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run ../../packages/shared/src/**/*.test.ts",
+    "test": "cd ../.. && vitest run packages/shared/src",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

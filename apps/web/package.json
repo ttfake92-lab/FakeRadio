@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter @fakeradio/shared build",
     "dev": "next dev -p 3000",
+    "prebuild": "pnpm --filter @fakeradio/shared build",
     "build": "next build",
+    "pretypecheck": "pnpm --filter @fakeradio/shared build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src/**/*.test.ts",
+    "pretest": "pnpm --filter @fakeradio/shared build",
+    "test": "cd ../.. && vitest run apps/web/src",
+    "prelint": "pnpm --filter @fakeradio/shared build",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

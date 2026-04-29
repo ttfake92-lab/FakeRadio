@@ -43,4 +43,41 @@ describe("createRadioServer", () => {
     expect(chat.statusCode).toBe(200);
     expect(chat.json().decision.play.query).toBe("warm morning indie");
   });
+
+  it("keeps the latest DJ speech in now after computing next", async () => {
+    app = await createRadioServer();
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+
+    const nextBody = next.json();
+    const now = await app.inject({ method: "GET", url: "/api/now" });
+
+    expect(now.statusCode).toBe(200);
+    expect(now.json()).toMatchObject({
+      playback: "playing",
+      track: {
+        id: nextBody.track.id
+      },
+      dj: {
+        say: nextBody.decision.say,
+        audioUrl: nextBody.tts.audioUrl,
+        segue: nextBody.decision.segue
+      }
+    });
+  });
+
+  it("allows the local web app origin during development", async () => {
+    app = await createRadioServer();
+
+    const health = await app.inject({
+      method: "GET",
+      url: "/api/health",
+      headers: {
+        origin: "http://127.0.0.1:3002"
+      }
+    });
+
+    expect(health.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3002");
+  });
 });

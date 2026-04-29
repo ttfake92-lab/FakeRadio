@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
-  background: #0d0d10;
-  color: #f5f1e8;
+  background: #0b0d0e;
+  color: #f4efe5;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -10,18 +10,304 @@
   box-sizing: border-box;
 }
 
+html {
+  min-width: 320px;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  background: #0d0d10;
+  background:
+    linear-gradient(180deg, rgba(38, 52, 49, 0.32), rgba(11, 13, 14, 0) 340px),
+    #0b0d0e;
 }
 
 a {
   color: inherit;
+  text-decoration: none;
 }
 
-.page {
-  width: min(960px, calc(100vw - 32px));
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 42px;
+  border: 1px solid #3e4742;
+  border-radius: 6px;
+  background: #171c1b;
+  color: #f4efe5;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 0 16px;
+}
+
+button:hover:not(:disabled) {
+  border-color: #d59f58;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.radio-page {
+  width: min(1180px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 32px 0;
+  padding: 24px 0 40px;
+}
+
+.topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 52px;
+}
+
+.brand {
+  color: #f4efe5;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.nav-links {
+  align-items: center;
+  color: #a8b3aa;
+  display: flex;
+  font-size: 0.9rem;
+  gap: 18px;
+}
+
+.nav-links a:hover {
+  color: #f4efe5;
+}
+
+.player-panel {
+  border-bottom: 1px solid #26302d;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  padding: 40px 0 28px;
+}
+
+.player-copy {
+  min-width: 0;
+}
+
+.section-label {
+  color: #d59f58;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 10px;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(2.3rem, 7vw, 5.8rem);
+  line-height: 0.95;
+  margin-bottom: 14px;
+  max-width: 780px;
+}
+
+h2 {
+  color: #f4efe5;
+  font-size: 1rem;
+  line-height: 1.2;
+  margin-bottom: 14px;
+}
+
+.artist-line {
+  color: #a8b3aa;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin-bottom: 0;
+}
+
+.status-strip {
+  align-content: start;
+  display: grid;
+  gap: 10px;
+}
+
+.status-strip span {
+  border: 1px solid #33403b;
+  border-radius: 6px;
+  color: #cbd6cd;
+  min-height: 38px;
+  padding: 9px 12px;
+}
+
+.audio-control {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.primary-button {
+  background: #d59f58;
+  border-color: #d59f58;
+  color: #15120d;
+}
+
+.error-line {
+  background: #3b1717;
+  border: 1px solid #7d3b35;
+  border-radius: 6px;
+  color: #ffd7ce;
+  margin: 16px 0 0;
+  padding: 12px 14px;
+}
+
+.grid-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 20px;
+}
+
+.panel {
+  background: #111515;
+  border: 1px solid #26302d;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.panel p {
+  color: #cbd6cd;
+  line-height: 1.65;
+  margin-bottom: 12px;
+}
+
+.speech {
+  color: #f4efe5;
+  font-size: 1rem;
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.detail-list div {
+  border-top: 1px solid #25302d;
+  padding-top: 10px;
+}
+
+.detail-list dt {
+  color: #d59f58;
+  font-size: 0.75rem;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.detail-list dd {
+  color: #a8b3aa;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.queue-list,
+.plan-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.queue-list li,
+.plan-list li {
+  border-top: 1px solid #25302d;
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+}
+
+.queue-list span,
+.plan-list span {
+  color: #f4efe5;
+  font-weight: 700;
+}
+
+.queue-list small,
+.plan-list small,
+.plan-list time {
+  color: #8fa098;
+  font-size: 0.82rem;
+}
+
+.chat-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.chat-form label {
+  color: #d59f58;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.chat-form textarea {
+  background: #0b0d0e;
+  border: 1px solid #33403b;
+  border-radius: 6px;
+  color: #f4efe5;
+  min-height: 104px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.chat-form textarea:focus {
+  border-color: #d59f58;
+  outline: none;
+}
+
+@media (max-width: 880px) {
+  .player-panel,
+  .grid-layout {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: clamp(2.1rem, 14vw, 4rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .radio-page {
+    width: min(100% - 24px, 1180px);
+    padding-top: 14px;
+  }
+
+  .topbar,
+  .button-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nav-links {
+    justify-content: space-between;
+  }
+
+  button {
+    width: 100%;
+  }
 }

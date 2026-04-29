@@ -14,6 +14,12 @@ export function buildApiUrl(path: string) {
   return new URL(path, getServerBaseUrl()).toString();
 }
 
+export function buildStreamUrl(path: string) {
+  const url = new URL(path, getServerBaseUrl());
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
 export async function getNow() {
   const response = await fetch(buildApiUrl("/api/now"));
   return NowResponseSchema.parse(await response.json());

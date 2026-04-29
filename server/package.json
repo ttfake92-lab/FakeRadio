@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter @fakeradio/shared build",
     "dev": "tsx src/index.ts",
+    "prebuild": "pnpm --filter @fakeradio/shared build",
     "build": "tsc -b tsconfig.json --force",
+    "pretypecheck": "pnpm --filter @fakeradio/shared build",
     "typecheck": "tsc -b tsconfig.json --force",
-    "test": "vitest run src/**/*.test.ts",
+    "pretest": "pnpm --filter @fakeradio/shared build",
+    "test": "cd .. && vitest run server/src",
+    "prelint": "pnpm --filter @fakeradio/shared build",
     "lint": "tsc -b tsconfig.json --force"
   },
   "dependencies": {
-    "@fastify/websocket": "^11.0.2",
     "@fakeradio/shared": "workspace:*",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/websocket": "^11.0.2",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.1",
     "zod": "^4.1.12"
