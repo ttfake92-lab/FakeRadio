@@ -1,0 +1,15 @@
+# AGENTS.md
+
+## 项目文档语言
+
+- Markdown 文档默认使用中文，包括 README、docs、spec、plan、runbook 和 adapter 说明。
+- 必须保留英文的地方可以使用英文，例如代码标识符、文件路径、接口名、命令、包名、配置键、HTTP route、TypeScript 类型和第三方产品名。
+- 如果英文术语比中文更准确，可以保留英文，但优先在第一次出现时用中文解释上下文。
+- 代码注释遵循代码可读性优先：面向项目成员的解释尽量中文，API 名称和类型名称保持原文。
+
+## 开发原则
+
+- 优先保持架构边界清楚：PWA 播放器只调用本地 server，本地 server 负责 orchestration、adapter、state 和调度。
+- 外部服务必须通过 adapter 接口接入，避免把 provider 逻辑写进核心流程。
+- 先完成 mock contract 和本地闭环，再接真实 provider。
+- 变更保持克制，只修改与当前任务直接相关的文件。

@@ -1,98 +1,98 @@
-# FakeRadio Design
+# FakeRadio 设计方案
 
-## Goal
+## 目标
 
-FakeRadio is a local-first, LLM-driven personal music radio. It follows the reference architecture: a PWA player talks to a local Node.js server, and the server coordinates user taste files, music search/playback, speech synthesis, environment inputs, schedule hooks, persistent state, and an LLM brain that behaves like a personal DJ.
+FakeRadio 是一个本地优先、由大模型驱动的个人音乐电台。它遵循参考图里的架构：PWA 播放器连接本地 Node.js 服务，本地服务负责协调用户品味文件、音乐搜索与播放、语音合成、环境输入、节奏调度、持久化状态，以及像个人 DJ 一样工作的 LLM 大脑。
 
-This design creates the architecture-complete project skeleton first. Real provider integrations can be implemented later behind stable adapter interfaces.
+本设计先创建“架构完整版”的项目骨架。真实服务商接入可以在后续实现中放到稳定的 adapter 接口之后。
 
-## Success Criteria
+## 成功标准
 
-- `/Users/tt/projects/FakeRadio` is an independent git repository.
-- The project structure clearly reproduces the reference flow: PWA player, local server, user context, LLM brain, music adapter, voice/I/O adapters, state, scheduler, and HTTP/WebSocket contract.
-- The first scaffold contains directory boundaries, TypeScript package layout, API contracts, config samples, prompt/user files, and documentation.
-- External services are represented by replaceable adapters, not hard-coded product logic.
-- A future worker can continue from the docs without reverse-engineering the intended architecture.
+- `/Users/tt/projects/FakeRadio` 是一个独立 git 仓库。
+- 项目结构能清楚复现参考流程：PWA 播放器、本地服务、用户上下文、LLM 大脑、音乐 adapter、语音与 I/O adapter、状态、调度器、HTTP/WebSocket contract。
+- 第一版骨架包含目录边界、TypeScript package 布局、API contract、配置样例、prompt/user 文件和说明文档。
+- 外部服务都通过可替换 adapter 表达，不把具体产品逻辑硬编码进核心流程。
+- 后续的人或 agent 可以直接从文档继续实现，不需要反向猜架构意图。
 
-## Assumptions
+## 假设
 
-- Package manager: pnpm.
-- Language: TypeScript.
-- Frontend: Next.js PWA.
-- Local server: Node.js with Fastify.
-- Repo style: monorepo with apps, server, packages, docs, prompts, and user files.
-- State design: SQLite for durable event/state storage, plus markdown/JSON files for editable user taste and routines.
-- First implementation does not call real Netease, FishAudio, Feishu, Weather, UPnP, or LLM APIs. It defines adapters and mock-capable contracts.
+- 包管理器：pnpm。
+- 语言：TypeScript。
+- 前端：Next.js PWA。
+- 本地服务：Node.js + Fastify。
+- 仓库形式：monorepo，包含 apps、server、packages、docs、prompts、user 等目录。
+- 状态设计：SQLite 保存持久事件与状态，Markdown/JSON 文件保存可编辑的用户品味和日程偏好。
+- 第一版实现不调用真实的 Netease、FishAudio、Feishu、Weather、UPnP 或 LLM API，只定义 adapter 和可 mock 的 contract。
 
-## Reference Flow Verification
+## 参考流程核验
 
-The second reference image can be reproduced as a four-layer system.
+第二张参考图可以复现为四层系统。
 
-### Layer 1: External Context
+### 第一层：外部上下文
 
-Reference items:
+参考项：
 
-- `USER/`: `taste.md`, `routines.md`, `playlists.json`, `mood-rules.md`.
-- `BRAIN`: Claude Code style model process returning JSON.
-- `MUSIC`: NeteaseCloudMusicApi capabilities such as search, song URL, lyric, recommend.
-- `VOICE + I/O`: Fish TTS, Feishu/Lark, weather, UPnP.
+- `USER/`：`taste.md`、`routines.md`、`playlists.json`、`mood-rules.md`。
+- `BRAIN`：类似 Claude Code 的模型进程，输出 JSON。
+- `MUSIC`：NeteaseCloudMusicApi 能力，例如 search、song URL、lyric、recommend。
+- `VOICE + I/O`：Fish TTS、Feishu/Lark、weather、UPnP。
 
-FakeRadio mapping:
+FakeRadio 映射：
 
-- `user/taste.md`: long-term taste, disliked patterns, preferred radio tone.
-- `user/routines.md`: day rhythm, time blocks, calendar expectations.
-- `user/playlists.json`: curated seeds and playlist metadata.
-- `user/mood-rules.md`: rules that translate weather, time, user input, and recent playback into mood hints.
-- `server/src/adapters/llm/`: model adapter interface and provider-specific implementations.
-- `server/src/adapters/music/`: search, resolve stream URL, lyrics, recommendations.
-- `server/src/adapters/tts/`: DJ speech synthesis to cached audio files.
-- `server/src/adapters/io/`: weather, calendar, Feishu/Lark, UPnP, and other outside signals.
+- `user/taste.md`：长期音乐品味、不喜欢的模式、偏好的电台语气。
+- `user/routines.md`：日常节奏、时间段、日历预期。
+- `user/playlists.json`：人工维护的种子歌单和歌单元数据。
+- `user/mood-rules.md`：把天气、时间、用户输入、近期播放翻译成 mood hint 的规则。
+- `server/src/adapters/llm/`：模型 adapter 接口和具体 provider 实现。
+- `server/src/adapters/music/`：搜索、解析音频 URL、歌词、推荐。
+- `server/src/adapters/tts/`：把 DJ 文案合成为缓存音频文件。
+- `server/src/adapters/io/`：天气、日历、Feishu/Lark、UPnP 和其他外部信号。
 
-This layer is reproducible because each outside dependency has a named file boundary and a stable TypeScript interface.
+这一层可以复现，因为每个外部依赖都有命名清晰的文件边界和稳定的 TypeScript 接口。
 
-### Layer 2: Local Brain
+### 第二层：本地大脑
 
-Reference items:
+参考项：
 
-- `router.js`: intent routing.
-- `context.js`: prompt assembly from taste, routines, environment, history, and system prompt.
-- `claude.js`: LLM adapter that parses `{ say, play, reason, segue }`.
-- `scheduler.js`: rhythm scheduling.
-- `tts.js`: speech synthesis cache.
-- `state.db`: messages, plays, plan, prefs, long-term memory.
+- `router.js`：意图分流。
+- `context.js`：从 taste、routines、环境、历史和 system prompt 组装提示词。
+- `claude.js`：LLM adapter，解析 `{ say, play, reason, segue }`。
+- `scheduler.js`：节奏调度。
+- `tts.js`：语音合成缓存。
+- `state.db`：messages、plays、plan、prefs、长期记忆。
 
-FakeRadio mapping:
+FakeRadio 映射：
 
-- `server/src/router/intent-router.ts`: routes chat, next-track, planned-radio, and natural-language commands.
-- `server/src/context/context-builder.ts`: builds the context window from six fragments.
-- `server/src/brain/dj-brain.ts`: calls the LLM adapter and validates structured DJ decisions.
-- `server/src/scheduler/radio-scheduler.ts`: generates time-aware radio plans and hooks.
-- `server/src/tts/tts-cache.ts`: converts DJ speech to cached audio paths.
-- `server/src/state/`: database schema, repositories, and file-backed preference loaders.
+- `server/src/router/intent-router.ts`：分流 chat、next-track、planned-radio 和自然语言命令。
+- `server/src/context/context-builder.ts`：从六类片段构建 context window。
+- `server/src/brain/dj-brain.ts`：调用 LLM adapter，并校验结构化 DJ 决策。
+- `server/src/scheduler/radio-scheduler.ts`：生成带时间感的电台计划和 hook。
+- `server/src/tts/tts-cache.ts`：把 DJ 口播转换为可复用的缓存音频路径。
+- `server/src/state/`：数据库 schema、repository、文件偏好加载器。
 
-This layer is reproducible because the reference script names become focused modules with explicit responsibilities.
+这一层可以复现，因为参考图里的脚本名会变成职责明确的模块。
 
-### Layer 3: Runtime Context Window
+### 第三层：运行时 Context Window
 
-Reference fragments:
+参考片段：
 
-- System prompt.
-- User taste.
-- Environment injection.
-- Stored memory.
-- User input and tool results.
-- Execution track.
+- System prompt。
+- 用户语料。
+- 环境注入。
+- 已检索记忆。
+- 用户输入和工具结果。
+- 执行轨迹。
 
-FakeRadio mapping:
+FakeRadio 映射：
 
-- `prompts/dj-persona.md`: DJ identity, behavior, and output style.
-- `user/*.md` and `user/playlists.json`: editable personal context.
-- `server/src/context/environment-fragment.ts`: now, weather, calendar, device availability.
-- `server/src/state/memory-repository.ts`: recent messages, plays, plans, and learned preferences.
-- `server/src/context/request-fragment.ts`: `/api/chat`, `/api/next`, and music search/tool outputs.
-- `server/src/context/execution-fragment.ts`: scheduler state, current queue, current playback, TTS cache status.
+- `prompts/dj-persona.md`：DJ 身份、行为方式、输出风格。
+- `user/*.md` 和 `user/playlists.json`：可编辑的个人上下文。
+- `server/src/context/environment-fragment.ts`：now、weather、calendar、可用播放设备。
+- `server/src/state/memory-repository.ts`：近期消息、播放、计划、学习到的偏好。
+- `server/src/context/request-fragment.ts`：`/api/chat`、`/api/next`、音乐搜索和工具结果。
+- `server/src/context/execution-fragment.ts`：scheduler 状态、当前队列、当前播放、TTS 缓存状态。
 
-The model output contract is:
+模型输出 contract：
 
 ```ts
 type DjDecision = {
@@ -107,39 +107,39 @@ type DjDecision = {
 };
 ```
 
-This reproduces the reference model step: `compute(fragments) -> { say, play, reason, segue }`, followed by queue resolution, TTS synthesis, and now-playing broadcast.
+这能复现参考图里的模型步骤：`compute(fragments) -> { say, play, reason, segue }`，随后解析播放队列、合成 TTS，并通过 WebSocket 广播 now-playing。
 
-### Layer 4: Interaction Layer
+### 第四层：交互层
 
-Reference items:
+参考项：
 
-- PWA on localhost.
-- Player, Profile, Settings views.
-- Single audio element.
-- WebSocket chat/stream.
-- Service worker cache and prefetch.
-- HTTP contract: `POST /api/chat`, `GET /api/now`, `GET /api/next`, `GET /api/taste`, `GET /api/plan/today`, `WS /stream`.
+- localhost 上的 PWA。
+- Player、Profile、Settings 三个视图。
+- 单一 audio 元素。
+- WebSocket chat/stream。
+- Service worker 缓存和预取。
+- HTTP contract：`POST /api/chat`、`GET /api/now`、`GET /api/next`、`GET /api/taste`、`GET /api/plan/today`、`WS /stream`。
 
-FakeRadio mapping:
+FakeRadio 映射：
 
-- `apps/web/`: Next.js PWA with Player, Profile, Settings, and a single audio pipeline.
-- `packages/shared/src/contracts/`: shared request/response types used by both web and server.
-- `server/src/http/routes/`: Fastify routes for the HTTP contract.
-- `server/src/realtime/stream.ts`: WebSocket events for now-playing, queue updates, DJ speech, and diagnostics.
-- `apps/web/src/lib/api-client.ts`: client wrapper for the local server contract.
+- `apps/web/`：Next.js PWA，包含 Player、Profile、Settings，以及单一音频播放管线。
+- `packages/shared/src/contracts/`：前后端共享的 request/response 类型。
+- `server/src/http/routes/`：Fastify route，承载 HTTP contract。
+- `server/src/realtime/stream.ts`：WebSocket 事件，广播 now-playing、queue、DJ speech、diagnostics。
+- `apps/web/src/lib/api-client.ts`：本地 server contract 的客户端封装。
 
-This layer is reproducible because the same endpoints from the reference image are retained as the first public contract.
+这一层可以复现，因为第一版 public contract 保留了参考图里的核心 endpoint。
 
-## Architecture
+## 架构
 
 ```text
 apps/web
-  Next.js PWA player
-  Profile and Settings views
-  HTTP client and WebSocket stream client
+  Next.js PWA 播放器
+  Profile 和 Settings 视图
+  HTTP client 与 WebSocket stream client
 
 server
-  Fastify local API server
+  Fastify 本地 API 服务
   intent router
   context builder
   DJ brain
@@ -154,18 +154,18 @@ packages/shared
   common utilities
 
 user
-  editable personal taste and routine files
+  可编辑的个人品味和日程文件
 
 prompts
-  model prompts and context templates
+  模型 prompt 和 context 模板
 
 docs
-  architecture, setup, API contract, adapter guide
+  架构、启动方式、API contract、adapter 指南
 ```
 
-The frontend never calls outside services directly. It talks only to the local server. The server owns orchestration, provider credentials, state, and long-running decisions.
+前端永远不直接调用外部服务，只和本地 server 通信。server 负责 orchestration、provider 凭证、状态和长周期决策。
 
-## Proposed File Structure
+## 建议文件结构
 
 ```text
 FakeRadio/
@@ -234,68 +234,68 @@ FakeRadio/
       specs/
 ```
 
-## HTTP and WebSocket Contract
+## HTTP 和 WebSocket Contract
 
-Initial routes:
+初始 route：
 
-- `GET /api/health`: local server health and adapter readiness.
-- `GET /api/now`: current track, DJ speech, playback state, and queue preview.
-- `GET /api/next`: ask the server to compute or fetch the next playable item.
-- `POST /api/chat`: user message or command to the DJ brain.
-- `GET /api/taste`: normalized view of user taste files.
-- `GET /api/plan/today`: scheduler plan for the current day.
-- `WS /stream`: now-playing, queue, DJ speech, chat, and diagnostic events.
+- `GET /api/health`：本地 server 健康状态和 adapter 就绪状态。
+- `GET /api/now`：当前歌曲、DJ 口播、播放状态、队列预览。
+- `GET /api/next`：让 server 计算或获取下一首可播放内容。
+- `POST /api/chat`：用户发给 DJ 大脑的消息或命令。
+- `GET /api/taste`：用户品味文件的规范化视图。
+- `GET /api/plan/today`：当天的 scheduler 计划。
+- `WS /stream`：now-playing、queue、DJ speech、chat、diagnostics 事件。
 
-The route list intentionally matches the reference image and adds only `GET /api/health` for local diagnostics.
+route 列表刻意保留参考图里的接口，只额外添加 `GET /api/health` 用于本地诊断。
 
-## Adapter Boundaries
+## Adapter 边界
 
-Each adapter has a port interface and at least one mock implementation in the first scaffold.
+每个 adapter 都有 port interface，第一版骨架至少提供一个 mock 实现。
 
-- LLM adapter: receives context fragments, returns a validated `DjDecision`.
-- Music adapter: searches, recommends, resolves stream URLs, fetches lyrics.
-- TTS adapter: receives text and voice settings, returns a cached audio file URL/path.
-- Weather adapter: returns current weather and coarse mood hints.
-- Calendar adapter: returns near-term schedule context.
-- UPnP adapter: discovers and pushes playback to local devices.
+- LLM adapter：接收 context fragments，返回经过校验的 `DjDecision`。
+- Music adapter：搜索、推荐、解析音频 URL、获取歌词。
+- TTS adapter：接收文本和声音设置，返回缓存音频文件的 URL/path。
+- Weather adapter：返回当前天气和粗粒度 mood hint。
+- Calendar adapter：返回近期日程上下文。
+- UPnP adapter：发现本地设备并推送播放。
 
-Real providers are implementation details. The rest of the system depends on interfaces.
+真实 provider 都是实现细节。系统其他部分只依赖接口。
 
-## State Model
+## 状态模型
 
-Durable state is split into human-editable files and application state.
+持久状态拆成两类：人可编辑文件和应用状态。
 
-- Human-editable files live in `user/`.
-- Application state lives under `server/src/state/` and is planned for SQLite.
-- TTS audio cache lives under `server/cache/tts/`.
-- Music cache and temporary provider responses live under `server/cache/music/`.
+- 人可编辑文件放在 `user/`。
+- 应用状态放在 `server/src/state/`，计划使用 SQLite。
+- TTS 音频缓存放在 `server/cache/tts/`。
+- 音乐缓存和临时 provider 响应放在 `server/cache/music/`。
 
-The first scaffold includes schema documentation and repository interfaces. Real SQLite persistence comes after the mock flow and contract tests exist.
+第一版骨架包含 schema 文档和 repository 接口。真实 SQLite 持久化在 mock flow 和 contract tests 跑通后再实现。
 
-## Testing Strategy
+## 测试策略
 
-The first scaffold provides test entry points for the architecture contracts, not complete provider behavior.
+第一版骨架提供架构 contract 的测试入口，不追求完整 provider 行为。
 
-- Shared contracts: schema validation tests.
-- Context builder: deterministic fragment ordering tests.
-- DJ brain: mock LLM output validation tests.
-- HTTP routes: health and contract shape tests.
-- Web app: smoke test for Player/Profile/Settings route rendering once UI is implemented.
+- Shared contracts：schema validation tests。
+- Context builder：片段顺序确定性的测试。
+- DJ brain：mock LLM 输出校验测试。
+- HTTP routes：health 和 contract shape 测试。
+- Web app：UI 实现后，对 Player/Profile/Settings route 做 smoke test。
 
-## Out of Scope for First Scaffold
+## 第一版骨架不包含
 
-- Real Netease login or streaming implementation.
-- Real FishAudio synthesis.
-- Real Feishu/Lark calendar integration.
-- Real UPnP playback.
-- Production deployment.
-- Multi-user accounts.
-- Recommendation quality tuning.
-- Full visual design polish.
+- 真实 Netease 登录或串流实现。
+- 真实 FishAudio 合成。
+- 真实 Feishu/Lark 日历集成。
+- 真实 UPnP 播放。
+- 生产部署。
+- 多用户账号。
+- 推荐质量调优。
+- 完整视觉设计打磨。
 
-## Implementation Defaults
+## 实现默认值
 
-- LLM provider: mock adapter first, real provider later behind `server/src/adapters/llm/`.
-- Local development: web app and server run on separate ports, with a root script to start both.
-- Persistence: repository interfaces and schema notes first; SQLite implementation after the mock flow is running.
-- Provider integrations: all external services are mocked until the shared contracts and local API routes are verified.
+- LLM provider：先用 mock adapter，真实 provider 后续放到 `server/src/adapters/llm/`。
+- 本地开发：web app 和 server 分别跑在不同端口，根目录脚本负责同时启动两者。
+- 持久化：先写 repository 接口和 schema notes；mock flow 跑通后再实现 SQLite。
+- Provider 集成：在 shared contracts 和本地 API routes 验证前，所有外部服务都使用 mock。
