@@ -1,0 +1,24 @@
+{
+  "name": "@fakeradio/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -b tsconfig.json --force",
+    "typecheck": "tsc -b tsconfig.json --force",
+    "test": "vitest run src/**/*.test.ts",
+    "lint": "tsc -b tsconfig.json --force"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.0.2",
+    "@fakeradio/shared": "workspace:*",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.6.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "vitest": "^3.2.4"
+  }
+}
