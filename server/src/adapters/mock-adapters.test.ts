@@ -6,7 +6,7 @@ import {
   createMockMusicAdapter,
   createMockTtsAdapter,
   createMockWeatherAdapter
-} from "./index";
+} from "./index.js";
 
 describe("mock adapters", () => {
   it("computes a valid DJ decision", async () => {

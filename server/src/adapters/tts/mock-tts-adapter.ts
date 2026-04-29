@@ -1,4 +1,4 @@
-import type { TtsAdapter } from "../types";
+import type { TtsAdapter } from "../types.js";
 
 export function createMockTtsAdapter(): TtsAdapter {
   return {

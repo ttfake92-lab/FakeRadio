@@ -1,6 +1,6 @@
 import { DjDecisionSchema, type DjDecision } from "@fakeradio/shared";
-import type { LlmAdapter } from "../adapters";
-import { buildContextWindow, type BuildContextInput } from "../context/context-builder";
+import type { LlmAdapter } from "../adapters/index.js";
+import { buildContextWindow, type BuildContextInput } from "../context/context-builder.js";
 
 export type ComputeDjDecisionInput = BuildContextInput & {
   llm: LlmAdapter;

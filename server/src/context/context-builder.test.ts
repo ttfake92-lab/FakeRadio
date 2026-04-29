@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildContextWindow } from "./context-builder";
+import { buildContextWindow } from "./context-builder.js";
 
 describe("buildContextWindow", () => {
   it("builds the six context fragments in deterministic order", () => {

@@ -1,5 +1,5 @@
 import { DjDecisionSchema } from "@fakeradio/shared";
-import type { LlmAdapter } from "../types";
+import type { LlmAdapter } from "../types.js";
 
 export function createMockLlmAdapter(): LlmAdapter {
   return {

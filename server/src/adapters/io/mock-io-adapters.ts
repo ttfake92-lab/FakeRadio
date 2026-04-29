@@ -1,4 +1,4 @@
-import type { CalendarAdapter, DeviceAdapter, WeatherAdapter } from "../types";
+import type { CalendarAdapter, DeviceAdapter, WeatherAdapter } from "../types.js";
 
 export function createMockWeatherAdapter(): WeatherAdapter {
   return {

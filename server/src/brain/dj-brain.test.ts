@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createMockLlmAdapter } from "../adapters";
-import { computeDjDecision } from "./dj-brain";
+import { createMockLlmAdapter } from "../adapters/index.js";
+import { computeDjDecision } from "./dj-brain.js";
 
 describe("computeDjDecision", () => {
   it("builds context and returns a validated decision", async () => {

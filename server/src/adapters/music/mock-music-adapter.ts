@@ -1,5 +1,5 @@
 import type { Track } from "@fakeradio/shared";
-import type { MusicAdapter } from "../types";
+import type { MusicAdapter } from "../types.js";
 
 const MOCK_TRACKS: Track[] = [
   {
