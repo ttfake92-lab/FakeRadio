@@ -68,6 +68,8 @@ export function PlayerShell() {
   const isDuckingRef = useRef(false);
   const nextEpisodeRef = useRef<RadioEpisode | null>(null);
   const isPrefetchingRef = useRef(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onTimeUpdateRef = useRef<(() => void) | null>(null);
 
   const track = now?.track ?? null;
   const playbackLabel = useMemo(() => getPlaybackLabel(now?.playback ?? "idle"), [now?.playback]);
@@ -132,7 +134,11 @@ export function PlayerShell() {
       }
     };
 
+    if (onTimeUpdateRef.current) {
+      speechAudio.removeEventListener("timeupdate", onTimeUpdateRef.current);
+    }
     speechAudio.addEventListener("timeupdate", onTimeUpdate);
+    onTimeUpdateRef.current = onTimeUpdate;
 
     speechAudio.onended = () => {
       setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
@@ -167,6 +173,7 @@ export function PlayerShell() {
         const pollInterval = setInterval(() => {
           if (!isPrefetchingRef.current) {
             clearInterval(pollInterval);
+            pollIntervalRef.current = null;
             const n = nextEpisodeRef.current;
             if (n) {
               nextEpisodeRef.current = null;
@@ -178,6 +185,14 @@ export function PlayerShell() {
             }
           }
         }, 100);
+        pollIntervalRef.current = pollInterval;
+        setTimeout(() => {
+          if (pollIntervalRef.current === pollInterval) {
+            clearInterval(pollInterval);
+            pollIntervalRef.current = null;
+            setEpisodeState("idle");
+          }
+        }, 30_000);
         return;
       }
 
@@ -185,7 +200,11 @@ export function PlayerShell() {
     };
 
     speechAudio.play().then(() => {
-      setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+      try {
+        setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+      } catch {
+        // state already changed, ignore
+      }
     }).catch(() => {
       const ma = musicAudioRef.current;
       if (ma) {
@@ -254,6 +273,20 @@ export function PlayerShell() {
       prefetchNextEpisode();
     }
   }, [episodeState, prefetchNextEpisode]);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      const sa = speechAudioRef.current;
+      if (sa && onTimeUpdateRef.current) {
+        sa.removeEventListener("timeupdate", onTimeUpdateRef.current);
+        onTimeUpdateRef.current = null;
+      }
+    };
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
