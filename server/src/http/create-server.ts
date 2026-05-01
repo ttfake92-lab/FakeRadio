@@ -24,7 +24,8 @@ import {
   createMockStorySourceAdapter,
   createMockTtsAdapter,
   createMockWeatherAdapter,
-  createEdgeTtsAdapter
+  createEdgeTtsAdapter,
+  createPublicMetadataAdapter
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -283,34 +284,47 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       fallbackReason = "TTS synthesis failed; fell back to mock TTS";
     }
 
-    let sources: RadioEpisode["sources"];
+    let lyricSources: RadioEpisode["sources"] = [];
     try {
       const adapterSources = await storySource.gather(track);
-      sources = adapterSources.length > 0 ? adapterSources : [
-        {
-          kind: "mock",
-          title: "mock source",
-          content: "Placeholder source note for story generation."
-        }
-      ];
+      lyricSources = adapterSources.length > 0 ? adapterSources : [];
     } catch {
-      sources = [
-        {
-          kind: "mock",
-          title: "mock source",
-          content: "Placeholder source note for story generation."
-        }
-      ];
+      lyricSources = [];
     }
 
+    let metadataSources: RadioEpisode["sources"] = [];
+    try {
+      const publicMetadata = createPublicMetadataAdapter();
+      const adapterSources = await publicMetadata.gather(track);
+      metadataSources = adapterSources.length > 0 ? adapterSources : [];
+    } catch {
+      metadataSources = [];
+    }
+
+    const combinedSources = [...lyricSources, ...metadataSources];
+    const sources = combinedSources.length > 0 ? combinedSources : [
+      {
+        kind: "mock",
+        title: "mock source",
+        content: "Placeholder source note for story generation."
+      }
+    ];
+
     const hasLyricSource = sources.some((s) => s.kind === "lyric");
+    const hasMetadataSource = sources.some((s) => s.kind === "metadata" && (s.confidence ?? 0) >= 0.5);
+
+    const storyType: RadioEpisode["story"]["type"] = hasMetadataSource
+      ? "background"
+      : hasLyricSource
+        ? "lyric-theme"
+        : "mood-reading";
 
     const episode: RadioEpisode = {
       track,
       story: {
         text: decision.say,
         audioUrl: storyAudioUrl,
-        type: hasLyricSource ? "lyric-theme" : "mood-reading"
+        type: storyType
       },
       sources,
       playback: {

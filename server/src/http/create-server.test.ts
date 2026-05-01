@@ -297,6 +297,148 @@ describe("createRadioServer", () => {
     expect(body.episode.playback.musicStartVolume).toBeLessThanOrEqual(1);
   });
 
+  it("returns background story type when metadata source is available with high confidence", async () => {
+    const metadataStorySource = {
+      async gather() {
+        return [
+          {
+            kind: "metadata" as const,
+            title: "Test Song - Test Artist",
+            content: "Album: Test Album\nReleased: 2023-06-15",
+            url: "https://musicbrainz.org/recording/abc123",
+            confidence: 0.95
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: metadataStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("background");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("metadata");
+    expect(body.episode.sources[0].confidence).toBe(0.95);
+  });
+
+  it("returns lyric-theme story type when only lyric source is available", async () => {
+    const lyricStorySource = {
+      async gather() {
+        return [
+          {
+            kind: "lyric" as const,
+            title: "Test Song",
+            content: "第一行歌词\n第二行歌词"
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: lyricStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("lyric-theme");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("lyric");
+  });
+
+  it("returns mood-reading story type when metadata confidence is below 0.5", async () => {
+    const lowConfidenceMetadataSource = {
+      async gather() {
+        return [
+          {
+            kind: "metadata" as const,
+            title: "Test Song - Test Artist",
+            content: "Album: Test Album",
+            confidence: 0.3
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: lowConfidenceMetadataSource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources[0].kind).toBe("metadata");
+    expect(body.episode.sources[0].confidence).toBe(0.3);
+  });
+
+  it("returns background story type when both lyric and metadata sources are present", async () => {
+    const combinedStorySource = {
+      async gather() {
+        return [
+          {
+            kind: "lyric" as const,
+            title: "Test Song",
+            content: "第一行歌词"
+          },
+          {
+            kind: "metadata" as const,
+            title: "Test Song - Test Artist",
+            content: "Album: Test Album",
+            confidence: 0.85
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: combinedStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("background");
+    expect(body.episode.sources).toHaveLength(2);
+  });
+
+  it("returns mood-reading when metadata adapter fails", async () => {
+    const failingStorySource = {
+      async gather() {
+        throw new Error("Lyric service down");
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: failingStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources[0].kind).toBe("mock");
+  });
+
   it("falls back to mock TTS when real TTS fails for episode", async () => {
     const failingTts = {
       async synthesize() {
