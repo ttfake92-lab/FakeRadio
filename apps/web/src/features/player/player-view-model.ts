@@ -70,5 +70,7 @@ export async function fetchNextEpisode(baseUrl = ""): Promise<EpisodeNextRespons
   if (!response.ok) {
     throw new Error(`Failed to fetch next episode: ${response.status}`);
   }
-  return response.json() as Promise<EpisodeNextResponse>;
+  const data = await response.json();
+  // TODO: add EpisodeNextResponseSchema.parse() after shared schema is bundled for web
+  return data as EpisodeNextResponse;
 }

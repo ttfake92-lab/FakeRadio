@@ -21,13 +21,14 @@ import {
   createMusicAdapter,
   createMockLlmAdapter,
   createMockMusicAdapter,
+  createMockStorySourceAdapter,
   createMockTtsAdapter,
   createMockWeatherAdapter,
   createEdgeTtsAdapter
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { CalendarAdapter, DeviceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
+import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
@@ -51,6 +52,7 @@ type CreateRadioServerOptions = {
   weatherAdapter?: WeatherAdapter;
   calendarAdapter?: CalendarAdapter;
   deviceAdapter?: DeviceAdapter;
+  storySourceAdapter?: StorySourceAdapter;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -77,6 +79,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const weather = options.weatherAdapter ?? createMockWeatherAdapter();
   const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
   const devices = options.deviceAdapter ?? createMockDeviceAdapter();
+  const storySource = options.storySourceAdapter ?? createMockStorySourceAdapter();
   const stream = createStreamBroadcaster();
   const memory = createInMemoryMemoryRepository();
   const nowProvider = options.now ?? (() => new Date());
@@ -116,12 +119,13 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
   app.get("/api/now", async () => buildNowResponse());
 
-  app.get("/api/next", async () => {
+  async function resolveNextTrackAndDecision() {
     const now = nowProvider();
     const weatherSnapshot = await weather.current();
     const calendarItems = await calendar.upcoming();
     const playbackDevices = await devices.list();
     const recentMemoryEntries = await memory.recent(5);
+
     const draftDecision = await computeDjDecision({
       llm,
       now,
@@ -138,6 +142,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
         devices: playbackDevices
       }
     });
+
     const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
     let track: Track;
 
@@ -152,6 +157,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     }
 
     const isFallback = candidates.length === 0 && queue.length === 0;
+
     const decision = await computeDjDecision({
       llm,
       now,
@@ -174,6 +180,12 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
         devices: playbackDevices
       }
     });
+
+    return { track, decision, isFallback, candidates };
+  }
+
+  app.get("/api/next", async () => {
+    const { track, decision } = await resolveNextTrackAndDecision();
     const ttsResult = await tts.synthesize(decision.say);
     currentTrack = track;
     currentDj = {
@@ -256,74 +268,39 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   });
 
   app.get("/api/episode/next", async () => {
-    const now = nowProvider();
-    const weatherSnapshot = await weather.current();
-    const calendarItems = await calendar.upcoming();
-    const playbackDevices = await devices.list();
-    const recentMemoryEntries = await memory.recent(5);
-    const draftDecision = await computeDjDecision({
-      llm,
-      now,
-      systemPrompt: "你是 FakeRadio DJ。",
-      userTaste: "喜欢低刺激、持续陪伴的音乐。",
-      routines: "早晨低刺激启动，工作时段稳定少打扰。",
-      moodRules: "晴天早晨温暖轻盈。",
-      recentMemory: recentMemoryEntries.map((entry) => entry.content),
-      toolResults: [],
-      executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
-      environment: {
-        weather: weatherSnapshot,
-        calendar: calendarItems,
-        devices: playbackDevices
-      }
-    });
-    const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
-    let track: Track;
-
-    if (candidates.length > 0) {
-      track = await music.resolve(candidates[0]!);
-    } else if (queue.length > 0) {
-      track = await music.resolve(queue[0]!);
-    } else {
-      const mockMusic = createMockMusicAdapter();
-      const fallbackTracks = await mockMusic.search("warm morning indie");
-      track = await mockMusic.resolve(fallbackTracks[0]!);
-    }
-
-    const isFallback = candidates.length === 0 && queue.length === 0;
-    const decision = await computeDjDecision({
-      llm,
-      now,
-      systemPrompt: "你是 FakeRadio DJ。",
-      userTaste: "喜欢低刺激、持续陪伴的音乐。",
-      routines: "早晨低刺激启动，工作时段稳定少打扰。",
-      moodRules: "晴天早晨温暖轻盈。",
-      recentMemory: recentMemoryEntries.map((entry) => entry.content),
-      toolResults: [
-        `music.provider: ${musicStatus}`,
-        `music.search returned ${candidates.length} tracks`,
-        ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
-        `music.selectedTrack: ${track.title} - ${track.artist}`,
-        ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
-      ],
-      executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
-      environment: {
-        weather: weatherSnapshot,
-        calendar: calendarItems,
-        devices: playbackDevices
-      }
-    });
+    const { track, decision } = await resolveNextTrackAndDecision();
 
     let storyAudioUrl: string;
     let fallbackReason: string | undefined;
     try {
       const ttsResult = await tts.synthesize(decision.say);
       storyAudioUrl = ttsResult.audioUrl;
-    } catch {
+    } catch (error) {
+      console.error("TTS synthesis failed, falling back to mock:", error);
       const mockTts = createMockTtsAdapter();
       const mockTtsResult = await mockTts.synthesize(decision.say);
       storyAudioUrl = mockTtsResult.audioUrl;
       fallbackReason = "TTS synthesis failed; fell back to mock TTS";
+    }
+
+    let sources: RadioEpisode["sources"];
+    try {
+      const adapterSources = await storySource.gather(track);
+      sources = adapterSources.length > 0 ? adapterSources : [
+        {
+          kind: "mock",
+          title: "mock source",
+          content: "Placeholder source note for story generation."
+        }
+      ];
+    } catch {
+      sources = [
+        {
+          kind: "mock",
+          title: "mock source",
+          content: "Placeholder source note for story generation."
+        }
+      ];
     }
 
     const episode: RadioEpisode = {
@@ -331,15 +308,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       story: {
         text: decision.say,
         audioUrl: storyAudioUrl,
+        // TODO: infer story type from source composition after Issue 02/03
         type: "mood-reading"
       },
-      sources: [
-        {
-          kind: "mock",
-          title: "mock source",
-          content: "Placeholder source note for story generation."
-        }
-      ],
+      sources,
       playback: {
         crossfadeStartOffsetMs: 3000,
         musicStartVolume: 0.2
