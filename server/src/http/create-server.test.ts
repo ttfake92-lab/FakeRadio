@@ -274,6 +274,48 @@ describe("createRadioServer", () => {
     expect(body.decision.say).toContain("设备");
     expect(body.decision.play.query).toBe("soft background instrumental");
   });
+
+  it("returns a complete radio episode from /api/episode/next", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode).toBeDefined();
+    expect(body.episode.track.id).toBe("mock-track-001");
+    expect(body.episode.story.text).toBeTruthy();
+    expect(body.episode.story.audioUrl).toBeTruthy();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("mock");
+    expect(body.episode.playback.crossfadeStartOffsetMs).toBeGreaterThanOrEqual(0);
+    expect(body.episode.playback.musicStartVolume).toBeGreaterThanOrEqual(0);
+    expect(body.episode.playback.musicStartVolume).toBeLessThanOrEqual(1);
+  });
+
+  it("falls back to mock TTS when real TTS fails for episode", async () => {
+    const failingTts = {
+      async synthesize() {
+        throw new Error("TTS service down");
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: failingTts
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.audioUrl).toContain("mock-");
+    expect(body.episode.fallbackReason).toContain("TTS");
+  });
 });
 
 import { mkdtempSync, writeFileSync, rmdirSync } from "node:fs";

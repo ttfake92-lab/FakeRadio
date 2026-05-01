@@ -132,6 +132,40 @@ export const HealthResponseSchema = z.object({
   checkedAt: z.string().datetime()
 });
 
+export const StoryTypeSchema = z.enum(["background", "lyric-theme", "mood-reading"]);
+
+export const StorySourceNoteSchema = z.object({
+  kind: z.enum(["lyric", "metadata", "web", "mock"]),
+  title: z.string().min(1),
+  content: z.string().min(1),
+  url: z.string().url().optional(),
+  confidence: z.number().min(0).max(1).optional()
+});
+
+export const StorySchema = z.object({
+  text: z.string().min(1),
+  audioUrl: z.string().min(1),
+  type: StoryTypeSchema,
+  estimatedDurationMs: z.number().int().positive().optional()
+});
+
+export const PlaybackPlanSchema = z.object({
+  crossfadeStartOffsetMs: z.number().int().nonnegative(),
+  musicStartVolume: z.number().min(0).max(1)
+});
+
+export const RadioEpisodeSchema = z.object({
+  track: TrackSchema,
+  story: StorySchema,
+  sources: z.array(StorySourceNoteSchema),
+  playback: PlaybackPlanSchema,
+  fallbackReason: z.string().optional()
+});
+
+export const EpisodeNextResponseSchema = z.object({
+  episode: RadioEpisodeSchema
+});
+
 export type Track = z.infer<typeof TrackSchema>;
 export type ContextFragment = z.infer<typeof ContextFragmentSchema>;
 export type TtsResult = z.infer<typeof TtsResultSchema>;
@@ -142,3 +176,9 @@ export type ChatResponse = z.infer<typeof ChatResponseSchema>;
 export type TasteResponse = z.infer<typeof TasteResponseSchema>;
 export type TodayPlanResponse = z.infer<typeof TodayPlanResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+export type StoryType = z.infer<typeof StoryTypeSchema>;
+export type StorySourceNote = z.infer<typeof StorySourceNoteSchema>;
+export type Story = z.infer<typeof StorySchema>;
+export type PlaybackPlan = z.infer<typeof PlaybackPlanSchema>;
+export type RadioEpisode = z.infer<typeof RadioEpisodeSchema>;
+export type EpisodeNextResponse = z.infer<typeof EpisodeNextResponseSchema>;

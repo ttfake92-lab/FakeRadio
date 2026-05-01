@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ChatRequestSchema,
   DjDecisionSchema,
+  EpisodeNextResponseSchema,
   HealthResponseSchema,
   NowResponseSchema,
+  RadioEpisodeSchema,
+  StorySchema,
+  StorySourceNoteSchema,
+  StoryTypeSchema,
   StreamEventSchema,
   TrackSchema
 } from "../index";
@@ -87,5 +92,124 @@ describe("FakeRadio shared contracts", () => {
     });
 
     expect(StreamEventSchema.parse({ type: "now-playing", payload: now }).type).toBe("now-playing");
+  });
+
+  it("validates story type enum values", () => {
+    expect(StoryTypeSchema.parse("background")).toBe("background");
+    expect(StoryTypeSchema.parse("lyric-theme")).toBe("lyric-theme");
+    expect(StoryTypeSchema.parse("mood-reading")).toBe("mood-reading");
+    expect(() => StoryTypeSchema.parse("invalid")).toThrow();
+  });
+
+  it("validates a story source note with optional fields", () => {
+    const minimal = StorySourceNoteSchema.parse({
+      kind: "mock",
+      title: "mock source",
+      content: "This is a placeholder source note."
+    });
+    expect(minimal.kind).toBe("mock");
+
+    const full = StorySourceNoteSchema.parse({
+      kind: "web",
+      title: "Web Source",
+      content: "Some web content",
+      url: "https://example.com/source",
+      confidence: 0.85
+    });
+    expect(full.confidence).toBe(0.85);
+  });
+
+  it("rejects story source note confidence outside 0-1", () => {
+    expect(() =>
+      StorySourceNoteSchema.parse({
+        kind: "lyric",
+        title: "Lyric",
+        content: "...",
+        confidence: 1.5
+      })
+    ).toThrow();
+  });
+
+  it("validates a complete radio episode", () => {
+    const episode = RadioEpisodeSchema.parse({
+      track: {
+        id: "mock-001",
+        title: "Morning Signal",
+        artist: "FakeRadio",
+        source: "mock",
+        audioUrl: "https://example.com/audio/morning-signal.mp3"
+      },
+      story: {
+        text: "这是一段关于早晨的故事。",
+        audioUrl: "/cache/tts/mock-story.mp3",
+        type: "mood-reading",
+        estimatedDurationMs: 15000
+      },
+      sources: [
+        {
+          kind: "mock",
+          title: "mock source",
+          content: "placeholder"
+        }
+      ],
+      playback: {
+        crossfadeStartOffsetMs: 3000,
+        musicStartVolume: 0.2
+      }
+    });
+
+    expect(episode.story.type).toBe("mood-reading");
+    expect(episode.playback.musicStartVolume).toBe(0.2);
+  });
+
+  it("validates episode next response shape", () => {
+    const response = EpisodeNextResponseSchema.parse({
+      episode: {
+        track: {
+          id: "mock-002",
+          title: "Quiet Compiler",
+          artist: "FakeRadio",
+          source: "mock",
+          audioUrl: "https://example.com/audio/quiet-compiler.mp3"
+        },
+        story: {
+          text: "安静编译。",
+          audioUrl: "/cache/tts/mock-story-2.mp3",
+          type: "background"
+        },
+        sources: [],
+        playback: {
+          crossfadeStartOffsetMs: 2000,
+          musicStartVolume: 0.1
+        },
+        fallbackReason: "no real sources available"
+      }
+    });
+
+    expect(response.episode.track.title).toBe("Quiet Compiler");
+    expect(response.episode.fallbackReason).toBe("no real sources available");
+  });
+
+  it("rejects invalid playback plan values", () => {
+    expect(() =>
+      RadioEpisodeSchema.parse({
+        track: {
+          id: "mock-001",
+          title: "Morning Signal",
+          artist: "FakeRadio",
+          source: "mock"
+        },
+        story: {
+          text: "...",
+          audioUrl: "/cache/tts/story.mp3",
+          type: "mood-reading"
+        },
+        sources: [],
+        playback: {
+          crossfadeStartOffsetMs: 1000,
+          musicStartVolume: 1.5
+        }
+      })
+    ).toThrow();
   });
 });

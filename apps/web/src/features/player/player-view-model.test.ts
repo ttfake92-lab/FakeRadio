@@ -4,6 +4,7 @@ import {
   formatDuration,
   getPlaybackLabel,
   getProviderStatusLabel,
+  getStoryTypeLabel,
   getTrackSourceLabel,
   shouldWarnOnMockMusic
 } from "./player-view-model";
@@ -38,5 +39,11 @@ describe("player view model", () => {
     expect(computeFadedVolume(1.0, 0.2, 300, 150)).toBeCloseTo(0.6, 5);
     expect(computeFadedVolume(1.0, 0.2, 300, 300)).toBeCloseTo(0.2, 5);
     expect(computeFadedVolume(1.0, 0.2, 300, 600)).toBeCloseTo(0.2, 5);
+  });
+
+  it("labels story types in Chinese", () => {
+    expect(getStoryTypeLabel("background")).toBe("创作背景");
+    expect(getStoryTypeLabel("lyric-theme")).toBe("歌词主题");
+    expect(getStoryTypeLabel("mood-reading")).toBe("氛围解读");
   });
 });

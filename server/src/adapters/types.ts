@@ -1,4 +1,4 @@
-import type { ContextFragment, DjDecision, Track, TtsResult } from "@fakeradio/shared";
+import type { ContextFragment, DjDecision, StorySourceNote, Track, TtsResult } from "@fakeradio/shared";
 
 export type AdapterStatus = "mock" | "ready" | "disabled";
 
@@ -54,4 +54,8 @@ export type CalendarAdapter = {
 
 export type DeviceAdapter = {
   list(): Promise<PlaybackDevice[]>;
+};
+
+export type StorySourceAdapter = {
+  gather(track: Track): Promise<StorySourceNote[]>;
 };

@@ -1,4 +1,4 @@
-import type { HealthResponse, NowResponse, Track } from "@fakeradio/shared";
+import type { EpisodeNextResponse, HealthResponse, NowResponse, StoryType, Track } from "@fakeradio/shared";
 
 export function getPlaybackLabel(playback: NowResponse["playback"]) {
   const labels: Record<NowResponse["playback"], string> = {
@@ -53,4 +53,22 @@ export function computeFadedVolume(
 ): number {
   const progress = Math.min(elapsedMs / durationMs, 1);
   return startVolume + (targetVolume - startVolume) * progress;
+}
+
+export function getStoryTypeLabel(type: StoryType) {
+  const labels: Record<StoryType, string> = {
+    background: "创作背景",
+    "lyric-theme": "歌词主题",
+    "mood-reading": "氛围解读"
+  };
+
+  return labels[type];
+}
+
+export async function fetchNextEpisode(baseUrl = ""): Promise<EpisodeNextResponse> {
+  const response = await fetch(`${baseUrl}/api/episode/next`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch next episode: ${response.status}`);
+  }
+  return response.json() as Promise<EpisodeNextResponse>;
 }

@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import {
   ChatRequestSchema,
   ChatResponseSchema,
+  EpisodeNextResponseSchema,
   HealthResponseSchema,
   NextResponseSchema,
   NowResponseSchema,
@@ -11,6 +12,7 @@ import {
   TasteResponseSchema,
   TodayPlanResponseSchema,
   type NowResponse,
+  type RadioEpisode,
   type Track
 } from "@fakeradio/shared";
 import {
@@ -251,6 +253,101 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     }
 
     return reply.type("audio/mpeg").send(createReadStream(filePath));
+  });
+
+  app.get("/api/episode/next", async () => {
+    const now = nowProvider();
+    const weatherSnapshot = await weather.current();
+    const calendarItems = await calendar.upcoming();
+    const playbackDevices = await devices.list();
+    const recentMemoryEntries = await memory.recent(5);
+    const draftDecision = await computeDjDecision({
+      llm,
+      now,
+      systemPrompt: "你是 FakeRadio DJ。",
+      userTaste: "喜欢低刺激、持续陪伴的音乐。",
+      routines: "早晨低刺激启动，工作时段稳定少打扰。",
+      moodRules: "晴天早晨温暖轻盈。",
+      recentMemory: recentMemoryEntries.map((entry) => entry.content),
+      toolResults: [],
+      executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
+      environment: {
+        weather: weatherSnapshot,
+        calendar: calendarItems,
+        devices: playbackDevices
+      }
+    });
+    const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
+    let track: Track;
+
+    if (candidates.length > 0) {
+      track = await music.resolve(candidates[0]!);
+    } else if (queue.length > 0) {
+      track = await music.resolve(queue[0]!);
+    } else {
+      const mockMusic = createMockMusicAdapter();
+      const fallbackTracks = await mockMusic.search("warm morning indie");
+      track = await mockMusic.resolve(fallbackTracks[0]!);
+    }
+
+    const isFallback = candidates.length === 0 && queue.length === 0;
+    const decision = await computeDjDecision({
+      llm,
+      now,
+      systemPrompt: "你是 FakeRadio DJ。",
+      userTaste: "喜欢低刺激、持续陪伴的音乐。",
+      routines: "早晨低刺激启动，工作时段稳定少打扰。",
+      moodRules: "晴天早晨温暖轻盈。",
+      recentMemory: recentMemoryEntries.map((entry) => entry.content),
+      toolResults: [
+        `music.provider: ${musicStatus}`,
+        `music.search returned ${candidates.length} tracks`,
+        ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
+        `music.selectedTrack: ${track.title} - ${track.artist}`,
+        ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
+      ],
+      executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
+      environment: {
+        weather: weatherSnapshot,
+        calendar: calendarItems,
+        devices: playbackDevices
+      }
+    });
+
+    let storyAudioUrl: string;
+    let fallbackReason: string | undefined;
+    try {
+      const ttsResult = await tts.synthesize(decision.say);
+      storyAudioUrl = ttsResult.audioUrl;
+    } catch {
+      const mockTts = createMockTtsAdapter();
+      const mockTtsResult = await mockTts.synthesize(decision.say);
+      storyAudioUrl = mockTtsResult.audioUrl;
+      fallbackReason = "TTS synthesis failed; fell back to mock TTS";
+    }
+
+    const episode: RadioEpisode = {
+      track,
+      story: {
+        text: decision.say,
+        audioUrl: storyAudioUrl,
+        type: "mood-reading"
+      },
+      sources: [
+        {
+          kind: "mock",
+          title: "mock source",
+          content: "Placeholder source note for story generation."
+        }
+      ],
+      playback: {
+        crossfadeStartOffsetMs: 3000,
+        musicStartVolume: 0.2
+      },
+      fallbackReason
+    };
+
+    return EpisodeNextResponseSchema.parse({ episode });
   });
 
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(nowProvider())));
