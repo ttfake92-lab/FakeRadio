@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import { createRadioServer } from "./create-server.js";
@@ -219,5 +219,79 @@ describe("createRadioServer", () => {
     expect(secondNext.statusCode).toBe(200);
     expect(secondNext.json().decision.reason).toContain("Night Window");
     expect(secondNext.json().decision.say).toContain("Afterglow Desk");
+  });
+});
+
+import { mkdtempSync, writeFileSync, rmdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+describe("TTS cache route", () => {
+  let tempDir: string;
+  let ttsApp: FastifyInstance | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "tts-cache-route-test-"));
+  });
+
+  afterEach(async () => {
+    await ttsApp?.close();
+    ttsApp = undefined;
+    try {
+      rmdirSync(tempDir, { recursive: true });
+    } catch {}
+  });
+
+  it("serves valid cached audio files", async () => {
+    writeFileSync(`${tempDir}/abc123.mp3`, Buffer.from("fake audio"));
+
+    ttsApp = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      ttsCacheDir: tempDir
+    });
+
+    const response = await ttsApp.inject({ method: "GET", url: "/cache/tts/abc123.mp3" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("audio/mpeg");
+  });
+
+  it("rejects sibling directory prefix bypass", async () => {
+    const siblingDir = mkdtempSync(join(tmpdir(), "tts-cache-sibling-"));
+    writeFileSync(`${siblingDir}/secret.mp3`, Buffer.from("secret audio"));
+
+    ttsApp = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      ttsCacheDir: tempDir
+    });
+
+    const response = await ttsApp.inject({ method: "GET", url: `/cache/tts/${siblingDir}/secret.mp3` });
+
+    expect(response.statusCode).toBe(404);
+
+    try {
+      rmdirSync(siblingDir, { recursive: true });
+    } catch {}
+  });
+
+  it("rejects absolute path outside cache dir", async () => {
+    const outsideDir = mkdtempSync(join(tmpdir(), "tts-cache-outside-"));
+    writeFileSync(`${outsideDir}/outside.mp3`, Buffer.from("outside audio"));
+
+    ttsApp = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      ttsCacheDir: tempDir
+    });
+
+    const response = await ttsApp.inject({ method: "GET", url: `/cache/tts/${outsideDir}/outside.mp3` });
+
+    expect(response.statusCode).toBe(404);
+
+    try {
+      rmdirSync(outsideDir, { recursive: true });
+    } catch {}
   });
 });

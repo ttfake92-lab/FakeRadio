@@ -24,7 +24,7 @@ import {
   createEdgeTtsAdapter
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { TtsAdapter } from "../adapters/types.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
@@ -45,6 +45,7 @@ type CreateRadioServerOptions = {
   musicAdapterResult?: Awaited<ReturnType<typeof createMusicAdapter>>;
   now?: () => Date;
   ttsAdapter?: TtsAdapter;
+  ttsCacheDir?: string;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -230,7 +231,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     })
   );
 
-  const TTS_CACHE_DIR = resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
+  const TTS_CACHE_DIR = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
 
   app.get("/cache/tts/*", async (request, reply) => {
     const filename = (request.params as Record<string, string>)["*"];
@@ -239,13 +240,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       return reply.status(404).send("Not found");
     }
 
-    if (filename.includes("..")) {
-      return reply.status(403).send("Forbidden");
-    }
-
     const filePath = resolve(TTS_CACHE_DIR, filename);
+    const relativePath = relative(resolve(TTS_CACHE_DIR), filePath);
 
-    if (!filePath.startsWith(resolve(TTS_CACHE_DIR)) || !existsSync(filePath)) {
+    if (relativePath.startsWith("..") || isAbsolute(relativePath) || !existsSync(filePath)) {
       return reply.status(404).send("Not found");
     }
 
