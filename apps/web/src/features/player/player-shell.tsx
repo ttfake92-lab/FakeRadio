@@ -12,6 +12,7 @@ import {
   getProviderStatusLabel,
   getStoryTypeLabel,
   getTrackSourceLabel,
+  shouldStartCrossfade,
   shouldWarnOnMockMusic,
   transitEpisodeState
 } from "./player-view-model";
@@ -91,7 +92,7 @@ export function PlayerShell() {
   }
 
   async function playEpisode() {
-    if (episodeState !== "idle" && episodeState !== "error") return;
+    if (episodeState !== "idle" && episodeState !== "error" && episodeState !== "music") return;
 
     setError(null);
     setEpisodeState("preparing");
@@ -116,10 +117,7 @@ export function PlayerShell() {
 
       const onTimeUpdate = () => {
         if (crossfadeStarted) return;
-        if (!speechAudio.duration || !isFinite(speechAudio.duration)) return;
-
-        const remaining = speechAudio.duration - speechAudio.currentTime;
-        if (remaining <= episode.playback.crossfadeStartOffsetMs) {
+        if (shouldStartCrossfade(speechAudio.currentTime, speechAudio.duration, episode.playback.crossfadeStartOffsetMs)) {
           crossfadeStarted = true;
           setEpisodeState((current) => transitEpisodeState(current, "CROSSFADE_START"));
 
@@ -134,6 +132,11 @@ export function PlayerShell() {
       speechAudio.onended = () => {
         setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
         speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+        const musicAudio = musicAudioRef.current;
+        if (musicAudio) {
+          musicAudio.volume = 1.0;
+          musicAudio.play().catch(() => {});
+        }
       };
 
       speechAudio.onerror = () => {
@@ -148,7 +151,9 @@ export function PlayerShell() {
       setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("Invalid episode state transition")) {
-        throw err;
+        setEpisodeState("error");
+        setError("状态转换异常，请刷新页面重试");
+        return;
       }
       setEpisodeState("error");
       setEpisodeData(null);
@@ -360,7 +365,7 @@ export function PlayerShell() {
 
         <div className="button-row">
           <button type="button" className="primary-button" onClick={playEpisode} disabled={episodeState === "preparing"}>
-            {episodeState === "error" ? "重试播放" : "电台播放"}
+            {episodeState === "error" ? "重试播放" : episodeState === "music" ? "重新收听" : "电台播放"}
           </button>
           <button type="button" onClick={handleNext} disabled={isActing}>
             生成下一首

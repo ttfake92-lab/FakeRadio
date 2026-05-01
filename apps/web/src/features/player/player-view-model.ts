@@ -84,7 +84,7 @@ const EPISODE_TRANSITIONS: Record<EpisodePlaybackState, Partial<Record<EpisodeEv
     SPEECH_ENDED: "music",
     SPEECH_ERROR: "error"
   },
-  music: {},
+  music: { PLAY: "preparing" },
   error: { RETRY: "preparing" }
 };
 
@@ -123,12 +123,12 @@ export function getStoryTypeLabel(type: StoryType) {
   return labels[type];
 }
 
-export async function fetchNextEpisode(baseUrl = ""): Promise<EpisodeNextResponse> {
-  const response = await fetch(`${baseUrl}/api/episode/next`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch next episode: ${response.status}`);
-  }
-  const data = await response.json();
-  // TODO: add EpisodeNextResponseSchema.parse() after shared schema is bundled for web
-  return data as EpisodeNextResponse;
+export function shouldStartCrossfade(
+  currentTimeSec: number,
+  durationSec: number,
+  crossfadeStartOffsetMs: number
+): boolean {
+  if (!isFinite(currentTimeSec) || !isFinite(durationSec) || durationSec <= 0) return false;
+  const remainingMs = (durationSec - currentTimeSec) * 1000;
+  return remainingMs <= crossfadeStartOffsetMs;
 }

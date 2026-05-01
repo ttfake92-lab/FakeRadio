@@ -7,6 +7,7 @@ import {
   getProviderStatusLabel,
   getStoryTypeLabel,
   getTrackSourceLabel,
+  shouldStartCrossfade,
   shouldWarnOnMockMusic,
   transitEpisodeState
 } from "./player-view-model";
@@ -71,6 +72,7 @@ describe("episode state machine", () => {
     ["story", "SPEECH_ERROR", "error"],
     ["crossfade", "SPEECH_ENDED", "music"],
     ["crossfade", "SPEECH_ERROR", "error"],
+    ["music", "PLAY", "preparing"],
     ["error", "RETRY", "preparing"]
   ] satisfies [EpisodePlaybackState, EpisodeEvent, EpisodePlaybackState][])(
     "transitions from %s via %s to %s",
@@ -98,14 +100,15 @@ describe("episode state machine", () => {
     ["crossfade", "LOAD_ERROR"],
     ["crossfade", "CROSSFADE_START"],
     ["crossfade", "RETRY"],
-    ["music", "PLAY"],
     ["music", "LOAD_SUCCESS"],
+    ["music", "LOAD_ERROR"],
     ["music", "CROSSFADE_START"],
     ["music", "SPEECH_ENDED"],
     ["music", "SPEECH_ERROR"],
     ["music", "RETRY"],
     ["error", "PLAY"],
     ["error", "LOAD_SUCCESS"],
+    ["error", "LOAD_ERROR"],
     ["error", "CROSSFADE_START"],
     ["error", "SPEECH_ENDED"],
     ["error", "SPEECH_ERROR"]
@@ -123,5 +126,39 @@ describe("episode state machine", () => {
     expect(getEpisodeStateLabel("crossfade")).toBe("音乐渐入");
     expect(getEpisodeStateLabel("music")).toBe("播放中");
     expect(getEpisodeStateLabel("error")).toBe("播放异常");
+  });
+});
+
+describe("shouldStartCrossfade", () => {
+  it("returns true when remaining time is within offset", () => {
+    // 5s remaining <= 5000ms offset
+    expect(shouldStartCrossfade(55, 60, 5000)).toBe(true);
+    // exactly at boundary
+    expect(shouldStartCrossfade(57, 60, 3000)).toBe(true);
+  });
+
+  it("returns false when remaining time exceeds offset", () => {
+    expect(shouldStartCrossfade(10, 60, 5000)).toBe(false);
+    expect(shouldStartCrossfade(0, 180, 3000)).toBe(false);
+  });
+
+  it("returns true when story is shorter than offset (crossfade starts immediately)", () => {
+    expect(shouldStartCrossfade(0, 1, 3000)).toBe(true);
+  });
+
+  it("returns false for unknown duration (NaN)", () => {
+    expect(shouldStartCrossfade(0, NaN, 3000)).toBe(false);
+  });
+
+  it("returns false for infinite duration", () => {
+    expect(shouldStartCrossfade(0, Infinity, 3000)).toBe(false);
+  });
+
+  it("returns false when duration is 0", () => {
+    expect(shouldStartCrossfade(0, 0, 3000)).toBe(false);
+  });
+
+  it("returns false for NaN currentTime", () => {
+    expect(shouldStartCrossfade(NaN, 60, 3000)).toBe(false);
   });
 });
