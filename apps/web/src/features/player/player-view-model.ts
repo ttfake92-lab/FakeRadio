@@ -117,7 +117,7 @@ export function getStoryTypeLabel(type: StoryType) {
   const labels: Record<StoryType, string> = {
     background: "创作背景",
     "lyric-theme": "歌词主题",
-    "mood-reading": "氛围解读"
+    "mood-reading": "情绪解读"
   };
 
   return labels[type];
@@ -143,6 +143,7 @@ export function getStorySourceDescription(type: StoryType): string | null {
     case "mood-reading":
       return "当前故事基于听感解读，非真实创作背景";
   }
+  return null;
 }
 
 export function getNextEpisodeLabel(

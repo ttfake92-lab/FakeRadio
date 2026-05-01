@@ -114,10 +114,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
         weather: "mock",
         calendar: "mock",
         upnp: "mock",
-        storySource: {
-          lyric: "mock",
-          metadata: options.publicMetadataAdapter ? "mock" : "ready"
-        }
+        storySource: options.storySourceAdapter ? "ready" : "mock"
       },
       checkedAt: new Date().toISOString()
     })

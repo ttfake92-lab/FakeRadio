@@ -253,6 +253,11 @@ h2 {
   font-size: 0.82rem;
 }
 
+.story-source-hint {
+  color: var(--color-warning, #b08800);
+  margin-top: 0.5rem;
+}
+
 .chat-form {
   display: grid;
   gap: 10px;

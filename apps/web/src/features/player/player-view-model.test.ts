@@ -51,7 +51,7 @@ describe("player view model", () => {
   it("labels story types in Chinese", () => {
     expect(getStoryTypeLabel("background")).toBe("创作背景");
     expect(getStoryTypeLabel("lyric-theme")).toBe("歌词主题");
-    expect(getStoryTypeLabel("mood-reading")).toBe("氛围解读");
+    expect(getStoryTypeLabel("mood-reading")).toBe("情绪解读");
   });
 
   it("labels source kinds in Chinese", () => {
