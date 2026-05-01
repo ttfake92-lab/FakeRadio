@@ -580,7 +580,7 @@ describe("createRadioServer", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    expect(body.episode.story.audioUrl).toContain("mock-");
+    expect(body.episode.story.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
     expect(body.episode.fallbackReason).toContain("TTS");
   });
 

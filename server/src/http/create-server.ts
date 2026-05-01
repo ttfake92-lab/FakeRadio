@@ -283,7 +283,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       storyAudioUrl = ttsResult.audioUrl;
     } catch (error) {
       console.error("TTS synthesis failed, falling back to mock:", error);
-      const mockTts = createMockTtsAdapter();
+      const mockTts = createMockTtsAdapter({ cacheDir: TTS_CACHE_DIR });
       const mockTtsResult = await mockTts.synthesize(decision.say);
       storyAudioUrl = mockTtsResult.audioUrl;
       fallbackReason = "TTS synthesis failed; fell back to mock TTS";

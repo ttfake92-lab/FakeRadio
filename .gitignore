@@ -7,6 +7,7 @@ coverage/
 .DS_Store
 .env
 .env.local
+cache/
 server/cache/
 server/data/
 .worktrees/

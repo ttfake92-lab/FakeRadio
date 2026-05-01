@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createMockCalendarAdapter,
   createMockDeviceAdapter,
@@ -33,8 +36,15 @@ describe("mock adapters", () => {
     const resolved = await music.resolve(track!);
     expect(resolved.audioUrl).toContain("example.com");
 
-    const tts = createMockTtsAdapter();
-    expect((await tts.synthesize("早上好")).cacheKey).toBe("mock-tts-3");
+    const tempDir = mkdtempSync(join(tmpdir(), "mock-adapters-test-"));
+    try {
+      const tts = createMockTtsAdapter({ cacheDir: tempDir, baseUrl: "/cache/tts" });
+      const ttsResult = await tts.synthesize("早上好");
+      expect(ttsResult.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
+      expect(ttsResult.text).toBe("早上好");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
 
     expect((await createMockWeatherAdapter().current()).moodHint).toBe("warm and clear");
     expect((await createMockCalendarAdapter().upcoming())).toHaveLength(1);
