@@ -16,9 +16,9 @@ describe("computeDjDecision", () => {
       toolResults: [],
       executionState: "idle",
       environment: {
-        weather: "晴，22C",
-        calendar: "09:00 专注工作",
-        devices: "Local Browser available"
+        weather: { summary: "晴", moodHint: "温暖轻盈", temperatureC: 22 },
+        calendar: [{ title: "专注工作", start: "09:00", end: "12:00" }],
+        devices: [{ id: "local-browser", name: "Local Browser", kind: "browser", status: "available" }]
       }
     });
 
@@ -43,9 +43,9 @@ describe("computeDjDecision", () => {
       ],
       executionState: "queue primed",
       environment: {
-        weather: "晴，22C",
-        calendar: "09:00 专注工作",
-        devices: "Local Browser available"
+        weather: { summary: "晴", moodHint: "温暖轻盈", temperatureC: 22 },
+        calendar: [{ title: "专注工作", start: "09:00", end: "12:00" }],
+        devices: [{ id: "local-browser", name: "Local Browser", kind: "browser", status: "available" }]
       }
     });
 
