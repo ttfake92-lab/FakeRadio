@@ -14,9 +14,9 @@ describe("buildContextWindow", () => {
       toolResults: ["music.search 返回 3 首 mock 歌曲"],
       executionState: "queue empty",
       environment: {
-        weather: "晴，22C",
-        calendar: "09:00 专注工作",
-        devices: "Local Browser available"
+        weather: { summary: "晴", moodHint: "温暖轻盈", temperatureC: 22 },
+        calendar: [{ title: "专注工作", start: "09:00", end: "12:00" }],
+        devices: [{ id: "local-browser", name: "Local Browser", kind: "browser", status: "available" }]
       }
     });
 
@@ -29,5 +29,58 @@ describe("buildContextWindow", () => {
       "execution"
     ]);
     expect(fragments[1]?.content).toContain("喜欢低刺激音乐");
+  });
+
+  it("formats environment fragment from structured data", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: [],
+      toolResults: [],
+      executionState: "idle",
+      environment: {
+        weather: { summary: "晴", moodHint: "温暖轻盈", temperatureC: 22 },
+        calendar: [
+          { title: "专注工作", start: "09:00", end: "12:00" },
+          { title: "午餐", start: "12:00", end: "13:00" }
+        ],
+        devices: [
+          { id: "local-browser", name: "Local Browser", kind: "browser", status: "available" },
+          { id: "upnp-1", name: "Living Room Speaker", kind: "upnp", status: "offline" }
+        ]
+      }
+    });
+
+    const envFragment = fragments.find((f) => f.source === "environment");
+    expect(envFragment).toBeDefined();
+    expect(envFragment!.content).toContain("weather: 晴, 温暖轻盈, 22C");
+    expect(envFragment!.content).toContain("calendar: 09:00 专注工作, 12:00 午餐");
+    expect(envFragment!.content).toContain("devices: Local Browser available, Living Room Speaker offline");
+  });
+
+  it("omits temperature when not provided", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: [],
+      toolResults: [],
+      executionState: "idle",
+      environment: {
+        weather: { summary: "多云", moodHint: "沉稳" },
+        calendar: [],
+        devices: []
+      }
+    });
+
+    const envFragment = fragments.find((f) => f.source === "environment");
+    expect(envFragment!.content).toContain("weather: 多云, 沉稳");
+    expect(envFragment!.content).toContain("calendar: ");
+    expect(envFragment!.content).toContain("devices: ");
   });
 });

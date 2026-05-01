@@ -220,6 +220,60 @@ describe("createRadioServer", () => {
     expect(secondNext.json().decision.reason).toContain("Night Window");
     expect(secondNext.json().decision.say).toContain("Afterglow Desk");
   });
+
+  it("produces rain-aware DJ decision when weather contains rain", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      weatherAdapter: {
+        async current() {
+          return { summary: "大雨，适合窝在室内", moodHint: "rainy", temperatureC: 18 };
+        }
+      }
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    const body = next.json();
+    expect(body.decision.say).toContain("雨");
+    expect(body.decision.play.query).toBe("cozy indoor acoustic");
+  });
+
+  it("produces empty-calendar DJ decision when calendar is empty", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      calendarAdapter: {
+        async upcoming() {
+          return [];
+        }
+      }
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    const body = next.json();
+    expect(body.decision.say).toContain("日程很空");
+    expect(body.decision.play.query).toBe("chill ambient focus");
+  });
+
+  it("produces no-device DJ decision when no playback devices are available", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      deviceAdapter: {
+        async list() {
+          return [];
+        }
+      }
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    const body = next.json();
+    expect(body.decision.say).toContain("设备");
+    expect(body.decision.play.query).toBe("soft background instrumental");
+  });
 });
 
 import { mkdtempSync, writeFileSync, rmdirSync } from "node:fs";

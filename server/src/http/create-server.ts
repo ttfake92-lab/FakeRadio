@@ -25,7 +25,7 @@ import {
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { TtsAdapter } from "../adapters/types.js";
+import type { CalendarAdapter, DeviceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
@@ -46,6 +46,9 @@ type CreateRadioServerOptions = {
   now?: () => Date;
   ttsAdapter?: TtsAdapter;
   ttsCacheDir?: string;
+  weatherAdapter?: WeatherAdapter;
+  calendarAdapter?: CalendarAdapter;
+  deviceAdapter?: DeviceAdapter;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -69,9 +72,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       cacheDir: resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR),
       voice: env.FAKERADIO_TTS_VOICE
     });
-  const weather = createMockWeatherAdapter();
-  const calendar = createMockCalendarAdapter();
-  const devices = createMockDeviceAdapter();
+  const weather = options.weatherAdapter ?? createMockWeatherAdapter();
+  const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
+  const devices = options.deviceAdapter ?? createMockDeviceAdapter();
   const stream = createStreamBroadcaster();
   const memory = createInMemoryMemoryRepository();
   const nowProvider = options.now ?? (() => new Date());
@@ -128,9 +131,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       toolResults: [],
       executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
       environment: {
-        weather: `${weatherSnapshot.summary}, ${weatherSnapshot.moodHint}`,
-        calendar: calendarItems.map((item) => `${item.start} ${item.title}`).join(", "),
-        devices: playbackDevices.map((device) => `${device.name} ${device.status}`).join(", ")
+        weather: weatherSnapshot,
+        calendar: calendarItems,
+        devices: playbackDevices
       }
     });
     const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
@@ -164,9 +167,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       ],
       executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
       environment: {
-        weather: `${weatherSnapshot.summary}, ${weatherSnapshot.moodHint}`,
-        calendar: calendarItems.map((item) => `${item.start} ${item.title}`).join(", "),
-        devices: playbackDevices.map((device) => `${device.name} ${device.status}`).join(", ")
+        weather: weatherSnapshot,
+        calendar: calendarItems,
+        devices: playbackDevices
       }
     });
     const ttsResult = await tts.synthesize(decision.say);
@@ -210,9 +213,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       toolResults: [],
       executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
       environment: {
-        weather: "mock weather",
-        calendar: "mock calendar",
-        devices: "Local Browser available"
+        weather: { summary: "mock weather", moodHint: "mock" },
+        calendar: [{ title: "mock calendar", start: "09:00", end: "10:00" }],
+        devices: [{ id: "local-browser", name: "Local Browser", kind: "browser", status: "available" }]
       }
     });
 

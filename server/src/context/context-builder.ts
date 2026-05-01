@@ -1,9 +1,10 @@
 import type { ContextFragment } from "@fakeradio/shared";
+import type { CalendarItem, PlaybackDevice, WeatherSnapshot } from "../adapters/types.js";
 
 export type ContextEnvironment = {
-  weather: string;
-  calendar: string;
-  devices: string;
+  weather: WeatherSnapshot;
+  calendar: CalendarItem[];
+  devices: PlaybackDevice[];
 };
 
 export type BuildContextInput = {
@@ -40,9 +41,9 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
       label: "环境注入",
       content: [
         `now: ${input.now.toISOString()}`,
-        `weather: ${input.environment.weather}`,
-        `calendar: ${input.environment.calendar}`,
-        `devices: ${input.environment.devices}`
+        `weather: ${formatWeather(input.environment.weather)}`,
+        `calendar: ${formatCalendar(input.environment.calendar)}`,
+        `devices: ${formatDevices(input.environment.devices)}`
       ].join("\n"),
       priority: 3,
       source: "environment"
@@ -69,4 +70,20 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
       source: "execution"
     }
   ];
+}
+
+function formatWeather(weather: WeatherSnapshot): string {
+  const parts = [weather.summary, weather.moodHint];
+  if (weather.temperatureC !== undefined) {
+    parts.push(`${weather.temperatureC}C`);
+  }
+  return parts.join(", ");
+}
+
+function formatCalendar(calendar: CalendarItem[]): string {
+  return calendar.map((item) => `${item.start} ${item.title}`).join(", ");
+}
+
+function formatDevices(devices: PlaybackDevice[]): string {
+  return devices.map((device) => `${device.name} ${device.status}`).join(", ");
 }
