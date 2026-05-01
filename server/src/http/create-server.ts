@@ -25,7 +25,7 @@ import {
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { TtsAdapter } from "../adapters/types.js";
+import type { CalendarAdapter, DeviceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
@@ -45,6 +45,9 @@ type CreateRadioServerOptions = {
   musicAdapterResult?: Awaited<ReturnType<typeof createMusicAdapter>>;
   now?: () => Date;
   ttsAdapter?: TtsAdapter;
+  weatherAdapter?: WeatherAdapter;
+  calendarAdapter?: CalendarAdapter;
+  deviceAdapter?: DeviceAdapter;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -68,9 +71,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       cacheDir: resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR),
       voice: env.FAKERADIO_TTS_VOICE
     });
-  const weather = createMockWeatherAdapter();
-  const calendar = createMockCalendarAdapter();
-  const devices = createMockDeviceAdapter();
+  const weather = options.weatherAdapter ?? createMockWeatherAdapter();
+  const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
+  const devices = options.deviceAdapter ?? createMockDeviceAdapter();
   const stream = createStreamBroadcaster();
   const memory = createInMemoryMemoryRepository();
   const nowProvider = options.now ?? (() => new Date());
