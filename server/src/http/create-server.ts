@@ -25,7 +25,8 @@ import {
   createMockTtsAdapter,
   createMockWeatherAdapter,
   createEdgeTtsAdapter,
-  createPublicMetadataAdapter
+  createPublicMetadataAdapter,
+  createWebResearchAdapter
 } from "../adapters/index.js";
 import { createReadStream, existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -55,6 +56,7 @@ type CreateRadioServerOptions = {
   deviceAdapter?: DeviceAdapter;
   storySourceAdapter?: StorySourceAdapter;
   publicMetadataAdapter?: StorySourceAdapter;
+  webResearchAdapter?: StorySourceAdapter;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -114,7 +116,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
         weather: "mock",
         calendar: "mock",
         upnp: "mock",
-        storySource: options.storySourceAdapter ? "ready" : "mock"
+        storySource: options.storySourceAdapter ? "ready" : "mock",
+        webResearch: options.webResearchAdapter || env.FAKERADIO_BRAVE_API_KEY ? "ready" : "disabled"
       },
       checkedAt: new Date().toISOString()
     })
@@ -303,7 +306,16 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       metadataSources = [];
     }
 
-    const combinedSources = [...lyricSources, ...metadataSources];
+    let webSources: RadioEpisode["sources"] = [];
+    try {
+      const webResearch = options.webResearchAdapter ?? createWebResearchAdapter({ apiKey: env.FAKERADIO_BRAVE_API_KEY });
+      const adapterSources = await webResearch.gather(track);
+      webSources = adapterSources.length > 0 ? adapterSources : [];
+    } catch {
+      webSources = [];
+    }
+
+    const combinedSources = [...lyricSources, ...metadataSources, ...webSources];
     const sources = combinedSources.length > 0 ? combinedSources : [
       {
         kind: "mock",
@@ -313,9 +325,11 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     ];
 
     const hasLyricSource = sources.some((s) => s.kind === "lyric");
-    const hasMetadataSource = sources.some((s) => s.kind === "metadata" && (s.confidence ?? 0) >= 0.5);
+    const hasBackgroundSource = sources.some((s) =>
+      (s.kind === "metadata" || s.kind === "web") && (s.confidence ?? 0) >= 0.5
+    );
 
-    const storyType: RadioEpisode["story"]["type"] = hasMetadataSource
+    const storyType: RadioEpisode["story"]["type"] = hasBackgroundSource
       ? "background"
       : hasLyricSource
         ? "lyric-theme"

@@ -82,6 +82,22 @@ screen -S fakeradio-web -X quit
 screen -S fakeradio-netease -X quit
 ```
 
+## 环境变量
+
+| 变量名 | 说明 | 必需 |
+|---|---|---|
+| `FAKERADIO_BRAVE_API_KEY` | Brave Search API key，用于网页研究支撑的创作背景资料（2000 queries/month 免费 tier） | 否（无 key 时优雅降级） |
+
+如果使用 Brave Search 网页研究功能，需要申请 Brave Search API key（免费）并设置：
+
+```bash
+export FAKERADIO_BRAVE_API_KEY=your_brave_api_key_here
+```
+
+免费 tier 支持每月 2000 次查询，对 V1 阶段足够使用。
+
+无 API key 时，web-research-adapter 不报错，直接返回空数组。episode route 不受影响，走到现有降级链路（metadata → lyric → mood-reading）。
+
 ## 验证
 
 ```bash
@@ -123,3 +139,19 @@ curl http://localhost:3001/api/plan/today
 - `/api/next` 的 `decision.reason` 是否围绕真实曲目生成
 - `/api/plan/today` 的 `blocks[].moodHint`
 - 前端页面是否显示 `Music Provider` 和来源标签
+
+验证网页研究（web research）功能：
+
+```bash
+# 检查 webResearch adapter 状态
+curl http://localhost:3001/api/health | jq .adapters.webResearch
+
+# 查看 episode 中的 source kind（有 API key 时才会查到网页资料）
+curl http://localhost:3001/api/episode/next | jq '.episode.sources[] | select(.kind == "web")'
+```
+
+`adapters.webResearch`：
+- `ready`：已配置 Brave Search API key，web 研究功能可用
+- `disabled`：未配置 API key，功能关闭
+
+当未配置 API key 时，episode route 正常降级，不影响播放流程。

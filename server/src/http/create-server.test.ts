@@ -432,6 +432,115 @@ describe("createRadioServer", () => {
     expect(body.episode.sources).toHaveLength(2);
   });
 
+  it("returns background story type when web source is available with high confidence", async () => {
+    const webSource = {
+      async gather() {
+        return [
+          {
+            kind: "web" as const,
+            title: "Test Song Meaning",
+            content: "A description of the song meaning from the web",
+            url: "https://example.com/song-meaning",
+            confidence: 0.6
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: { async gather() { return []; } },
+      webResearchAdapter: webSource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("background");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("web");
+    expect(body.episode.sources[0].confidence).toBe(0.6);
+  });
+
+  it("returns mood-reading when web source confidence is below 0.5", async () => {
+    const lowConfidenceWebSource = {
+      async gather() {
+        return [
+          {
+            kind: "web" as const,
+            title: "Test Song",
+            content: "Low confidence result",
+            url: "https://example.com/low-conf",
+            confidence: 0.3
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: { async gather() { return []; } },
+      webResearchAdapter: lowConfidenceWebSource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("web");
+    expect(body.episode.sources[0].confidence).toBe(0.3);
+  });
+
+  it("returns background when both web and metadata sources are available", async () => {
+    const metadataSource = {
+      async gather() {
+        return [
+          {
+            kind: "metadata" as const,
+            title: "Test Song - Test Artist",
+            content: "Album: Test Album",
+            confidence: 0.85
+          }
+        ];
+      }
+    };
+    const webSource = {
+      async gather() {
+        return [
+          {
+            kind: "web" as const,
+            title: "Test Song Meaning",
+            content: "A description of the song meaning from the web",
+            url: "https://example.com/song-meaning",
+            confidence: 0.6
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: metadataSource,
+      webResearchAdapter: webSource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("background");
+    expect(body.episode.sources).toHaveLength(2);
+  });
+
   it("returns mood-reading when metadata adapter fails", async () => {
     const failingMetadataSource = {
       async gather() {
@@ -558,6 +667,39 @@ describe("createRadioServer", () => {
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
     expect(health.json().adapters.storySource).toBe("ready");
+  });
+
+  it("reports webResearch status in health", async () => {
+    const webResearchAdapter = {
+      async gather() {
+        return [];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: createMockStorySourceAdapter(),
+      webResearchAdapter
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.webResearch).toBe("ready");
+  });
+
+  it("reports webResearch as disabled when no API key and no adapter injected", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: createMockStorySourceAdapter()
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.webResearch).toBe("disabled");
   });
 });
 

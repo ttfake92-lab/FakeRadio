@@ -11,3 +11,4 @@ export * from "./io/mock-io-adapters.js";
 export * from "./story-source/mock-story-source-adapter.js";
 export * from "./story-source/netease-lyric-adapter.js";
 export * from "./story-source/public-metadata-adapter.js";
+export * from "./story-source/web-research-adapter.js";

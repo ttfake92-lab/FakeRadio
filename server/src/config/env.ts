@@ -9,7 +9,8 @@ const EnvSchema = z.object({
   FAKERADIO_NETEASE_API_BASE_URL: z.string().url().default("http://127.0.0.1:3300"),
   FAKERADIO_NETEASE_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
   FAKERADIO_TTS_VOICE: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
-  FAKERADIO_TTS_CACHE_DIR: z.string().min(1).default("cache/tts")
+  FAKERADIO_TTS_CACHE_DIR: z.string().min(1).default("cache/tts"),
+  FAKERADIO_BRAVE_API_KEY: z.string().optional()
 });
 
 export function parseEnv(input: Record<string, string | undefined>) {
