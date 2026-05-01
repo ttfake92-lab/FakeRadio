@@ -3,6 +3,7 @@ import {
   computeFadedVolume,
   formatDuration,
   getEpisodeStateLabel,
+  getNextEpisodeLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
   getStoryTypeLabel,
@@ -160,5 +161,35 @@ describe("shouldStartCrossfade", () => {
 
   it("returns false for NaN currentTime", () => {
     expect(shouldStartCrossfade(NaN, 60, 3000)).toBe(false);
+  });
+});
+
+describe("getNextEpisodeLabel", () => {
+  it("returns empty string when nothing is happening", () => {
+    expect(getNextEpisodeLabel(false, false, false)).toBe("");
+  });
+
+  it("returns prefetching label when prefetch is in progress", () => {
+    expect(getNextEpisodeLabel(false, false, true)).toBe("下一集预备中");
+  });
+
+  it("returns ready label when next episode is available", () => {
+    expect(getNextEpisodeLabel(false, true, false)).toBe("下一集已就绪");
+  });
+
+  it("returns ready label when both episode and prefetching (episode available wins)", () => {
+    expect(getNextEpisodeLabel(false, true, true)).toBe("下一集已就绪");
+  });
+
+  it("returns error label when prefetch failed (error takes priority over prefetching)", () => {
+    expect(getNextEpisodeLabel(true, false, true)).toBe("下一集预备失败");
+  });
+
+  it("returns error label when prefetch failed and not fetching", () => {
+    expect(getNextEpisodeLabel(true, false, false)).toBe("下一集预备失败");
+  });
+
+  it("returns error label when error exists even if episode is available (error wins)", () => {
+    expect(getNextEpisodeLabel(true, true, false)).toBe("下一集预备失败");
   });
 });

@@ -8,6 +8,7 @@ import {
   computeFadedVolume,
   formatDuration,
   getEpisodeStateLabel,
+  getNextEpisodeLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
   getStoryTypeLabel,
@@ -58,15 +59,24 @@ export function PlayerShell() {
   const [error, setError] = useState<string | null>(null);
   const [episodeState, setEpisodeState] = useState<EpisodePlaybackState>("idle");
   const [episodeData, setEpisodeData] = useState<RadioEpisode | null>(null);
+  const [nextEpisode, setNextEpisode] = useState<RadioEpisode | null>(null);
+  const [nextEpisodeError, setNextEpisodeError] = useState<string | null>(null);
+  const [isPrefetching, setIsPrefetching] = useState(false);
 
   const musicAudioRef = useRef<HTMLAudioElement>(null);
   const speechAudioRef = useRef<HTMLAudioElement>(null);
   const isDuckingRef = useRef(false);
+  const nextEpisodeRef = useRef<RadioEpisode | null>(null);
+  const isPrefetchingRef = useRef(false);
 
   const track = now?.track ?? null;
   const playbackLabel = useMemo(() => getPlaybackLabel(now?.playback ?? "idle"), [now?.playback]);
   const musicStatus = health?.adapters.music ?? "mock";
   const shouldWarn = shouldWarnOnMockMusic(musicStatus);
+  const nextEpisodeLabel = useMemo(
+    () => getNextEpisodeLabel(nextEpisodeError !== null, nextEpisode !== null, isPrefetching),
+    [nextEpisodeError, nextEpisode, isPrefetching]
+  );
 
   function fadeVolume(audio: HTMLAudioElement, targetVolume: number, durationMs: number) {
     const startVolume = audio.volume;
@@ -91,64 +101,120 @@ export function PlayerShell() {
     }
   }
 
+  function playEpisodeData(episode: RadioEpisode) {
+    const speechAudio = speechAudioRef.current;
+    const musicAudio = musicAudioRef.current;
+    if (!speechAudio || !musicAudio) {
+      setEpisodeState("error");
+      setError("播放器未就绪");
+      return;
+    }
+
+    setEpisodeData(episode);
+    setEpisodeState("preparing");
+
+    musicAudio.src = episode.track.audioUrl ?? "";
+    musicAudio.volume = 0;
+
+    speechAudio.src = episode.story.audioUrl;
+
+    let crossfadeStarted = false;
+
+    const onTimeUpdate = () => {
+      if (crossfadeStarted) return;
+      if (shouldStartCrossfade(speechAudio.currentTime, speechAudio.duration, episode.playback.crossfadeStartOffsetMs)) {
+        crossfadeStarted = true;
+        setEpisodeState((current) => transitEpisodeState(current, "CROSSFADE_START"));
+
+        musicAudio.volume = episode.playback.musicStartVolume;
+        musicAudio.play().catch(() => {});
+        fadeVolume(musicAudio, 1.0, episode.playback.crossfadeStartOffsetMs);
+      }
+    };
+
+    speechAudio.addEventListener("timeupdate", onTimeUpdate);
+
+    speechAudio.onended = () => {
+      setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
+      speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+      const ma = musicAudioRef.current;
+      if (ma) {
+        ma.volume = 1.0;
+        ma.play().catch(() => {});
+      }
+    };
+
+    speechAudio.onerror = () => {
+      const ma = musicAudioRef.current;
+      if (ma && !ma.paused) {
+        fadeVolume(ma, 1.0, 300);
+      }
+      setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
+      speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+    };
+
+    musicAudio.onended = () => {
+      const next = nextEpisodeRef.current;
+      if (next) {
+        nextEpisodeRef.current = null;
+        setNextEpisode(null);
+        setNextEpisodeError(null);
+        playEpisodeData(next);
+        return;
+      }
+
+      if (isPrefetchingRef.current) {
+        const pollInterval = setInterval(() => {
+          if (!isPrefetchingRef.current) {
+            clearInterval(pollInterval);
+            const n = nextEpisodeRef.current;
+            if (n) {
+              nextEpisodeRef.current = null;
+              setNextEpisode(null);
+              setNextEpisodeError(null);
+              playEpisodeData(n);
+            } else {
+              setEpisodeState("idle");
+            }
+          }
+        }, 100);
+        return;
+      }
+
+      setEpisodeState("idle");
+    };
+
+    speechAudio.play().then(() => {
+      setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+    }).catch(() => {
+      const ma = musicAudioRef.current;
+      if (ma) {
+        ma.volume = 1.0;
+        ma.play().catch(() => {});
+      }
+      try {
+        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
+      } catch {
+        setEpisodeState("error");
+        setError("语音播放失败");
+      }
+    });
+  }
+
   async function playEpisode() {
     if (episodeState !== "idle" && episodeState !== "error" && episodeState !== "music") return;
 
+    isPrefetchingRef.current = false;
+    setIsPrefetching(false);
+    nextEpisodeRef.current = null;
+    setNextEpisode(null);
+    setNextEpisodeError(null);
+
     setError(null);
-    setEpisodeState("preparing");
 
     try {
       const response: EpisodeNextResponse = await getNextEpisode();
-      const episode = response.episode;
-      setEpisodeData(episode);
-
-      const speechAudio = speechAudioRef.current;
-      const musicAudio = musicAudioRef.current;
-      if (!speechAudio || !musicAudio) {
-        throw new Error("播放器未就绪");
-      }
-
-      musicAudio.src = episode.track.audioUrl ?? "";
-      musicAudio.volume = 0;
-
-      speechAudio.src = episode.story.audioUrl;
-
-      let crossfadeStarted = false;
-
-      const onTimeUpdate = () => {
-        if (crossfadeStarted) return;
-        if (shouldStartCrossfade(speechAudio.currentTime, speechAudio.duration, episode.playback.crossfadeStartOffsetMs)) {
-          crossfadeStarted = true;
-          setEpisodeState((current) => transitEpisodeState(current, "CROSSFADE_START"));
-
-          musicAudio.volume = episode.playback.musicStartVolume;
-          musicAudio.play().catch(() => {});
-          fadeVolume(musicAudio, 1.0, episode.playback.crossfadeStartOffsetMs);
-        }
-      };
-
-      speechAudio.addEventListener("timeupdate", onTimeUpdate);
-
-      speechAudio.onended = () => {
-        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
-        speechAudio.removeEventListener("timeupdate", onTimeUpdate);
-        const musicAudio = musicAudioRef.current;
-        if (musicAudio) {
-          musicAudio.volume = 1.0;
-          musicAudio.play().catch(() => {});
-        }
-      };
-
-      speechAudio.onerror = () => {
-        if (musicAudio && !musicAudio.paused) {
-          fadeVolume(musicAudio, 1.0, 300);
-        }
-        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
-        speechAudio.removeEventListener("timeupdate", onTimeUpdate);
-      };
-
-      await speechAudio.play();
-      setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+      playEpisodeData(response.episode);
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("Invalid episode state transition")) {
         setEpisodeState("error");
@@ -160,6 +226,34 @@ export function PlayerShell() {
       setError(`播放失败：${getErrorMessage(err)}`);
     }
   }
+
+  const prefetchNextEpisode = useCallback(async () => {
+    if (isPrefetchingRef.current) return;
+    isPrefetchingRef.current = true;
+    setIsPrefetching(true);
+    setNextEpisodeError(null);
+
+    try {
+      const response = await getNextEpisode();
+      if (!isPrefetchingRef.current) return;
+      nextEpisodeRef.current = response.episode;
+      setNextEpisode(response.episode);
+    } catch (err) {
+      if (!isPrefetchingRef.current) return;
+      nextEpisodeRef.current = null;
+      setNextEpisode(null);
+      setNextEpisodeError(getErrorMessage(err));
+    } finally {
+      isPrefetchingRef.current = false;
+      setIsPrefetching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (episodeState === "music") {
+      prefetchNextEpisode();
+    }
+  }, [episodeState, prefetchNextEpisode]);
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
@@ -352,6 +446,7 @@ export function PlayerShell() {
           <span>{streamStatus.label}</span>
           <span>{getProviderStatusLabel(musicStatus)}</span>
           <span>{isLoading ? "加载中" : "同步完成"}</span>
+          {nextEpisodeLabel !== "" ? <span>{nextEpisodeLabel}</span> : null}
         </div>
 
         <audio

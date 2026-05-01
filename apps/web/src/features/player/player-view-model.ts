@@ -123,6 +123,17 @@ export function getStoryTypeLabel(type: StoryType) {
   return labels[type];
 }
 
+export function getNextEpisodeLabel(
+  hasError: boolean,
+  hasEpisode: boolean,
+  isPrefetching: boolean
+): string {
+  if (hasError) return "下一集预备失败";
+  if (hasEpisode) return "下一集已就绪";
+  if (isPrefetching) return "下一集预备中";
+  return "";
+}
+
 export function shouldStartCrossfade(
   currentTimeSec: number,
   durationSec: number,
