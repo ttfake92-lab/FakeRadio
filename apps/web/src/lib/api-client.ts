@@ -1,5 +1,6 @@
 import {
   ChatResponseSchema,
+  EpisodeNextResponseSchema,
   HealthResponseSchema,
   NextResponseSchema,
   NowResponseSchema,
@@ -45,6 +46,11 @@ export async function sendChat(message: string) {
     body: JSON.stringify({ message })
   });
   return ChatResponseSchema.parse(await response.json());
+}
+
+export async function getNextEpisode() {
+  const response = await fetch(buildApiUrl("/api/episode/next"));
+  return EpisodeNextResponseSchema.parse(await response.json());
 }
 
 export async function getTaste() {

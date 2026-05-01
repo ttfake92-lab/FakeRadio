@@ -1,17 +1,21 @@
 "use client";
 
-import type { ChatResponse, HealthResponse, NextResponse, NowResponse, StreamEvent, TasteResponse, TodayPlanResponse } from "@fakeradio/shared";
+import type { ChatResponse, EpisodeNextResponse, HealthResponse, NextResponse, NowResponse, RadioEpisode, StreamEvent, TasteResponse, TodayPlanResponse } from "@fakeradio/shared";
 import { StreamEventSchema } from "@fakeradio/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildStreamUrl, getHealth, getNext, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
+import { buildStreamUrl, getHealth, getNext, getNextEpisode, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
 import {
   computeFadedVolume,
   formatDuration,
+  getEpisodeStateLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
+  getStoryTypeLabel,
   getTrackSourceLabel,
-  shouldWarnOnMockMusic
+  shouldWarnOnMockMusic,
+  transitEpisodeState
 } from "./player-view-model";
+import type { EpisodePlaybackState } from "./player-view-model";
 
 type StreamStatus = {
   label: string;
@@ -51,6 +55,8 @@ export function PlayerShell() {
   const [isLoading, setIsLoading] = useState(true);
   const [isActing, setIsActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [episodeState, setEpisodeState] = useState<EpisodePlaybackState>("idle");
+  const [episodeData, setEpisodeData] = useState<RadioEpisode | null>(null);
 
   const musicAudioRef = useRef<HTMLAudioElement>(null);
   const speechAudioRef = useRef<HTMLAudioElement>(null);
@@ -81,6 +87,72 @@ export function PlayerShell() {
     if (musicAudio && isDuckingRef.current) {
       isDuckingRef.current = false;
       fadeVolume(musicAudio, 1.0, 300);
+    }
+  }
+
+  async function playEpisode() {
+    if (episodeState !== "idle" && episodeState !== "error") return;
+
+    setError(null);
+    setEpisodeState("preparing");
+
+    try {
+      const response: EpisodeNextResponse = await getNextEpisode();
+      const episode = response.episode;
+      setEpisodeData(episode);
+
+      const speechAudio = speechAudioRef.current;
+      const musicAudio = musicAudioRef.current;
+      if (!speechAudio || !musicAudio) {
+        throw new Error("播放器未就绪");
+      }
+
+      musicAudio.src = episode.track.audioUrl ?? "";
+      musicAudio.volume = 0;
+
+      speechAudio.src = episode.story.audioUrl;
+
+      let crossfadeStarted = false;
+
+      const onTimeUpdate = () => {
+        if (crossfadeStarted) return;
+        if (!speechAudio.duration || !isFinite(speechAudio.duration)) return;
+
+        const remaining = speechAudio.duration - speechAudio.currentTime;
+        if (remaining <= episode.playback.crossfadeStartOffsetMs) {
+          crossfadeStarted = true;
+          setEpisodeState((current) => transitEpisodeState(current, "CROSSFADE_START"));
+
+          musicAudio.volume = episode.playback.musicStartVolume;
+          musicAudio.play().catch(() => {});
+          fadeVolume(musicAudio, 1.0, episode.playback.crossfadeStartOffsetMs);
+        }
+      };
+
+      speechAudio.addEventListener("timeupdate", onTimeUpdate);
+
+      speechAudio.onended = () => {
+        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
+        speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+      };
+
+      speechAudio.onerror = () => {
+        if (musicAudio && !musicAudio.paused) {
+          fadeVolume(musicAudio, 1.0, 300);
+        }
+        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
+        speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+      };
+
+      await speechAudio.play();
+      setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Invalid episode state transition")) {
+        throw err;
+      }
+      setEpisodeState("error");
+      setEpisodeData(null);
+      setError(`播放失败：${getErrorMessage(err)}`);
     }
   }
 
@@ -260,16 +332,18 @@ export function PlayerShell() {
       <section className="player-panel" aria-labelledby="player-title">
         <div className="player-copy">
           <p className="section-label">本地个人音乐电台</p>
-          <h1 id="player-title">{track?.title ?? "等待开播"}</h1>
+          <h1 id="player-title">{episodeData?.track.title ?? track?.title ?? "等待开播"}</h1>
           <p className="artist-line">
-            {track === null
-              ? "FakeRadio 已准备好"
-              : `${track.artist} · ${formatDuration(track.durationMs)} · ${getTrackSourceLabel(track.source)}`}
+            {episodeData !== null
+              ? `${episodeData.track.artist} · ${getStoryTypeLabel(episodeData.story.type)} · ${getTrackSourceLabel(episodeData.track.source)}`
+              : track === null
+                ? "FakeRadio 已准备好"
+                : `${track.artist} · ${formatDuration(track.durationMs)} · ${getTrackSourceLabel(track.source)}`}
           </p>
         </div>
 
         <div className="status-strip" aria-label="播放状态">
-          <span>{playbackLabel}</span>
+          <span>{episodeState !== "idle" ? getEpisodeStateLabel(episodeState) : playbackLabel}</span>
           <span>{streamStatus.label}</span>
           <span>{getProviderStatusLabel(musicStatus)}</span>
           <span>{isLoading ? "加载中" : "同步完成"}</span>
@@ -285,11 +359,14 @@ export function PlayerShell() {
         <audio ref={speechAudioRef} preload="none" style={{ display: "none" }} />
 
         <div className="button-row">
+          <button type="button" className="primary-button" onClick={playEpisode} disabled={episodeState === "preparing"}>
+            {episodeState === "error" ? "重试播放" : "电台播放"}
+          </button>
+          <button type="button" onClick={handleNext} disabled={isActing}>
+            生成下一首
+          </button>
           <button type="button" onClick={handleRefresh} disabled={isActing}>
             刷新当前
-          </button>
-          <button type="button" className="primary-button" onClick={handleNext} disabled={isActing}>
-            生成下一首
           </button>
         </div>
       </section>
@@ -300,11 +377,15 @@ export function PlayerShell() {
       <section className="grid-layout" aria-label="电台运行信息">
         <article className="panel">
           <h2>DJ 口播</h2>
-          <p className="speech">{now?.dj.say ?? "等待 DJ 输出。"}</p>
+          <p className="speech">{now?.dj.say ?? episodeData?.story.text ?? "等待 DJ 输出。"}</p>
           <dl className="detail-list">
             <div>
               <dt>TTS</dt>
-              <dd>{now?.dj.audioUrl ?? "尚未合成"}</dd>
+              <dd>{now?.dj.audioUrl ?? episodeData?.story.audioUrl ?? "尚未合成"}</dd>
+            </div>
+            <div>
+              <dt>故事类型</dt>
+              <dd>{episodeData !== null ? getStoryTypeLabel(episodeData.story.type) : "—"}</dd>
             </div>
             <div>
               <dt>Segue</dt>
@@ -357,6 +438,24 @@ export function PlayerShell() {
           <h2>决策原因</h2>
           <p>{nextResult?.decision.reason ?? "生成下一首后显示模型决策原因。"}</p>
           <p>{nextResult?.decision.play.reason ?? "播放理由会显示在这里。"}</p>
+          {episodeData !== null ? (
+            <>
+              <h3>故事来源</h3>
+              <ul className="source-list">
+                {episodeData.sources.map((source, index) => (
+                  <li key={index}>
+                    <strong>{source.title}</strong>
+                    <small>
+                      {source.kind === "lyric" ? "歌词" : source.kind === "metadata" ? "元数据" : source.kind === "web" ? "网页" : "Mock"}
+                      {source.confidence !== undefined ? ` (${Math.round(source.confidence * 100)}%)` : null}
+                    </small>
+                    <p>{source.content}</p>
+                  </li>
+                ))}
+              </ul>
+              {episodeData.fallbackReason !== undefined ? <p className="error-line">回退原因：{episodeData.fallbackReason}</p> : null}
+            </>
+          ) : null}
         </article>
 
         <article className="panel">
