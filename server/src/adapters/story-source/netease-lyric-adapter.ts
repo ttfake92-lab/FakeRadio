@@ -11,7 +11,7 @@ export type CreateNeteaseLyricAdapterOptions = Partial<CreateNeteaseHttpClientOp
 };
 
 const DEFAULT_LYRIC_LINE_LIMIT = 8;
-const TIMESTAMP_PATTERN = /^\[\d{2}:\d{2}\.\d{2,3}\]/;
+const TIMESTAMP_PATTERN = /^\[\d{2}:\d{2}\.\d{2,3}\]/g;
 
 function stripTimestamp(line: string): string {
   return line.replace(TIMESTAMP_PATTERN, "").trim();
