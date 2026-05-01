@@ -303,13 +303,14 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       ];
     }
 
+    const hasLyricSource = sources.some((s) => s.kind === "lyric");
+
     const episode: RadioEpisode = {
       track,
       story: {
         text: decision.say,
         audioUrl: storyAudioUrl,
-        // TODO: infer story type from source composition after Issue 02/03
-        type: "mood-reading"
+        type: hasLyricSource ? "lyric-theme" : "mood-reading"
       },
       sources,
       playback: {

@@ -316,6 +316,76 @@ describe("createRadioServer", () => {
     expect(body.episode.story.audioUrl).toContain("mock-");
     expect(body.episode.fallbackReason).toContain("TTS");
   });
+
+  it("returns lyric-theme story type when lyric source is available", async () => {
+    const lyricStorySource = {
+      async gather() {
+        return [
+          {
+            kind: "lyric" as const,
+            title: "Test Song",
+            content: "第一行歌词\n第二行歌词"
+          }
+        ];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: lyricStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("lyric-theme");
+    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources[0].kind).toBe("lyric");
+  });
+
+  it("returns mood-reading story type when lyric source is unavailable", async () => {
+    const emptyStorySource = {
+      async gather() {
+        return [];
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: emptyStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources[0].kind).toBe("mock");
+  });
+
+  it("returns mood-reading story type when story source throws", async () => {
+    const failingStorySource = {
+      async gather() {
+        throw new Error("Lyric service down");
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: failingStorySource
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.sources[0].kind).toBe("mock");
+  });
 });
 
 import { mkdtempSync, writeFileSync, rmdirSync } from "node:fs";
