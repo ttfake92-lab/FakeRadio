@@ -3,7 +3,7 @@
 import type { ChatResponse, EpisodeNextResponse, HealthResponse, NextResponse, NowResponse, RadioEpisode, StreamEvent, TasteResponse, TodayPlanResponse } from "@fakeradio/shared";
 import { StreamEventSchema } from "@fakeradio/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildStreamUrl, getHealth, getNext, getNextEpisode, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
+import { buildMediaUrl, buildStreamUrl, getHealth, getNext, getNextEpisode, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
 import {
   computeFadedVolume,
   formatDuration,
@@ -17,7 +17,7 @@ import {
   getTrackSourceLabel,
   shouldStartCrossfade,
   shouldWarnOnMockMusic,
-  transitEpisodeState
+  transitEpisodeStateSafely
 } from "./player-view-model";
 import type { EpisodePlaybackState } from "./player-view-model";
 
@@ -28,6 +28,11 @@ type StreamStatus = {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function getMusicStatus(health: HealthResponse | null) {
+  const status = health?.adapters.music;
+  return typeof status === "string" ? status : "mock";
 }
 
 function buildNowFromNext(result: NextResponse): NowResponse {
@@ -75,8 +80,9 @@ export function PlayerShell() {
 
   const track = now?.track ?? null;
   const playbackLabel = useMemo(() => getPlaybackLabel(now?.playback ?? "idle"), [now?.playback]);
-  const musicStatus = health?.adapters.music ?? "mock";
+  const musicStatus = getMusicStatus(health);
   const shouldWarn = shouldWarnOnMockMusic(musicStatus);
+  const musicAudioUrl = buildMediaUrl(episodeData?.track.audioUrl ?? track?.audioUrl);
   const nextEpisodeLabel = useMemo(
     () => getNextEpisodeLabel(nextEpisodeError !== null, nextEpisode !== null, isPrefetching),
     [nextEpisodeError, nextEpisode, isPrefetching]
@@ -117,10 +123,10 @@ export function PlayerShell() {
     setEpisodeData(episode);
     setEpisodeState("preparing");
 
-    musicAudio.src = episode.track.audioUrl ?? "";
+    musicAudio.src = buildMediaUrl(episode.track.audioUrl) ?? "";
     musicAudio.volume = 0;
 
-    speechAudio.src = episode.story.audioUrl;
+    speechAudio.src = buildMediaUrl(episode.story.audioUrl) ?? "";
 
     let crossfadeStarted = false;
 
@@ -128,7 +134,7 @@ export function PlayerShell() {
       if (crossfadeStarted) return;
       if (shouldStartCrossfade(speechAudio.currentTime, speechAudio.duration, episode.playback.crossfadeStartOffsetMs)) {
         crossfadeStarted = true;
-        setEpisodeState((current) => transitEpisodeState(current, "CROSSFADE_START"));
+        setEpisodeState((current) => transitEpisodeStateSafely(current, "CROSSFADE_START"));
 
         musicAudio.volume = episode.playback.musicStartVolume;
         musicAudio.play().catch(() => {});
@@ -143,7 +149,7 @@ export function PlayerShell() {
     onTimeUpdateRef.current = onTimeUpdate;
 
     speechAudio.onended = () => {
-      setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ENDED"));
+      setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ENDED"));
       speechAudio.removeEventListener("timeupdate", onTimeUpdate);
       const ma = musicAudioRef.current;
       if (ma) {
@@ -157,7 +163,8 @@ export function PlayerShell() {
       if (ma && !ma.paused) {
         fadeVolume(ma, 1.0, 300);
       }
-      setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
+      setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ERROR"));
+      setError("口播加载失败");
       speechAudio.removeEventListener("timeupdate", onTimeUpdate);
     };
 
@@ -203,22 +210,13 @@ export function PlayerShell() {
 
     speechAudio.play().then(() => {
       try {
-        setEpisodeState((current) => transitEpisodeState(current, "LOAD_SUCCESS"));
+        setEpisodeState((current) => transitEpisodeStateSafely(current, "LOAD_SUCCESS"));
       } catch {
         // state already changed, ignore
       }
     }).catch(() => {
-      const ma = musicAudioRef.current;
-      if (ma) {
-        ma.volume = 1.0;
-        ma.play().catch(() => {});
-      }
-      try {
-        setEpisodeState((current) => transitEpisodeState(current, "SPEECH_ERROR"));
-      } catch {
-        setEpisodeState("error");
-        setError("语音播放失败");
-      }
+      setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ERROR"));
+      setError("口播加载失败");
     });
   }
 
@@ -346,7 +344,7 @@ export function PlayerShell() {
             restoreMusicVolume();
           }
 
-          speechAudio.src = event.payload.audioUrl;
+          speechAudio.src = buildMediaUrl(event.payload.audioUrl) ?? "";
           speechAudio.onended = () => {
             restoreMusicVolume();
           };
@@ -489,9 +487,9 @@ export function PlayerShell() {
           className="audio-control"
           controls
           preload="none"
-          src={track?.audioUrl ?? undefined}
+          src={musicAudioUrl}
         />
-        <audio ref={speechAudioRef} preload="none" style={{ display: "none" }} />
+        <audio ref={speechAudioRef} preload="auto" style={{ display: "none" }} />
 
         <div className="button-row">
           <button type="button" className="primary-button" onClick={playEpisode} disabled={episodeState === "preparing"}>

@@ -155,6 +155,122 @@ describe("createRadioServer", () => {
     expect(music.resolve).toHaveBeenCalledWith(candidateTrack);
   });
 
+  it("uses custom playlist seeds for music search when playlists are injected", async () => {
+    const queueTrack = {
+      id: "custom-queue-001",
+      title: "Custom Queue",
+      artist: "Custom Artist",
+      album: "Custom Album",
+      durationMs: 180000,
+      source: "netease" as const
+    };
+    const candidateTrack = {
+      id: "custom-search-001",
+      title: "Custom Search",
+      artist: "Custom Artist",
+      album: "Custom Album",
+      durationMs: 210000,
+      source: "netease" as const
+    };
+    const resolvedTrack = {
+      ...candidateTrack,
+      audioUrl: "https://example.com/audio/custom-search-001.mp3"
+    };
+    const music = {
+      recommend: vi.fn().mockResolvedValue([queueTrack]),
+      search: vi.fn().mockResolvedValue([candidateTrack]),
+      resolve: vi.fn().mockResolvedValue(resolvedTrack)
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 8, 0, 0),
+      ttsAdapter: createMockTtsAdapter(),
+      userPreferences: {
+        taste: "test taste",
+        routines: "test routines",
+        moodRules: "test mood",
+        playlists: [
+          {
+            id: "custom-morning",
+            name: "Custom Morning",
+            description: "A custom morning playlist.",
+            seeds: ["custom morning seed"]
+          }
+        ]
+      }
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "custom morning seed", limit: 3 });
+  });
+
+  it("selects a different search candidate after the current track has played", async () => {
+    const firstTrack = {
+      id: "netease-search-001",
+      title: "First Result",
+      artist: "Adapter Artist",
+      album: "Adapter Album",
+      durationMs: 210000,
+      source: "netease" as const
+    };
+    const secondTrack = {
+      id: "netease-search-002",
+      title: "Second Result",
+      artist: "Adapter Artist",
+      album: "Adapter Album",
+      durationMs: 220000,
+      source: "netease" as const
+    };
+    const music = {
+      recommend: vi.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue([firstTrack, secondTrack]),
+      resolve: vi.fn().mockImplementation(async (track) => ({
+        ...track,
+        audioUrl: `https://example.com/audio/${track.id}.mp3`
+      }))
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 8, 0, 0),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const first = await app.inject({ method: "GET", url: "/api/next" });
+    const second = await app.inject({ method: "GET", url: "/api/next" });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(first.json().track.id).toBe("netease-search-001");
+    expect(second.json().track.id).toBe("netease-search-002");
+  });
+
+  it("falls back to mock TTS when real TTS fails for /api/next", async () => {
+    const failingTts = {
+      async synthesize() {
+        throw new Error("TTS service down");
+      }
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: failingTts
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/next" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().tts.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
+  });
+
   it("falls back to mock track when search and queue are empty", async () => {
     const music = {
       recommend: vi.fn().mockResolvedValue([]),
@@ -350,6 +466,7 @@ describe("createRadioServer", () => {
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricStorySource,
+      webResearchAdapter: { async gather() { return []; } },
       publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
@@ -421,6 +538,7 @@ describe("createRadioServer", () => {
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricSource,
+      webResearchAdapter: { async gather() { return []; } },
       publicMetadataAdapter: metadataSource
     });
 
@@ -573,6 +691,7 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: failingTts,
+      webResearchAdapter: createMockStorySourceAdapter(),
       publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
@@ -601,6 +720,7 @@ describe("createRadioServer", () => {
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricStorySource,
+      webResearchAdapter: { async gather() { return []; } },
       publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
@@ -624,6 +744,7 @@ describe("createRadioServer", () => {
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: emptyStorySource,
+      webResearchAdapter: createMockStorySourceAdapter(),
       publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
@@ -646,6 +767,7 @@ describe("createRadioServer", () => {
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: failingStorySource,
+      webResearchAdapter: createMockStorySourceAdapter(),
       publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
@@ -689,17 +811,144 @@ describe("createRadioServer", () => {
     expect(health.json().adapters.webResearch).toBe("ready");
   });
 
-  it("reports webResearch as disabled when no API key and no adapter injected", async () => {
+
+  it("uses injected user preferences for DJ decisions", async () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      userPreferences: {
+        taste: "Custom taste: no vocals, ambient only.",
+        routines: "Custom routines: night owl schedule.",
+        moodRules: "Custom mood: dark and rainy.",
+        playlists: [
+          {
+            id: "test-playlist",
+            name: "Test Playlist",
+            description: "For testing.",
+            seeds: ["test seed"]
+          }
+        ]
+      }
     });
 
-    const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.statusCode).toBe(200);
-    expect(health.json().adapters.webResearch).toBe("disabled");
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    expect(next.json().decision.say).toBeTruthy();
+  });
+
+  it("exposes loaded user preferences via /api/taste", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      userPreferences: {
+        taste: "Test taste content",
+        routines: "Test routines content",
+        moodRules: "Test mood rules content",
+        playlists: [
+          {
+            id: "test-playlist",
+            name: "Test Playlist",
+            description: "For testing.",
+            seeds: ["test seed"]
+          }
+        ]
+      }
+    });
+
+    const taste = await app.inject({ method: "GET", url: "/api/taste" });
+    expect(taste.statusCode).toBe(200);
+    expect(taste.json().taste).toBe("Test taste content");
+    expect(taste.json().routines).toBe("Test routines content");
+    expect(taste.json().moodRules).toBe("Test mood rules content");
+    expect(taste.json().playlists[0].id).toBe("test-playlist");
+  });
+
+  it("returns loaded playlists from /api/taste", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      userPreferences: {
+        taste: "Test taste",
+        routines: "Test routines",
+        moodRules: "Test mood",
+        playlists: [
+          {
+            id: "morning-soft-start",
+            name: "早晨轻启动",
+            description: "温暖、低刺激、适合开始一天。",
+            seeds: ["warm morning indie", "soft acoustic sunrise", "light city pop"]
+          },
+          {
+            id: "focus-coding",
+            name: "写代码专注",
+            description: "稳定节奏、少人声、适合持续工作。",
+            seeds: ["instrumental focus", "minimal electronic", "lofi coding"]
+          },
+          {
+            id: "night-downshift",
+            name: "晚间降速",
+            description: "低密度、空间感、适合收尾。",
+            seeds: ["ambient pop night", "soft piano electronic", "dreamy downtempo"]
+          }
+        ]
+      }
+    });
+
+    const taste = await app.inject({ method: "GET", url: "/api/taste" });
+    expect(taste.statusCode).toBe(200);
+    const body = taste.json();
+    expect(body.playlists).toHaveLength(3);
+    expect(body.playlists[0].id).toBe("morning-soft-start");
+    expect(body.playlists[1].id).toBe("focus-coding");
+    expect(body.playlists[2].id).toBe("night-downshift");
+    expect(body.playlists[2].seeds).toContain("ambient pop night");
+  });
+
+  it("uses seeds from loaded playlists for /api/next", async () => {
+    const music = {
+      recommend: vi.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue([
+        {
+          id: "netease-search-001",
+          title: "Search Result",
+          artist: "Adapter Artist",
+          album: "Adapter Album",
+          durationMs: 210000,
+          source: "netease" as const
+        }
+      ]),
+      resolve: vi.fn().mockImplementation(async (track) => ({
+        ...track,
+        audioUrl: `https://example.com/audio/${track.id}.mp3`
+      }))
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 8, 0, 0),
+      ttsAdapter: createMockTtsAdapter(),
+      userPreferences: {
+        taste: "Test taste",
+        routines: "Test routines",
+        moodRules: "Test mood",
+        playlists: [
+          {
+            id: "morning-soft-start",
+            name: "早晨轻启动",
+            description: "温暖、低刺激、适合开始一天。",
+            seeds: ["warm morning indie", "soft acoustic sunrise", "light city pop"]
+          }
+        ]
+      }
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    expect(music.search).toHaveBeenCalledWith("warm morning indie");
+    expect(next.json().track.title).toBe("Search Result");
   });
 });
 

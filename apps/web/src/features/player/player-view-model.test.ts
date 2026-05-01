@@ -12,6 +12,7 @@ import {
   getTrackSourceLabel,
   shouldStartCrossfade,
   shouldWarnOnMockMusic,
+  transitEpisodeStateSafely,
   transitEpisodeState
 } from "./player-view-model";
 import type { EpisodeEvent, EpisodePlaybackState } from "./player-view-model";
@@ -142,6 +143,22 @@ describe("episode state machine", () => {
     expect(getEpisodeStateLabel("crossfade")).toBe("音乐渐入");
     expect(getEpisodeStateLabel("music")).toBe("播放中");
     expect(getEpisodeStateLabel("error")).toBe("播放异常");
+  });
+
+  it("keeps error state stable when duplicate speech errors arrive", () => {
+    expect(transitEpisodeStateSafely("error", "SPEECH_ERROR")).toBe("error");
+  });
+
+  it("transitions from preparing to error on SPEECH_ERROR", () => {
+    expect(transitEpisodeState("preparing", "SPEECH_ERROR")).toBe("error");
+  });
+
+  it("transitions from story to error on SPEECH_ERROR", () => {
+    expect(transitEpisodeState("story", "SPEECH_ERROR")).toBe("error");
+  });
+
+  it("transitions from crossfade to error on SPEECH_ERROR", () => {
+    expect(transitEpisodeState("crossfade", "SPEECH_ERROR")).toBe("error");
   });
 });
 

@@ -13,7 +13,8 @@ import {
   TodayPlanResponseSchema,
   type NowResponse,
   type RadioEpisode,
-  type Track
+  type Track,
+  type TtsResult
 } from "@fakeradio/shared";
 import {
   createMockCalendarAdapter,
@@ -36,15 +37,7 @@ import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
-
-const PLAYLISTS = [
-  {
-    id: "morning-soft-start",
-    name: "早晨轻启动",
-    description: "温暖、低刺激、适合开始一天。",
-    seeds: ["warm morning indie", "soft acoustic sunrise", "light city pop"]
-  }
-];
+import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
 
 type CreateRadioServerOptions = {
   musicAdapterResult?: Awaited<ReturnType<typeof createMusicAdapter>>;
@@ -57,6 +50,7 @@ type CreateRadioServerOptions = {
   storySourceAdapter?: StorySourceAdapter;
   publicMetadataAdapter?: StorySourceAdapter;
   webResearchAdapter?: StorySourceAdapter;
+  userPreferences?: UserPreferences;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -67,6 +61,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   await app.register(websocket);
 
   const llm = createMockLlmAdapter();
+  const ttsCacheDir = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
   const { music, status: musicStatus } =
     options.musicAdapterResult ??
     (await createMusicAdapter({
@@ -77,7 +72,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const tts =
     options.ttsAdapter ??
     createEdgeTtsAdapter({
-      cacheDir: resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR),
+      cacheDir: ttsCacheDir,
       voice: env.FAKERADIO_TTS_VOICE
     });
   const weather = options.weatherAdapter ?? createMockWeatherAdapter();
@@ -91,7 +86,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   let currentDj: NowResponse["dj"] = {
     say: "FakeRadio 准备好了。"
   };
-  const currentPlan = buildTodayPlan(nowProvider());
+  let recentlySelectedTrackIds: string[] = [];
+  const userPreferences = options.userPreferences ?? (await loadUserPreferences());
+
+  const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
   const currentPlanBlock = getCurrentPlanBlock(currentPlan, nowProvider());
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
   const queue = await music.recommend({ mood: currentMoodHint, limit: 3 });
@@ -104,6 +102,34 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       queue,
       updatedAt: new Date().toISOString()
     });
+
+  const rememberSelectedTrack = (track: Track) => {
+    recentlySelectedTrackIds = [
+      track.id,
+      ...recentlySelectedTrackIds.filter((id) => id !== track.id)
+    ].slice(0, 10);
+  };
+
+  const selectCandidate = (tracks: Track[]) => {
+    const excludedTrackIds = new Set([
+      ...recentlySelectedTrackIds,
+      ...(currentTrack ? [currentTrack.id] : [])
+    ]);
+    return tracks.find((track) => !excludedTrackIds.has(track.id)) ?? tracks[0];
+  };
+
+  const synthesizeWithFallback = async (text: string): Promise<{ result: TtsResult; fallbackReason?: string }> => {
+    try {
+      return { result: await tts.synthesize(text) };
+    } catch (error) {
+      console.error("TTS synthesis failed, falling back to mock:", error);
+      const mockTts = createMockTtsAdapter({ cacheDir: ttsCacheDir });
+      return {
+        result: await mockTts.synthesize(text),
+        fallbackReason: "TTS synthesis failed; fell back to mock TTS"
+      };
+    }
+  };
 
   app.get("/api/health", async () =>
     HealthResponseSchema.parse({
@@ -136,9 +162,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       llm,
       now,
       systemPrompt: "你是 FakeRadio DJ。",
-      userTaste: "喜欢低刺激、持续陪伴的音乐。",
-      routines: "早晨低刺激启动，工作时段稳定少打扰。",
-      moodRules: "晴天早晨温暖轻盈。",
+      userTaste: userPreferences.taste,
+      routines: userPreferences.routines,
+      moodRules: userPreferences.moodRules,
       recentMemory: recentMemoryEntries.map((entry) => entry.content),
       toolResults: [],
       executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
@@ -149,16 +175,19 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       }
     });
 
-    const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
+    const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
     let track: Track;
 
-    if (candidates.length > 0) {
-      track = await music.resolve(candidates[0]!);
-    } else if (queue.length > 0) {
-      track = await music.resolve(queue[0]!);
+    const candidate = selectCandidate(candidates);
+    const queueCandidate = selectCandidate(queue);
+
+    if (candidate) {
+      track = await music.resolve(candidate);
+    } else if (queueCandidate) {
+      track = await music.resolve(queueCandidate);
     } else {
       const mockMusic = createMockMusicAdapter();
-      const fallbackTracks = await mockMusic.search("warm morning indie");
+      const fallbackTracks = await mockMusic.search(currentMoodHint);
       track = await mockMusic.resolve(fallbackTracks[0]!);
     }
 
@@ -168,9 +197,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       llm,
       now,
       systemPrompt: "你是 FakeRadio DJ。",
-      userTaste: "喜欢低刺激、持续陪伴的音乐。",
-      routines: "早晨低刺激启动，工作时段稳定少打扰。",
-      moodRules: "晴天早晨温暖轻盈。",
+      userTaste: userPreferences.taste,
+      routines: userPreferences.routines,
+      moodRules: userPreferences.moodRules,
       recentMemory: recentMemoryEntries.map((entry) => entry.content),
       toolResults: [
         `music.provider: ${musicStatus}`,
@@ -192,8 +221,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
   app.get("/api/next", async () => {
     const { track, decision } = await resolveNextTrackAndDecision();
-    const ttsResult = await tts.synthesize(decision.say);
+    const { result: ttsResult } = await synthesizeWithFallback(decision.say);
     currentTrack = track;
+    rememberSelectedTrack(track);
     currentDj = {
       say: decision.say,
       audioUrl: ttsResult.audioUrl,
@@ -225,9 +255,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       llm,
       now: new Date(),
       systemPrompt: "你是 FakeRadio DJ。",
-      userTaste: "喜欢低刺激、持续陪伴的音乐。",
-      routines: "工作时段稳定少打扰。",
-      moodRules: "用户主动输入时优先尊重用户意图。",
+      userTaste: userPreferences.taste,
+      routines: userPreferences.routines,
+      moodRules: userPreferences.moodRules,
       recentMemory: [],
       userMessage: body.message,
       toolResults: [],
@@ -247,14 +277,12 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
   app.get("/api/taste", async () =>
     TasteResponseSchema.parse({
-      taste: "喜欢低刺激、能持续陪伴的音乐。",
-      routines: "早晨低刺激启动；工作时段稳定少打扰；晚间降速。",
-      playlists: PLAYLISTS,
-      moodRules: "晴天早晨温暖轻盈；工作时段少人声。"
+      taste: userPreferences.taste,
+      routines: userPreferences.routines,
+      playlists: userPreferences.playlists,
+      moodRules: userPreferences.moodRules
     })
   );
-
-  const TTS_CACHE_DIR = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
 
   app.get("/cache/tts/*", async (request, reply) => {
     const filename = (request.params as Record<string, string>)["*"];
@@ -263,8 +291,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       return reply.status(404).send("Not found");
     }
 
-    const filePath = resolve(TTS_CACHE_DIR, filename);
-    const relativePath = relative(resolve(TTS_CACHE_DIR), filePath);
+    const filePath = resolve(ttsCacheDir, filename);
+    const relativePath = relative(resolve(ttsCacheDir), filePath);
 
     if (relativePath.startsWith("..") || isAbsolute(relativePath) || !existsSync(filePath)) {
       return reply.status(404).send("Not found");
@@ -276,18 +304,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   app.get("/api/episode/next", async () => {
     const { track, decision } = await resolveNextTrackAndDecision();
 
-    let storyAudioUrl: string;
-    let fallbackReason: string | undefined;
-    try {
-      const ttsResult = await tts.synthesize(decision.say);
-      storyAudioUrl = ttsResult.audioUrl;
-    } catch (error) {
-      console.error("TTS synthesis failed, falling back to mock:", error);
-      const mockTts = createMockTtsAdapter({ cacheDir: TTS_CACHE_DIR });
-      const mockTtsResult = await mockTts.synthesize(decision.say);
-      storyAudioUrl = mockTtsResult.audioUrl;
-      fallbackReason = "TTS synthesis failed; fell back to mock TTS";
-    }
+    const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(decision.say);
+    rememberSelectedTrack(track);
 
     let lyricSources: RadioEpisode["sources"] = [];
     try {
@@ -308,7 +326,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
     let webSources: RadioEpisode["sources"] = [];
     try {
-      const webResearch = options.webResearchAdapter ?? createWebResearchAdapter({ apiKey: env.FAKERADIO_BRAVE_API_KEY });
+      const webResearch = options.webResearchAdapter ?? createWebResearchAdapter(
+        env.FAKERADIO_BRAVE_API_KEY ? { apiKey: env.FAKERADIO_BRAVE_API_KEY } : {}
+      );
       const adapterSources = await webResearch.gather(track);
       webSources = adapterSources.length > 0 ? adapterSources : [];
     } catch {
@@ -316,7 +336,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     }
 
     const combinedSources = [...lyricSources, ...metadataSources, ...webSources];
-    const sources = combinedSources.length > 0 ? combinedSources : [
+    const sources: RadioEpisode["sources"] = combinedSources.length > 0 ? combinedSources : [
       {
         kind: "mock",
         title: "mock source",
@@ -339,7 +359,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       track,
       story: {
         text: decision.say,
-        audioUrl: storyAudioUrl,
+        audioUrl: storyTtsResult.audioUrl,
         type: storyType
       },
       sources,

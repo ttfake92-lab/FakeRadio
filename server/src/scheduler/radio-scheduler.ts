@@ -1,28 +1,31 @@
 import type { TodayPlanResponse } from "@fakeradio/shared";
 
-export function buildTodayPlan(now: Date): TodayPlanResponse {
+type PlaylistInput = {
+  name: string;
+  seeds: string[];
+};
+
+export function buildTodayPlan(now: Date, playlists?: PlaylistInput[]): TodayPlanResponse {
   const date = now.toLocaleDateString("en-CA");
 
-  return {
-    date,
-    blocks: [
-      {
-        at: "07:00",
-        label: "早晨轻启动",
-        moodHint: "warm morning indie"
-      },
-      {
-        at: "09:00",
-        label: "写代码专注",
-        moodHint: "instrumental focus"
-      },
-      {
-        at: "21:00",
-        label: "晚间降速",
-        moodHint: "ambient pop night"
-      }
-    ]
-  };
+  const defaultBlocks = [
+    { at: "07:00", label: "早晨轻启动", moodHint: "warm morning indie" },
+    { at: "09:00", label: "写代码专注", moodHint: "instrumental focus" },
+    { at: "21:00", label: "晚间降速", moodHint: "ambient pop night" }
+  ];
+
+  if (!playlists || playlists.length === 0) {
+    return { date, blocks: defaultBlocks };
+  }
+
+  const timeSlots = ["07:00", "09:00", "21:00"];
+  const blocks = playlists.map((playlist, index) => ({
+    at: timeSlots[index] ?? defaultBlocks[index]?.at ?? "07:00",
+    label: playlist.name,
+    moodHint: playlist.seeds[0] ?? defaultBlocks[index]?.moodHint ?? "warm morning indie"
+  }));
+
+  return { date, blocks };
 }
 
 export function getCurrentPlanBlock(plan: TodayPlanResponse, now: Date) {
