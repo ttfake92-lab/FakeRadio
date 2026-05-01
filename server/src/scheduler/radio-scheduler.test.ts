@@ -12,4 +12,12 @@ describe("radio scheduler", () => {
     expect(getCurrentPlanBlock(plan, morning)?.moodHint).toBe("warm morning indie");
     expect(getCurrentPlanBlock(plan, night)?.moodHint).toBe("ambient pop night");
   });
+
+  it("uses local date even when UTC has crossed to previous day", () => {
+    const shanghaiMidnight = new Date(2026, 4, 1, 0, 30, 0);
+
+    const plan = buildTodayPlan(shanghaiMidnight);
+
+    expect(plan.date).toBe("2026-05-01");
+  });
 });

@@ -18,6 +18,7 @@ import {
   createMockDeviceAdapter,
   createMusicAdapter,
   createMockLlmAdapter,
+  createMockMusicAdapter,
   createMockTtsAdapter,
   createMockWeatherAdapter,
   createEdgeTtsAdapter
@@ -132,7 +133,19 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       }
     });
     const candidates = await music.search(draftDecision.play.query ?? "warm morning indie");
-    const track = await music.resolve(candidates[0] ?? queue[0]!);
+    let track: Track;
+
+    if (candidates.length > 0) {
+      track = await music.resolve(candidates[0]!);
+    } else if (queue.length > 0) {
+      track = await music.resolve(queue[0]!);
+    } else {
+      const mockMusic = createMockMusicAdapter();
+      const fallbackTracks = await mockMusic.search("warm morning indie");
+      track = await mockMusic.resolve(fallbackTracks[0]!);
+    }
+
+    const isFallback = candidates.length === 0 && queue.length === 0;
     const decision = await computeDjDecision({
       llm,
       now,
@@ -144,6 +157,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       toolResults: [
         `music.provider: ${musicStatus}`,
         `music.search returned ${candidates.length} tracks`,
+        ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
         `music.selectedTrack: ${track.title} - ${track.artist}`,
         ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
       ],

@@ -153,7 +153,9 @@ export function PlayerShell() {
             fadeVolume(musicAudio, 0.2, 300);
           }
 
-          speechAudio.play().catch(() => {});
+          speechAudio.play().catch(() => {
+            restoreMusicVolume();
+          });
         }
 
         const dj: NowResponse["dj"] = {

@@ -1,7 +1,7 @@
 import type { TodayPlanResponse } from "@fakeradio/shared";
 
 export function buildTodayPlan(now: Date): TodayPlanResponse {
-  const date = now.toISOString().slice(0, 10);
+  const date = now.toLocaleDateString("en-CA");
 
   return {
     date,

@@ -153,6 +153,30 @@ describe("createRadioServer", () => {
     expect(music.resolve).toHaveBeenCalledWith(candidateTrack);
   });
 
+  it("falls back to mock track when search and queue are empty", async () => {
+    const music = {
+      recommend: vi.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue([]),
+      resolve: vi.fn().mockRejectedValue(new Error("should not be called"))
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 8, 0, 0),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+
+    expect(next.statusCode).toBe(200);
+    expect(next.json().track.source).toBe("mock");
+    expect(music.search).toHaveBeenCalledWith("warm morning indie");
+    expect(music.resolve).not.toHaveBeenCalled();
+  });
+
   it("shows daypart continuity through queue mood and recent play memory", async () => {
     const firstTrack = {
       id: "netease-track-001",
