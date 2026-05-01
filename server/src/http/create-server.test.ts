@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import { createRadioServer } from "./create-server.js";
 
 let app: FastifyInstance | undefined;
@@ -278,7 +278,9 @@ describe("createRadioServer", () => {
   it("returns a complete radio episode from /api/episode/next", async () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -315,7 +317,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: metadataStorySource
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: metadataStorySource
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -344,7 +347,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: lyricStorySource
+      storySourceAdapter: lyricStorySource,
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -352,7 +356,7 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("lyric-theme");
-    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources).toHaveLength(2);
     expect(body.episode.sources[0].kind).toBe("lyric");
   });
 
@@ -373,7 +377,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: lowConfidenceMetadataSource
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: lowConfidenceMetadataSource
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -386,14 +391,20 @@ describe("createRadioServer", () => {
   });
 
   it("returns background story type when both lyric and metadata sources are present", async () => {
-    const combinedStorySource = {
+    const lyricSource = {
       async gather() {
         return [
           {
             kind: "lyric" as const,
             title: "Test Song",
             content: "第一行歌词"
-          },
+          }
+        ];
+      }
+    };
+    const metadataSource = {
+      async gather() {
+        return [
           {
             kind: "metadata" as const,
             title: "Test Song - Test Artist",
@@ -407,7 +418,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: combinedStorySource
+      storySourceAdapter: lyricSource,
+      publicMetadataAdapter: metadataSource
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -419,16 +431,17 @@ describe("createRadioServer", () => {
   });
 
   it("returns mood-reading when metadata adapter fails", async () => {
-    const failingStorySource = {
+    const failingMetadataSource = {
       async gather() {
-        throw new Error("Lyric service down");
+        throw new Error("Metadata service down");
       }
     };
 
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: failingStorySource
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: failingMetadataSource
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -448,7 +461,8 @@ describe("createRadioServer", () => {
 
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: failingTts
+      ttsAdapter: failingTts,
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -475,7 +489,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: lyricStorySource
+      storySourceAdapter: lyricStorySource,
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -483,7 +498,7 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("lyric-theme");
-    expect(body.episode.sources).toHaveLength(1);
+    expect(body.episode.sources).toHaveLength(2);
     expect(body.episode.sources[0].kind).toBe("lyric");
   });
 
@@ -497,7 +512,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: emptyStorySource
+      storySourceAdapter: emptyStorySource,
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -518,7 +534,8 @@ describe("createRadioServer", () => {
     app = await createRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: failingStorySource
+      storySourceAdapter: failingStorySource,
+      publicMetadataAdapter: createMockStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });

@@ -54,6 +54,7 @@ type CreateRadioServerOptions = {
   calendarAdapter?: CalendarAdapter;
   deviceAdapter?: DeviceAdapter;
   storySourceAdapter?: StorySourceAdapter;
+  publicMetadataAdapter?: StorySourceAdapter;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -294,7 +295,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
     let metadataSources: RadioEpisode["sources"] = [];
     try {
-      const publicMetadata = createPublicMetadataAdapter();
+      const publicMetadata = options.publicMetadataAdapter ?? createPublicMetadataAdapter();
       const adapterSources = await publicMetadata.gather(track);
       metadataSources = adapterSources.length > 0 ? adapterSources : [];
     } catch {
