@@ -1,4 +1,4 @@
-import type { NowResponse } from "@fakeradio/shared";
+import type { HealthResponse, NowResponse, Track } from "@fakeradio/shared";
 
 export function getPlaybackLabel(playback: NowResponse["playback"]) {
   const labels: Record<NowResponse["playback"], string> = {
@@ -19,4 +19,38 @@ export function formatDuration(durationMs: number | undefined) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+export function getProviderStatusLabel(status: HealthResponse["adapters"]["music"]) {
+  const labels: Record<HealthResponse["adapters"]["music"], string> = {
+    ready: "真实来源已连接",
+    mock: "已回退到 mock",
+    disabled: "已禁用"
+  };
+
+  return labels[status];
+}
+
+export function getTrackSourceLabel(source: Track["source"]) {
+  const labels: Record<Track["source"], string> = {
+    netease: "网易云",
+    mock: "Mock",
+    local: "本地"
+  };
+
+  return labels[source];
+}
+
+export function shouldWarnOnMockMusic(status: HealthResponse["adapters"]["music"]) {
+  return status === "mock";
+}
+
+export function computeFadedVolume(
+  startVolume: number,
+  targetVolume: number,
+  durationMs: number,
+  elapsedMs: number
+): number {
+  const progress = Math.min(elapsedMs / durationMs, 1);
+  return startVolume + (targetVolume - startVolume) * progress;
 }

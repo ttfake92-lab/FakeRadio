@@ -14,3 +14,17 @@
 - 外部服务必须通过 adapter 接口接入，避免把 provider 逻辑写进核心流程。
 - 先完成 mock contract 和本地闭环，再接真实 provider。
 - 变更保持克制，只修改与当前任务直接相关的文件。
+
+## Agent skills
+
+### Issue tracker
+
+本仓库暂时使用本地 Markdown 作为 issue tracker。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+本仓库使用默认五段式 triage 状态词汇。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+本仓库按 single-context 布局消费 domain docs。见 `docs/agents/domain.md`。

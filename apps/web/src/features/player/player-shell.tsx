@@ -1,10 +1,17 @@
 "use client";
 
-import type { ChatResponse, NextResponse, NowResponse, StreamEvent, TasteResponse, TodayPlanResponse } from "@fakeradio/shared";
+import type { ChatResponse, HealthResponse, NextResponse, NowResponse, StreamEvent, TasteResponse, TodayPlanResponse } from "@fakeradio/shared";
 import { StreamEventSchema } from "@fakeradio/shared";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { buildStreamUrl, getNext, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
-import { formatDuration, getPlaybackLabel } from "./player-view-model";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildStreamUrl, getHealth, getNext, getNow, getTaste, getTodayPlan, sendChat } from "../../lib/api-client";
+import {
+  computeFadedVolume,
+  formatDuration,
+  getPlaybackLabel,
+  getProviderStatusLabel,
+  getTrackSourceLabel,
+  shouldWarnOnMockMusic
+} from "./player-view-model";
 
 type StreamStatus = {
   label: string;
@@ -33,6 +40,7 @@ export function PlayerShell() {
   const [now, setNow] = useState<NowResponse | null>(null);
   const [taste, setTaste] = useState<TasteResponse | null>(null);
   const [plan, setPlan] = useState<TodayPlanResponse | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [nextResult, setNextResult] = useState<NextResponse | null>(null);
   const [chatMessage, setChatMessage] = useState("");
   const [chatReply, setChatReply] = useState<ChatResponse | null>(null);
@@ -44,18 +52,53 @@ export function PlayerShell() {
   const [isActing, setIsActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const musicAudioRef = useRef<HTMLAudioElement>(null);
+  const speechAudioRef = useRef<HTMLAudioElement>(null);
+  const isDuckingRef = useRef(false);
+
   const track = now?.track ?? null;
   const playbackLabel = useMemo(() => getPlaybackLabel(now?.playback ?? "idle"), [now?.playback]);
+  const musicStatus = health?.adapters.music ?? "mock";
+  const shouldWarn = shouldWarnOnMockMusic(musicStatus);
+
+  function fadeVolume(audio: HTMLAudioElement, targetVolume: number, durationMs: number) {
+    const startVolume = audio.volume;
+    const startTime = performance.now();
+
+    function step(now: number) {
+      const elapsed = now - startTime;
+      audio.volume = computeFadedVolume(startVolume, targetVolume, durationMs, elapsed);
+      if (elapsed < durationMs) {
+        requestAnimationFrame(step);
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  function restoreMusicVolume() {
+    const musicAudio = musicAudioRef.current;
+    if (musicAudio && isDuckingRef.current) {
+      isDuckingRef.current = false;
+      fadeVolume(musicAudio, 1.0, 300);
+    }
+  }
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const [nowResponse, tasteResponse, planResponse] = await Promise.all([getNow(), getTaste(), getTodayPlan()]);
+      const [nowResponse, tasteResponse, planResponse, healthResponse] = await Promise.all([
+        getNow(),
+        getTaste(),
+        getTodayPlan(),
+        getHealth()
+      ]);
       setNow(nowResponse);
       setTaste(tasteResponse);
       setPlan(planResponse);
+      setHealth(healthResponse);
     } catch (loadError) {
       setError(`无法连接本地服务：${getErrorMessage(loadError)}`);
     } finally {
@@ -89,6 +132,30 @@ export function PlayerShell() {
       }
 
       if (event.type === "dj-speech") {
+        const musicAudio = musicAudioRef.current;
+        const speechAudio = speechAudioRef.current;
+
+        if (speechAudio && event.payload.audioUrl) {
+          if (isDuckingRef.current) {
+            restoreMusicVolume();
+          }
+
+          speechAudio.src = event.payload.audioUrl;
+          speechAudio.onended = () => {
+            restoreMusicVolume();
+          };
+          speechAudio.onerror = () => {
+            restoreMusicVolume();
+          };
+
+          if (musicAudio && !musicAudio.paused) {
+            isDuckingRef.current = true;
+            fadeVolume(musicAudio, 0.2, 300);
+          }
+
+          speechAudio.play().catch(() => {});
+        }
+
         const dj: NowResponse["dj"] = {
           say: event.payload.text
         };
@@ -131,6 +198,7 @@ export function PlayerShell() {
 
     try {
       setNow(await getNow());
+      setHealth(await getHealth());
     } catch (refreshError) {
       setError(`刷新失败：${getErrorMessage(refreshError)}`);
     } finally {
@@ -191,16 +259,28 @@ export function PlayerShell() {
         <div className="player-copy">
           <p className="section-label">本地个人音乐电台</p>
           <h1 id="player-title">{track?.title ?? "等待开播"}</h1>
-          <p className="artist-line">{track === null ? "FakeRadio 已准备好" : `${track.artist} · ${formatDuration(track.durationMs)}`}</p>
+          <p className="artist-line">
+            {track === null
+              ? "FakeRadio 已准备好"
+              : `${track.artist} · ${formatDuration(track.durationMs)} · ${getTrackSourceLabel(track.source)}`}
+          </p>
         </div>
 
         <div className="status-strip" aria-label="播放状态">
           <span>{playbackLabel}</span>
           <span>{streamStatus.label}</span>
+          <span>{getProviderStatusLabel(musicStatus)}</span>
           <span>{isLoading ? "加载中" : "同步完成"}</span>
         </div>
 
-        <audio className="audio-control" controls preload="none" src={track?.audioUrl ?? undefined} />
+        <audio
+          ref={musicAudioRef}
+          className="audio-control"
+          controls
+          preload="none"
+          src={track?.audioUrl ?? undefined}
+        />
+        <audio ref={speechAudioRef} preload="none" style={{ display: "none" }} />
 
         <div className="button-row">
           <button type="button" onClick={handleRefresh} disabled={isActing}>
@@ -213,6 +293,7 @@ export function PlayerShell() {
       </section>
 
       {error === null ? null : <p className="error-line">{error}</p>}
+      {shouldWarn ? <p className="error-line">当前音乐来源已回退到 mock，本地真实 provider 暂不可用。</p> : null}
 
       <section className="grid-layout" aria-label="电台运行信息">
         <article className="panel">
@@ -231,6 +312,10 @@ export function PlayerShell() {
               <dt>Stream</dt>
               <dd>{streamStatus.detail}</dd>
             </div>
+            <div>
+              <dt>Music Provider</dt>
+              <dd>{getProviderStatusLabel(musicStatus)}</dd>
+            </div>
           </dl>
         </article>
 
@@ -240,7 +325,9 @@ export function PlayerShell() {
             {(now?.queue ?? []).map((queueTrack) => (
               <li key={queueTrack.id}>
                 <span>{queueTrack.title}</span>
-                <small>{queueTrack.artist}</small>
+                <small>
+                  {queueTrack.artist} · {getTrackSourceLabel(queueTrack.source)}
+                </small>
               </li>
             ))}
           </ol>

@@ -24,3 +24,21 @@ export function buildTodayPlan(now: Date): TodayPlanResponse {
     ]
   };
 }
+
+export function getCurrentPlanBlock(plan: TodayPlanResponse, now: Date) {
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  let selected = plan.blocks[0] ?? null;
+
+  for (const block of plan.blocks) {
+    const [rawHours, rawMinutes] = block.at.split(":");
+    const hours = Number(rawHours ?? 0);
+    const minutes = Number(rawMinutes ?? 0);
+    const blockMinutes = hours * 60 + minutes;
+
+    if (blockMinutes <= currentMinutes) {
+      selected = block;
+    }
+  }
+
+  return selected;
+}

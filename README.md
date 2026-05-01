@@ -14,6 +14,39 @@ pnpm dev
 - Web: `http://localhost:3000`
 - Server: `http://localhost:3001`
 
+如果你需要把服务放进持久会话，当前常用做法是：
+
+- Web: `http://127.0.0.1:3002`
+- Server: `http://127.0.0.1:3001`
+
+## 真实音乐来源
+
+FakeRadio 当前支持两种音乐来源：
+
+- mock music adapter
+- 本地 `NeteaseCloudMusicApi` HTTP adapter
+
+默认行为：
+
+- `FAKERADIO_PROVIDER_MODE=auto`
+- 优先探测本地网易云服务
+- 探测失败时自动回退到 mock
+
+运行时可以通过下面的接口确认当前来源：
+
+```bash
+curl http://127.0.0.1:3001/api/health
+```
+
+当返回 `adapters.music: "ready"` 时，表示当前已经走到真实网易云来源；返回 `"mock"` 时，表示当前处于回退路径。
+
+## 当前已实现
+
+- 前端展示当前曲目、队列、DJ 口播、今日计划和 provider 状态。
+- `/api/next` 先生成选歌 query，再用真实 music adapter 搜索并回填 grounded DJ 文案。
+- 初始队列会按当前 daypart 的 `moodHint` 生成，不再固定使用单一 mood。
+- server 会记录近期播放历史，后续 DJ 文案可引用上一首歌，形成连续感。
+
 ## 结构
 
 - `apps/web`：Next.js PWA 播放器。

@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import { createRadioServer } from "./create-server.js";
 
 let app: FastifyInstance | undefined;
+
+function createMockMusicAdapterResult() {
+  return {
+    music: createMockMusicAdapter(),
+    status: "mock" as const
+  };
+}
 
 afterEach(async () => {
   await app?.close();
@@ -11,7 +19,10 @@ afterEach(async () => {
 
 describe("createRadioServer", () => {
   it("serves health, now, plan, next, taste, and chat contracts", async () => {
-    app = await createRadioServer();
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
@@ -45,7 +56,10 @@ describe("createRadioServer", () => {
   });
 
   it("keeps the latest DJ speech in now after computing next", async () => {
-    app = await createRadioServer();
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
@@ -68,7 +82,10 @@ describe("createRadioServer", () => {
   });
 
   it("allows the local web app origin during development", async () => {
-    app = await createRadioServer();
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
 
     const health = await app.inject({
       method: "GET",
@@ -79,5 +96,104 @@ describe("createRadioServer", () => {
     });
 
     expect(health.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3002");
+  });
+
+  it("uses the selected music adapter for health, initial queue, and next track", async () => {
+    const queueTrack = {
+      id: "netease-queue-001",
+      title: "Queue Starter",
+      artist: "Adapter Artist",
+      album: "Adapter Album",
+      durationMs: 180000,
+      source: "netease" as const
+    };
+    const candidateTrack = {
+      id: "netease-search-001",
+      title: "Search Result",
+      artist: "Adapter Artist",
+      album: "Adapter Album",
+      durationMs: 210000,
+      source: "netease" as const
+    };
+    const resolvedTrack = {
+      ...candidateTrack,
+      audioUrl: "https://example.com/audio/netease-search-001.mp3"
+    };
+    const music = {
+      recommend: vi.fn().mockResolvedValue([queueTrack]),
+      search: vi.fn().mockResolvedValue([candidateTrack]),
+      resolve: vi.fn().mockResolvedValue(resolvedTrack)
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 8, 0, 0),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.music).toBe("ready");
+
+    const nowBeforeNext = await app.inject({ method: "GET", url: "/api/now" });
+    expect(nowBeforeNext.statusCode).toBe(200);
+    expect(nowBeforeNext.json().queue).toEqual([queueTrack]);
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "warm morning indie", limit: 3 });
+
+    const next = await app.inject({ method: "GET", url: "/api/next" });
+    expect(next.statusCode).toBe(200);
+    expect(next.json().track).toEqual(resolvedTrack);
+    expect(next.json().decision.say).toContain("Search Result");
+    expect(next.json().decision.reason).toContain("Search Result");
+    expect(next.json().decision.reason).not.toContain("当前没有真实 provider 输入");
+    expect(music.search).toHaveBeenCalledWith("warm morning indie");
+    expect(music.resolve).toHaveBeenCalledWith(candidateTrack);
+  });
+
+  it("shows daypart continuity through queue mood and recent play memory", async () => {
+    const firstTrack = {
+      id: "netease-track-001",
+      title: "Night Window",
+      artist: "Signal Room",
+      album: "Late Focus",
+      durationMs: 180000,
+      source: "netease" as const
+    };
+    const secondTrack = {
+      id: "netease-track-002",
+      title: "Afterglow Desk",
+      artist: "Signal Room",
+      album: "Late Focus",
+      durationMs: 190000,
+      source: "netease" as const
+    };
+    const music = {
+      recommend: vi.fn().mockResolvedValue([firstTrack]),
+      search: vi.fn().mockResolvedValueOnce([firstTrack]).mockResolvedValueOnce([secondTrack]),
+      resolve: vi.fn().mockImplementation(async (track) => ({
+        ...track,
+        audioUrl: `https://example.com/audio/${track.id}.mp3`
+      }))
+    };
+
+    app = await createRadioServer({
+      musicAdapterResult: {
+        music,
+        status: "ready"
+      },
+      now: () => new Date(2026, 3, 30, 21, 30, 0),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    await app.inject({ method: "GET", url: "/api/next" });
+    const secondNext = await app.inject({ method: "GET", url: "/api/next" });
+
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "ambient pop night", limit: 3 });
+    expect(secondNext.statusCode).toBe(200);
+    expect(secondNext.json().decision.reason).toContain("Night Window");
+    expect(secondNext.json().decision.say).toContain("Afterglow Desk");
   });
 });

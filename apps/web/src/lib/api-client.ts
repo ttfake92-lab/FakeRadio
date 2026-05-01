@@ -1,5 +1,6 @@
 import {
   ChatResponseSchema,
+  HealthResponseSchema,
   NextResponseSchema,
   NowResponseSchema,
   TasteResponseSchema,
@@ -23,6 +24,11 @@ export function buildStreamUrl(path: string) {
 export async function getNow() {
   const response = await fetch(buildApiUrl("/api/now"));
   return NowResponseSchema.parse(await response.json());
+}
+
+export async function getHealth() {
+  const response = await fetch(buildApiUrl("/api/health"));
+  return HealthResponseSchema.parse(await response.json());
 }
 
 export async function getNext() {
