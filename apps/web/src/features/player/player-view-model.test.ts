@@ -6,6 +6,8 @@ import {
   getNextEpisodeLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
+  getSourceKindLabel,
+  getStorySourceDescription,
   getStoryTypeLabel,
   getTrackSourceLabel,
   shouldStartCrossfade,
@@ -50,6 +52,19 @@ describe("player view model", () => {
     expect(getStoryTypeLabel("background")).toBe("创作背景");
     expect(getStoryTypeLabel("lyric-theme")).toBe("歌词主题");
     expect(getStoryTypeLabel("mood-reading")).toBe("氛围解读");
+  });
+
+  it("labels source kinds in Chinese", () => {
+    expect(getSourceKindLabel("lyric")).toBe("歌词");
+    expect(getSourceKindLabel("metadata")).toBe("元数据");
+    expect(getSourceKindLabel("web")).toBe("网页");
+    expect(getSourceKindLabel("mock")).toBe("Mock");
+  });
+
+  it("returns story source descriptions for non-background types", () => {
+    expect(getStorySourceDescription("background")).toBeNull();
+    expect(getStorySourceDescription("lyric-theme")).toBe("当前故事基于歌词主题解读，非真实创作背景");
+    expect(getStorySourceDescription("mood-reading")).toBe("当前故事基于听感解读，非真实创作背景");
   });
 
   it("clamps faded volume to [0, 1] range", () => {

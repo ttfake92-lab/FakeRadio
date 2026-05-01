@@ -27,6 +27,10 @@ describe("createRadioServer", () => {
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
     expect(health.json().service).toBe("FakeRadio");
+    expect(health.json().adapters.storySource).toEqual({
+      lyric: "mock",
+      metadata: "ready"
+    });
 
     const now = await app.inject({ method: "GET", url: "/api/now" });
     expect(now.statusCode).toBe(200);
@@ -137,6 +141,10 @@ describe("createRadioServer", () => {
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
     expect(health.json().adapters.music).toBe("ready");
+    expect(health.json().adapters.storySource).toEqual({
+      lyric: "mock",
+      metadata: "ready"
+    });
 
     const nowBeforeNext = await app.inject({ method: "GET", url: "/api/now" });
     expect(nowBeforeNext.statusCode).toBe(200);
@@ -544,6 +552,21 @@ describe("createRadioServer", () => {
     const body = response.json();
     expect(body.episode.story.type).toBe("mood-reading");
     expect(body.episode.sources[0].kind).toBe("mock");
+  });
+  it("reports story source provider status in health", async () => {
+    app = await createRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: createMockStorySourceAdapter()
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.storySource).toEqual({
+      lyric: "mock",
+      metadata: "mock"
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { EpisodeNextResponse, HealthResponse, NowResponse, StoryType, Track } from "@fakeradio/shared";
+import type { EpisodeNextResponse, HealthResponse, NowResponse, StorySourceNote, StoryType, Track } from "@fakeradio/shared";
 
 export function getPlaybackLabel(playback: NowResponse["playback"]) {
   const labels: Record<NowResponse["playback"], string> = {
@@ -121,6 +121,28 @@ export function getStoryTypeLabel(type: StoryType) {
   };
 
   return labels[type];
+}
+
+export function getSourceKindLabel(kind: StorySourceNote["kind"]) {
+  const labels: Record<StorySourceNote["kind"], string> = {
+    lyric: "歌词",
+    metadata: "元数据",
+    web: "网页",
+    mock: "Mock"
+  };
+
+  return labels[kind];
+}
+
+export function getStorySourceDescription(type: StoryType): string | null {
+  switch (type) {
+    case "background":
+      return null;
+    case "lyric-theme":
+      return "当前故事基于歌词主题解读，非真实创作背景";
+    case "mood-reading":
+      return "当前故事基于听感解读，非真实创作背景";
+  }
 }
 
 export function getNextEpisodeLabel(

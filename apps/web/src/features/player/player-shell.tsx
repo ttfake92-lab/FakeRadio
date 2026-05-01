@@ -11,6 +11,8 @@ import {
   getNextEpisodeLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
+  getSourceKindLabel,
+  getStorySourceDescription,
   getStoryTypeLabel,
   getTrackSourceLabel,
   shouldStartCrossfade,
@@ -518,7 +520,14 @@ export function PlayerShell() {
             </div>
             <div>
               <dt>故事类型</dt>
-              <dd>{episodeData !== null ? getStoryTypeLabel(episodeData.story.type) : "—"}</dd>
+              <dd>
+                {episodeData !== null ? getStoryTypeLabel(episodeData.story.type) : "—"}
+                {episodeData !== null && getStorySourceDescription(episodeData.story.type) !== null ? (
+                  <small style={{ display: "block", color: "var(--color-warning, #b08800)" }}>
+                    {getStorySourceDescription(episodeData.story.type)}
+                  </small>
+                ) : null}
+              </dd>
             </div>
             <div>
               <dt>Segue</dt>
@@ -574,12 +583,15 @@ export function PlayerShell() {
           {episodeData !== null ? (
             <>
               <h3>故事来源</h3>
+              {getStorySourceDescription(episodeData.story.type) !== null ? (
+                <p className="story-source-hint">{getStorySourceDescription(episodeData.story.type)}</p>
+              ) : null}
               <ul className="source-list">
                 {episodeData.sources.map((source, index) => (
                   <li key={index}>
                     <strong>{source.title}</strong>
                     <small>
-                      {source.kind === "lyric" ? "歌词" : source.kind === "metadata" ? "元数据" : source.kind === "web" ? "网页" : "Mock"}
+                      {getSourceKindLabel(source.kind)}
                       {source.confidence !== undefined ? ` (${Math.round(source.confidence * 100)}%)` : null}
                     </small>
                     <p>{source.content}</p>

@@ -128,7 +128,13 @@ export const TodayPlanResponseSchema = z.object({
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
   service: z.literal("FakeRadio"),
-  adapters: z.record(z.string(), z.enum(["mock", "ready", "disabled"])),
+  adapters: z.record(
+    z.string(),
+    z.union([
+      z.enum(["mock", "ready", "disabled"]),
+      z.record(z.string(), z.enum(["mock", "ready", "disabled"]))
+    ])
+  ),
   checkedAt: z.string().datetime()
 });
 
