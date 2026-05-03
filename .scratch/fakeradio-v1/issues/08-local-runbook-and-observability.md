@@ -1,6 +1,6 @@
 # 08 本地运行与可观测性规范
 
-Status: needs-triage
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -26,3 +26,7 @@ Type: AFK
 ## Comments
 
 - 这条 slice 主要提升可运维性和可解释性，对后续所有真实 provider 接入都有复用价值。
+- 2026-05-01 implementation update:
+  - `docs/local-runbook.md` 已记录当前维护机三进程模式：Web `3002`、Server `3001`、NeteaseCloudMusicApi `3310`。
+  - runbook 已补充 health/provider 状态、`/api/next` 连续两次换歌、TTS fallback 和浏览器音量越界的冒烟观察点。
+  - 等待人工验收与归档。

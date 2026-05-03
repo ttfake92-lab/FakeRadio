@@ -33,5 +33,6 @@ Type: AFK
 
 - 2026-05-01 implementation update:
   - `/api/next` 先用候选曲目，再用启动队列，最后单次回退 `createMockMusicAdapter()`。
+  - 候选选择会优先避开当前正在播放的曲目，避免真实 provider 对同一 query 稳定返回同一首时无限重复。
   - grounded `toolResults` 会追加 `music.fallback: used mock adapter due to empty results`。
   - 等待人工验收与归档。

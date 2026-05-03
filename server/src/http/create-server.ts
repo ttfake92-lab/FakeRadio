@@ -29,8 +29,11 @@ import {
   createPublicMetadataAdapter,
   createWebResearchAdapter
 } from "../adapters/index.js";
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createDeepSeekAdapter } from "../adapters/llm/deepseek-llm-adapter.js";
+import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
 import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
@@ -39,7 +42,17 @@ import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-schedule
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
 
+function loadSystemPrompt(): string {
+  try {
+    const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+    return readFileSync(resolve(projectRoot, "prompts/dj-persona.md"), "utf-8").trim();
+  } catch {
+    return "你是 FakeRadio DJ。";
+  }
+}
+
 type CreateRadioServerOptions = {
+  llmAdapter?: import("../adapters/types.js").LlmAdapter;
   musicAdapterResult?: Awaited<ReturnType<typeof createMusicAdapter>>;
   now?: () => Date;
   ttsAdapter?: TtsAdapter;
@@ -60,7 +73,17 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   });
   await app.register(websocket);
 
-  const llm = createMockLlmAdapter();
+  const llm = options.llmAdapter ??
+    (env.FAKERADIO_DEEPSEEK_API_KEY
+      ? createDeepSeekAdapter({
+          apiKey: env.FAKERADIO_DEEPSEEK_API_KEY,
+          model: env.FAKERADIO_DEEPSEEK_MODEL,
+          baseUrl: env.FAKERADIO_DEEPSEEK_BASE_URL
+        })
+      : createMockLlmAdapter());
+  const llmStatus = options.llmAdapter ? "ready" : env.FAKERADIO_DEEPSEEK_API_KEY ? "ready" : "mock";
+
+  const systemPrompt = loadSystemPrompt();
   const ttsCacheDir = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
   const { music, status: musicStatus } =
     options.musicAdapterResult ??
@@ -69,12 +92,24 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       baseUrl: env.FAKERADIO_NETEASE_API_BASE_URL,
       timeoutMs: env.FAKERADIO_NETEASE_TIMEOUT_MS
     }));
-  const tts =
-    options.ttsAdapter ??
-    createEdgeTtsAdapter({
+
+  let ttsStatus: "ready" | "mock" = "mock";
+  const tts = options.ttsAdapter ?? (() => {
+    if (env.FAKERADIO_TTS_PROVIDER === "mimo" && env.FAKERADIO_MIMO_API_KEY) {
+      ttsStatus = "ready";
+      return createMimoTtsAdapter({
+        apiKey: env.FAKERADIO_MIMO_API_KEY,
+        cacheDir: ttsCacheDir,
+        baseUrl: env.FAKERADIO_MIMO_BASE_URL,
+        voice: env.FAKERADIO_MIMO_TTS_VOICE
+      });
+    }
+    ttsStatus = "ready";
+    return createEdgeTtsAdapter({
       cacheDir: ttsCacheDir,
       voice: env.FAKERADIO_TTS_VOICE
     });
+  })();
   const weather = options.weatherAdapter ?? createMockWeatherAdapter();
   const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
   const devices = options.deviceAdapter ?? createMockDeviceAdapter();
@@ -136,9 +171,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       ok: true,
       service: "FakeRadio",
       adapters: {
-        llm: "mock",
+        llm: llmStatus,
         music: musicStatus,
-        tts: options.ttsAdapter ? "mock" : "ready",
+        tts: options.ttsAdapter ? "mock" : ttsStatus,
         weather: "mock",
         calendar: "mock",
         upnp: "mock",
@@ -161,7 +196,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     const draftDecision = await computeDjDecision({
       llm,
       now,
-      systemPrompt: "你是 FakeRadio DJ。",
+      systemPrompt,
       userTaste: userPreferences.taste,
       routines: userPreferences.routines,
       moodRules: userPreferences.moodRules,
@@ -196,7 +231,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     const decision = await computeDjDecision({
       llm,
       now,
-      systemPrompt: "你是 FakeRadio DJ。",
+      systemPrompt,
       userTaste: userPreferences.taste,
       routines: userPreferences.routines,
       moodRules: userPreferences.moodRules,
@@ -254,7 +289,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     const decision = await computeDjDecision({
       llm,
       now: new Date(),
-      systemPrompt: "你是 FakeRadio DJ。",
+      systemPrompt,
       userTaste: userPreferences.taste,
       routines: userPreferences.routines,
       moodRules: userPreferences.moodRules,
@@ -298,7 +333,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       return reply.status(404).send("Not found");
     }
 
-    return reply.type("audio/mpeg").send(createReadStream(filePath));
+    const mimeType = filePath.endsWith(".wav") ? "audio/wav" : "audio/mpeg";
+    return reply.type(mimeType).send(createReadStream(filePath));
   });
 
   app.get("/api/episode/next", async () => {

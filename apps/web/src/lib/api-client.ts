@@ -9,11 +9,16 @@ import {
 } from "@fakeradio/shared";
 
 export function getServerBaseUrl() {
-  return process.env.NEXT_PUBLIC_FAKERADIO_SERVER_URL ?? "http://localhost:3001";
+  return process.env.NEXT_PUBLIC_FAKERADIO_SERVER_URL ?? "http://localhost:3301";
 }
 
 export function buildApiUrl(path: string) {
   return new URL(path, getServerBaseUrl()).toString();
+}
+
+export function buildMediaUrl(url: string | undefined) {
+  if (url === undefined || url.length === 0) return undefined;
+  return new URL(url, getServerBaseUrl()).toString();
 }
 
 export function buildStreamUrl(path: string) {

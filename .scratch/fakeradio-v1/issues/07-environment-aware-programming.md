@@ -1,6 +1,6 @@
 # 07 环境感知编排
 
-Status: needs-triage
+Status: done
 Type: AFK
 
 ## Parent

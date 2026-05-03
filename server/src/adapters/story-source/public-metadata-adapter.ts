@@ -68,6 +68,9 @@ export function createPublicMetadataAdapter(options: CreatePublicMetadataAdapter
         }
 
         const best = recordings[0];
+        if (best === undefined) {
+          return [];
+        }
         const confidence = (best.score ?? 0) / 100;
 
         if (confidence < 0.5) {

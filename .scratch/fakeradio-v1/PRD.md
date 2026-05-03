@@ -78,6 +78,9 @@ FakeRadio 目前已经具备本地优先的基本闭环：PWA 播放器连接本
 - 当前真实音乐来源接入范围限定为 `search / recommend / resolve`，并通过 `musicStatus` 向 health 暴露运行状态。
 - 当前 `recommend` 的实现决策是“mood 转 query，再搜索”，而不是直接依赖个性化推荐或登录态接口。
 - 当前真实音乐来源已成功接到本地 server，health 能返回 `music: "ready"`，`/api/next` 能返回 `source: "netease"` 的真实曲目。
+- 当前 `/api/next` 会优先避开当前正在播放的曲目；当真实搜索和启动队列都为空时，会单次回退到 mock music adapter。
+- 当前 TTS provider 失败不会阻断 `/api/next`，server 会单次回退到 mock TTS，并保持 `/api/now` 中 DJ 文案与音频路径一致。
+- 当前播放器音量 fade 结果会限制在 `[0, 1]`，避免浏览器拒绝非法 `HTMLMediaElement.volume` 值。
 - 当前 DJ 文本决策仍然主要来自 mock LLM 语义，因此“真实曲目 grounding”应作为后续独立 slice 继续推进。
 - V1 的统一任务编排将通过本地 Markdown issue tracker 管理，目录落在 `.scratch/fakeradio-v1/`。
 

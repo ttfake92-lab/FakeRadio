@@ -33,5 +33,6 @@ Type: AFK
 
 - 2026-05-01 implementation update:
   - TTS 播放 promise rejected 时会恢复音乐音量。
+  - 音量 fade helper 会把计算结果限制在 `[0, 1]`，避免 `HTMLMediaElement.volume` 写入 `1.04187` 这类非法值。
   - 仍建议后续把 speech playback orchestration 抽成更完整的可测 helper，而不是只测 fade math。
   - 等待人工验收与归档。

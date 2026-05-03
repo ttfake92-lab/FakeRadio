@@ -17,10 +17,11 @@ FakeRadio 由四层组成：
 2. server 收集天气、日历、设备和近期播放记忆
 3. DJ brain 先生成一个 draft 选歌 query
 4. music adapter 用该 query 搜索候选曲目，并解析出最终可播放 `audioUrl`
-5. server 把真实曲目、provider 状态和当前队列再次注入 DJ brain，生成 grounded 文案
-6. TTS adapter 生成口播音频路径
-7. server 更新当前播放状态、追加播放记忆，并通过 `/stream` 广播
-8. 前端刷新当前曲目、队列、DJ 口播和诊断状态
+5. server 优先选择不同于当前播放的候选曲目；候选和队列都为空时，单次回退到 mock music adapter
+6. server 把真实曲目、provider 状态和当前队列再次注入 DJ brain，生成 grounded 文案
+7. TTS adapter 生成口播音频路径；真实 TTS 失败时回退到 mock TTS
+8. server 更新当前播放状态、追加播放记忆，并通过 `/stream` 广播
+9. 前端刷新当前曲目、队列、DJ 口播和诊断状态
 
 ## 真实音乐来源与回退
 
@@ -41,21 +42,28 @@ provider 选择由 `server/src/adapters/music/create-music-adapter.ts` 统一处
 - `/api/next` 的真实歌曲来源
 - 前端播放器的 provider 提示和回退警告
 
+`/api/next` 的曲目选择规则保持 provider 无关：
+
+- 如果搜索结果中存在非当前曲目，优先选择第一首非当前曲目。
+- 如果搜索结果只有当前曲目，才允许重复。
+- 如果搜索结果为空，尝试使用启动队列中的非当前曲目。
+- 如果搜索和队列都为空，使用 mock music adapter 作为单次兜底，保证本地电台主流程不断流。
+
 ## 连续性与 daypart
 
 FakeRadio 当前已经有最小连续性闭环：
 
-- `buildTodayPlan()` 生成当天的时段计划
+- `buildTodayPlan(playlists?)` 生成当天的时段计划；当传入 `user/playlists.json` 内容时，block 的 `label` 和 `moodHint` 取自对应 playlist 的 `name` 与首个 `seed`，未传入时回退到硬编码默认值
 - `getCurrentPlanBlock()` 选出当前时段 block
-- 初始队列按当前 block 的 `moodHint` 生成
+- 初始队列按当前 block 的 `moodHint`（即对应 playlist 的首个 seed）生成
 - 每次成功生成下一首后，server 追加 `playedTrack` 记忆
 - 后续 DJ 文案可引用上一首歌，形成连续过渡
 
-当前 daypart block 包括：
+当前 daypart block 与默认 playlist 对应关系：
 
-- `07:00` 早晨轻启动
-- `09:00` 写代码专注
-- `21:00` 晚间降速
+- `07:00` 早晨轻启动 → `morning-soft-start`
+- `09:00` 写代码专注 → `focus-coding`
+- `21:00` 晚间降速 → `night-downshift`
 
 ## 播放器观测面
 
@@ -67,3 +75,29 @@ PWA 目前不是纯展示壳，而是本地运行态面板。它直接展示：
 - 当前曲目与队列来源
 - mock 回退提示
 - 今日计划与最新 `/api/next` 决策结果
+
+播放器的音频管线当前遵循三条稳定性规则：
+
+- DJ 口播播放时可以 duck 当前音乐音量，但播放失败后必须恢复音乐音量。
+- story audio（`speechAudio`）播放失败时不自动回退到纯音乐，进入 `error` 状态并提示用户「口播加载失败」。
+- 写入 `HTMLMediaElement.volume` 前，计算结果必须限制在 `[0, 1]`，避免浏览器抛出越界错误。
+
+## Story Episode 链路
+
+FakeRadio 已经实现 story-first 电台播放闭环：
+
+1. 前端请求 `GET /api/episode/next`
+2. server 选择下一首曲目（复用现有 music adapter 搜索/队列/回退逻辑）
+3. `StorySourceAdapter` 收集歌词（网易云）、公开元数据（MusicBrainz）和网页研究（Brave Search）资料
+4. story composer 按证据门槛生成中文短故事（`background` / `lyric-theme` / `mood-reading`）
+5. TTS adapter 合成故事音频；真实 TTS 失败时，mock TTS 生成真实静音 WAV 文件回退
+6. 前端先播放 story
+7. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
+8. 音乐播放时后台预取下一集 episode
+9. 当前音乐结束后自动进入下一集 story，形成连续电台循环
+
+播放器支持 `idle → preparing → story → crossfade → music` 六状态机（含 `error`），crossfade 触发条件、音量 clamp 和并发控制均通过测试覆盖。
+
+`/api/health` 暴露 `storySource` 和 `webResearch` provider 状态。前端展示故事类型标签、资料来源说明和非创作背景免责提示。
+
+这条链路遵循现有边界：前端不直接访问资料 provider，所有外部资料源通过 server adapter 接入。

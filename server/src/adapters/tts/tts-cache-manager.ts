@@ -3,21 +3,23 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type TtsCacheManager = {
-  resolvePath(cacheKey: string): string;
-  exists(cacheKey: string): boolean;
-  save(cacheKey: string, buffer: Buffer): void;
+  resolvePath(cacheKey: string, ext?: string): string;
+  exists(cacheKey: string, ext?: string): boolean;
+  save(cacheKey: string, buffer: Buffer, ext?: string): void;
 };
 
 export function createTtsCacheManager(cacheDir: string): TtsCacheManager {
+  const ext = (cacheKey: string, override?: string) => `${cacheDir}/${cacheKey}.${override ?? "mp3"}`;
+
   return {
-    resolvePath(cacheKey) {
-      return `${cacheDir}/${cacheKey}.mp3`;
+    resolvePath(cacheKey, override) {
+      return ext(cacheKey, override);
     },
-    exists(cacheKey) {
-      return existsSync(`${cacheDir}/${cacheKey}.mp3`);
+    exists(cacheKey, override) {
+      return existsSync(ext(cacheKey, override));
     },
-    save(cacheKey, buffer) {
-      const path = `${cacheDir}/${cacheKey}.mp3`;
+    save(cacheKey, buffer, override) {
+      const path = ext(cacheKey, override);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, buffer);
     }

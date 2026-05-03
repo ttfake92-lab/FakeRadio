@@ -15,7 +15,9 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts", "packages/**/*.test.ts", "server/**/*.test.ts", "apps/**/*.test.ts"],
     env: {
-      FAKERADIO_BRAVE_API_KEY: ""
+      FAKERADIO_BRAVE_API_KEY: "",
+      FAKERADIO_DEEPSEEK_API_KEY: "",
+      FAKERADIO_MIMO_API_KEY: ""
     }
   }
 });

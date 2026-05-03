@@ -26,3 +26,7 @@ Type: AFK
 ## Comments
 
 - 这条 slice 的重点是“同一条口播链路的连续性”，而不是先接更多 TTS provider。
+- 2026-05-01 implementation update:
+  - 真实 TTS provider 运行时失败时，`/api/next` 会回退到 mock TTS。
+  - `/api/next` 与 `/api/now` 中的 DJ 文案和 TTS 音频路径保持一致。
+  - 已用 failing TTS adapter 覆盖 server 测试，`pnpm test` 通过。

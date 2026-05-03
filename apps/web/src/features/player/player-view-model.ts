@@ -1,5 +1,7 @@
 import type { EpisodeNextResponse, HealthResponse, NowResponse, StorySourceNote, StoryType, Track } from "@fakeradio/shared";
 
+export type AdapterStatus = "mock" | "ready" | "disabled";
+
 export function getPlaybackLabel(playback: NowResponse["playback"]) {
   const labels: Record<NowResponse["playback"], string> = {
     idle: "待机",
@@ -21,8 +23,8 @@ export function formatDuration(durationMs: number | undefined) {
   return `${minutes}:${seconds}`;
 }
 
-export function getProviderStatusLabel(status: HealthResponse["adapters"]["music"]) {
-  const labels: Record<HealthResponse["adapters"]["music"], string> = {
+export function getProviderStatusLabel(status: AdapterStatus) {
+  const labels: Record<AdapterStatus, string> = {
     ready: "真实来源已连接",
     mock: "已回退到 mock",
     disabled: "已禁用"
@@ -41,7 +43,7 @@ export function getTrackSourceLabel(source: Track["source"]) {
   return labels[source];
 }
 
-export function shouldWarnOnMockMusic(status: HealthResponse["adapters"]["music"]) {
+export function shouldWarnOnMockMusic(status: AdapterStatus) {
   return status === "mock";
 }
 
@@ -99,6 +101,17 @@ export function transitEpisodeState(
     );
   }
   return next;
+}
+
+export function transitEpisodeStateSafely(
+  current: EpisodePlaybackState,
+  event: EpisodeEvent
+): EpisodePlaybackState {
+  try {
+    return transitEpisodeState(current, event);
+  } catch {
+    return current;
+  }
 }
 
 export function getEpisodeStateLabel(state: EpisodePlaybackState): string {

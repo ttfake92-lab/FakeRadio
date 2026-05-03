@@ -11,13 +11,8 @@ pnpm dev
 
 默认端口：
 
-- Web: `http://localhost:3000`
-- Server: `http://localhost:3001`
-
-如果你需要把服务放进持久会话，当前常用做法是：
-
-- Web: `http://127.0.0.1:3002`
-- Server: `http://127.0.0.1:3001`
+- Web: `http://localhost:3302`
+- Server: `http://localhost:3301`
 
 ## 真实音乐来源
 
@@ -35,17 +30,46 @@ FakeRadio 当前支持两种音乐来源：
 运行时可以通过下面的接口确认当前来源：
 
 ```bash
-curl http://127.0.0.1:3001/api/health
+curl http://127.0.0.1:3301/api/health
 ```
 
 当返回 `adapters.music: "ready"` 时，表示当前已经走到真实网易云来源；返回 `"mock"` 时，表示当前处于回退路径。
+
+## 真实 LLM 与 TTS
+
+FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
+
+| 组件 | Provider | 环境变量 |
+|------|----------|----------|
+| LLM | DeepSeek（默认，需 API key） | `FAKERADIO_DEEPSEEK_API_KEY` |
+| LLM | Mock（无 key 时自动回退） | — |
+| TTS | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` + `FAKERADIO_MIMO_API_KEY` |
+| TTS | Edge TTS（默认） | `FAKERADIO_TTS_PROVIDER=edge` |
+
+所有配置统一在项目根目录 `.env` 文件中。详见 `docs/adapters.md`。
 
 ## 当前已实现
 
 - 前端展示当前曲目、队列、DJ 口播、今日计划和 provider 状态。
 - `/api/next` 先生成选歌 query，再用真实 music adapter 搜索并回填 grounded DJ 文案。
+- `/api/next` 会尽量避开当前正在播放的曲目；当真实搜索结果为空时会单次回退到 mock 曲目。
+- TTS 合成失败时会回退到 mock TTS，不阻断“生成下一首”的主流程。
 - 初始队列会按当前 daypart 的 `moodHint` 生成，不再固定使用单一 mood。
 - server 会记录近期播放历史，后续 DJ 文案可引用上一首歌，形成连续感。
+- 前端音量淡入淡出会限制在浏览器允许的 `[0, 1]` 区间内。
+- **用户偏好接入**：server 启动时读取 `user/taste.md`、`user/routines.md`、`user/mood-rules.md` 和 `user/playlists.json`，注入 DJ 决策与选歌流程。
+- **播放稳定性**：story audio 播放失败时不再自动回退到纯音乐，而是进入错误状态并提示用户。
+
+## Story Episode（已实现）
+
+FakeRadio 已实现 story-first 电台播放闭环：
+
+- 用户点击播放后，FakeRadio 先基于真实资料生成音乐故事并口播（`background` > `lyric-theme` > `mood-reading` 三级证据门槛）
+- 口播快结束时音乐自动渐入（crossfade），播放过程中后台预取下一集
+- 故事资料来自网易云歌词、MusicBrainz 公开元数据和 Brave Search 网页研究
+- 故事类型和资料来源在前端可见，非创作背景时有免责提示
+- TTS 失败时自动回退到真实可播放的静音音频，不阻断电台循环
+- 详细规划见 `.scratch/fakeradio-story-episode/PRD.md`
 
 ## 结构
 

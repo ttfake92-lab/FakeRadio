@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildApiUrl, buildStreamUrl, getHealth, getServerBaseUrl } from "./api-client";
+import { buildApiUrl, buildMediaUrl, buildStreamUrl, getHealth, getServerBaseUrl } from "./api-client";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -8,18 +8,28 @@ afterEach(() => {
 
 describe("api-client", () => {
   it("uses localhost server by default", () => {
-    expect(getServerBaseUrl()).toBe("http://localhost:3001");
-    expect(buildApiUrl("/api/now")).toBe("http://localhost:3001/api/now");
+    expect(getServerBaseUrl()).toBe("http://localhost:3301");
+    expect(buildApiUrl("/api/now")).toBe("http://localhost:3301/api/now");
   });
 
   it("builds websocket stream url from the default server", () => {
-    expect(buildStreamUrl("/stream")).toBe("ws://localhost:3001/stream");
+    expect(buildStreamUrl("/stream")).toBe("ws://localhost:3301/stream");
   });
 
   it("builds secure websocket stream url from https server", () => {
     vi.stubEnv("NEXT_PUBLIC_FAKERADIO_SERVER_URL", "https://radio.local:3443");
 
     expect(buildStreamUrl("/stream")).toBe("wss://radio.local:3443/stream");
+  });
+
+  it("resolves server-relative media urls against the radio server", () => {
+    vi.stubEnv("NEXT_PUBLIC_FAKERADIO_SERVER_URL", "http://127.0.0.1:3301");
+
+    expect(buildMediaUrl("/cache/tts/story.mp3")).toBe("http://127.0.0.1:3301/cache/tts/story.mp3");
+  });
+
+  it("leaves absolute media urls unchanged", () => {
+    expect(buildMediaUrl("https://music.example/track.mp3")).toBe("https://music.example/track.mp3");
   });
 
   it("loads health payload from local server", async () => {

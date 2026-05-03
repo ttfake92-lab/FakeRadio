@@ -111,23 +111,92 @@ FakeRadio 目前按四层理解：
 - `FAKERADIO_PROVIDER_MODE=auto` 时，server 启动阶段优先探测本地网易云服务；不可用时回退到 mock。
 - `/api/health` 会暴露当前 `adapters.music` 状态，前端也会直接展示该状态。
 
+### 真实 LLM
+
+- `LlmAdapter` 已支持 `mock` 和 `DeepSeek`（OpenAI 兼容 API）。
+- 有 `FAKERADIO_DEEPSEEK_API_KEY` 时自动使用 DeepSeek，否则回退到 mock。
+- DeepSeek adapter 使用 `max_tokens: 4096`（推理模型需要额外 token 完成 reasoning），system prompt 追加 DjDecision schema 描述。
+- `/api/health` 的 `adapters.llm` 反映当前状态（`ready` / `mock`）。
+
+### 真实 TTS
+
+- `TtsAdapter` 已支持 `edge`（Edge TTS）和 `mimo`（MiMo V2.5 TTS）。
+- 通过 `FAKERADIO_TTS_PROVIDER` 切换，`FAKERADIO_MIMO_API_KEY` 为必需 key。
+- MiMo TTS 使用 provider-aware 缓存键（`hash(text, provider, model, voice)`），防止跨 provider 缓存碰撞。
+- 音频格式：MiMo 返回 WAV（16-bit PCM 24kHz），缓存文件扩展名与格式一致。
+- TTS 失败时回退到 mock TTS（生成真实静音 WAV），不阻断主流程。
+
 ### Grounded DJ 决策
 
 - `/api/next` 当前采用两段式流程：先生成选歌 query，再在拿到真实曲目后重新生成 grounded DJ 文案。
 - grounded 阶段会把 `music.provider`、`music.selectedTrack` 和当前队列信息注入到 `toolResults`。
 - DJ 文案必须围绕真实选中的曲目生成，不能再假装 provider 结果不存在。
+- `/api/next` 选择候选曲目时会尽量避开当前正在播放的曲目；如果真实搜索和启动队列都没有可用曲目，会用 mock music adapter 做单次兜底。
+
+### 用户偏好接入
+
+- server 启动时读取 `user/taste.md`、`user/routines.md`、`user/mood-rules.md`，替换此前硬编码在 `create-server.ts` 中的默认字符串，注入 DJ brain 的 `computeDjDecision`。
+- `user/playlists.json` 中的歌单定义用于动态生成 `buildTodayPlan` 的时段 block，`moodHint` 取自对应 playlist 的首个 `seed`。
+- 选歌时的 `music.search` 和 `music.recommend` fallback 均使用当前时段 block 的 `moodHint`，不再固定使用 `"warm morning indie"`。
+- 文件缺失或解析失败时，各模块优雅回退到与旧行为一致的默认值。
 
 ### 连续性与节律
 
-- server 启动时会先生成当日电台计划，并用当前时段 block 的 `moodHint` 初始化队列。
+- `buildTodayPlan(playlists?)` 生成当天的时段计划；传入 playlists 时动态构建 block（`moodHint` 取自对应 playlist 的首个 `seed`），未传入时使用硬编码默认值。
+- `getCurrentPlanBlock()` 选出当前时段 block。
+- 初始队列按当前 block 的 `moodHint` 生成。
 - `/api/next` 会读取近期播放记忆，并在生成成功后追加最新 `playedTrack`。
 - 当前 mock DJ 已可引用上一首歌，形成“不是每次都重新开始”的连续解释。
+
+### 播放与口播稳定性
+
+- TTS provider 出错时，server 会回退到 mock TTS 结果，避免 Edge TTS 等真实 provider 的运行时失败阻断 `/api/next`。
+- 播放器收到 DJ 口播时会临时降低音乐音量；TTS 播放失败或淡入淡出计算越界时，前端必须把最终音量限制在浏览器允许的 `[0, 1]` 范围内。
+- story audio（`speechAudio`）播放失败时，前端不再自动回退到纯音乐，而是进入 `error` 状态并提示用户「口播加载失败」。
 
 ### 播放器诊断
 
 - 播放器状态条会显示播放状态、stream 状态、music provider 状态和同步状态。
 - 当前曲目与队列会显示来源标签。
 - 当 music provider 回退到 mock 时，前端会给出显式提示。
+- 前端展示 story type 标签、source kind 标签、资料来源数量和降级提示。
+
+### Story Episode 播放闭环
+
+FakeRadio 已实现 story-first 电台播放闭环。核心新增术语：
+
+#### RadioEpisode
+
+一个完整电台节目单元，绑定下一首曲目、故事文案、故事 TTS、资料来源和播放参数。详见 `GET /api/episode/next` 和 `packages/shared` 中的 schema。
+
+#### StorySourceAdapter
+
+故事资料来源边界。已接入：
+- 网易云歌词（`kind: “lyric”`）
+- MusicBrainz 公开元数据（`kind: “metadata”`）
+- Brave Search 网页研究（`kind: “web”`，需 API key）
+- Mock 兜底（`kind: “mock”`）
+
+#### StoryType
+
+故事真实性等级（证据门槛从高到低）：
+- `background`：有 metadata/web source（confidence >= 0.5）支持的创作背景
+- `lyric-theme`：有歌词支撑的主题解读
+- `mood-reading`：资料不足时的情绪解读
+
+没有来源支撑时，不允许把 `mood-reading` 伪装成真实创作幕后。
+
+#### 前端状态机
+
+Playback: `idle → preparing → story → crossfade → music`（含 `error`），支持自动预取下一集形成连续循环。
+
+#### 播放参数
+
+`playback.crossfadeStartOffsetMs`（默认 3000）与 `playback.musicStartVolume`（默认 0.2），控制 story 快结束时音乐渐入。
+
+规划入口：
+- `.scratch/fakeradio-story-episode/PRD.md`
+- `.scratch/fakeradio-story-episode/issues/`
 
 ## 必须保持的约束
 
