@@ -1,3 +1,4 @@
+import { formatRadioDate } from "../utils/time.js";
 import type { TodayPlanResponse } from "@fakeradio/shared";
 
 type PlaylistInput = {
@@ -6,11 +7,14 @@ type PlaylistInput = {
 };
 
 export function buildTodayPlan(now: Date, playlists?: PlaylistInput[]): TodayPlanResponse {
-  const date = now.toLocaleDateString("en-CA");
+  const date = formatRadioDate(now);
 
   const defaultBlocks = [
+    { at: "00:00", label: "午夜静谧", moodHint: "ambient sleep" },
     { at: "07:00", label: "早晨轻启动", moodHint: "warm morning indie" },
     { at: "09:00", label: "写代码专注", moodHint: "instrumental focus" },
+    { at: "12:00", label: "午间轻松", moodHint: "light acoustic" },
+    { at: "14:00", label: "下午专注", moodHint: "deep focus electronic" },
     { at: "21:00", label: "晚间降速", moodHint: "ambient pop night" }
   ];
 
@@ -18,7 +22,7 @@ export function buildTodayPlan(now: Date, playlists?: PlaylistInput[]): TodayPla
     return { date, blocks: defaultBlocks };
   }
 
-  const timeSlots = ["07:00", "09:00", "21:00"];
+  const timeSlots = ["00:00", "07:00", "09:00", "12:00", "14:00", "21:00"];
   const blocks = playlists.map((playlist, index) => ({
     at: timeSlots[index] ?? defaultBlocks[index]?.at ?? "07:00",
     label: playlist.name,

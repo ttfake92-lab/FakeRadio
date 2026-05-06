@@ -1,3 +1,4 @@
+import { formatRadioDateTime } from "../utils/time.js";
 import type { ContextFragment } from "@fakeradio/shared";
 import type { CalendarItem, PlaybackDevice, WeatherSnapshot } from "../adapters/types.js";
 
@@ -40,7 +41,7 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
       id: "environment",
       label: "环境注入",
       content: [
-        `now: ${input.now.toISOString()}`,
+        `now: ${formatRadioDateTime(input.now)}`,
         `weather: ${formatWeather(input.environment.weather)}`,
         `calendar: ${formatCalendar(input.environment.calendar)}`,
         `devices: ${formatDevices(input.environment.devices)}`
