@@ -2,7 +2,8 @@
 
 ## 背景
 
-2026-07-01 对 FakeRadio 全仓库进行了一次系统性代码审查，覆盖 server、web、shared 三个包。审查结果整理为 13 个可执行 issue。
+- **第一次审查（2026-07-01）**：全仓库系统性审查，覆盖 server、web、shared 三个包，整理为 13 个 issue（#01-13）。
+- **第二次审查（2026-05-04）**：聚焦最近 5 个 commit（DeepSeek/MiMo 集成、用户偏好、Brave Search 适配器），新增 issue #14-24。
 
 ## 审查范围
 
@@ -55,13 +56,36 @@
 | 12 | 为 buildContextWindow 补充独立单元测试 | test |
 | 13 | 补充 scheduler 全时段覆盖 | feature |
 
+**第二次审查新增（2026-05-04）— 来自最近 5 个 commit**
+
+| Issue | 标题 | 类型 | 来源 |
+|-------|------|------|------|
+| 14 | Stream Bus broadcast 竞态条件 | bug | 第二次审查前已存在 |
+| 15 | queue array 使用 const 声明 | bug | 同上 |
+| 16 | CORS 允许任意 localhost 端口 | security | 同上 |
+| 17 | 外部 HTTP 调用无重试逻辑 | bug | 同上 |
+| 18 | API 响应缺少 Zod 验证 | bug | 同上 |
+| 19 | 缺失响应压缩与连接超时 | performance | 同上 |
+| 20 | 修复 health webResearch 运算符优先级 | bug | 2026-05-04 |
+| 21 | 修复 mock TTS WAV-as-MP3 MIME 不匹配 | bug | 2026-05-04 |
+| 22 | 修复 /api/plan/today 未传 playlists | bug | 2026-05-04 |
+| 23 | 为 DeepSeek 和 MiMo adapter 添加请求超时 | bug | 2026-05-04 |
+| 24 | Web research 结果按 episode 缓存 | bug | 2026-05-04 |
+
 ## Issue 目录
 
-所有 issue 位于 `.scratch/code-review/issues/`，编号 01–13。
+所有 issue 位于 `.scratch/code-review/issues/`，编号 01–25。
+
+**第三次审查新增（2026-05-06）**
+
+| Issue | 标题 | 类型 | 来源 |
+|-------|------|------|------|
+| 25 | 统一 Asia/Shanghai 时区契约，修复日期显示和归档偏移 | bug | 用户反馈“时区显示还是不对” |
 
 ## 执行建议
 
 - Issue 01 和 02 互相独立，可以并行执行。
 - Issue 03 应在 01 之前完成，因为它修改的是 adapter 层，与 01 的拆分范围不重叠。
 - Issue 10 修改 shared 包，可能影响 server 和 web，建议单独执行。
+- **第二次审查的紧急 issue（#20-24）建议优先处理**：#23 超时缺失会导致真实 API 挂起令服务不可用，#22 和 #21 是数据/行为不一致问题。
 - 其余 issue 互相独立，可以按优先级顺序执行。
