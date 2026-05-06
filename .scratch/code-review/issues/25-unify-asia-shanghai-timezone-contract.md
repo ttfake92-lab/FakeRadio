@@ -24,13 +24,14 @@ FakeRadio 当前多个地方依赖进程本地时区或直接使用 UTC ISO 日�
 
 ## Acceptance criteria
 
-- [ ] 新增共享的 server-side 时间工具，例如 `formatRadioDate(date, timeZone)` 和 `formatRadioDateTime(date, timeZone)`
+- [ ] 新增共享的 server-side 时间工具，例如 `formatRadioDate(date, timeZone)`、`formatRadioDateTime(date, timeZone)` 和 `getRadioMinutesOfDay(date, timeZone)`
 - [ ] 默认 time zone 明确为 `Asia/Shanghai`，不要依赖进程 `TZ`
 - [ ] `buildTodayPlan()` 在 `TZ=UTC` 运行时，对 `2026-05-01T00:30:00+08:00` 仍返回 `date: "2026-05-01"`
+- [ ] `getCurrentPlanBlock()` 用 `getRadioMinutesOfDay()` 替换原始的 `getHours()`，保证当前时段选择正确
 - [ ] session repository 在同一时间点写入/读取 `2026-05-01.json`，不是 `2026-04-30.json`
 - [ ] export pipeline 在同一时间点生成 `exports/2026-05-01/` 和 `fakeradio-2026-05-01.zip`
 - [ ] LLM context 中的 `now` 同时包含本地时间和时区标识，例如 `2026-05-01 00:30 Asia/Shanghai`
-- [ ] 测试覆盖 `TZ=UTC` 环境下的 Asia/Shanghai 边界时间
+- [ ] 测试覆盖 `TZ=UTC` 环境下的 Asia/Shanghai 边界时间，包括 `getCurrentPlanBlock` 在 UTC 时区下的时段判断
 
 ## Blocked by
 

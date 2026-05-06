@@ -1,4 +1,4 @@
-import { formatRadioDate } from "../utils/time.js";
+import { formatRadioDate, getRadioMinutesOfDay } from "../utils/time.js";
 import type { TodayPlanResponse } from "@fakeradio/shared";
 
 type PlaylistInput = {
@@ -33,7 +33,7 @@ export function buildTodayPlan(now: Date, playlists?: PlaylistInput[]): TodayPla
 }
 
 export function getCurrentPlanBlock(plan: TodayPlanResponse, now: Date) {
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const currentMinutes = getRadioMinutesOfDay(now);
   let selected = plan.blocks[0] ?? null;
 
   for (const block of plan.blocks) {

@@ -11,3 +11,9 @@ export function formatRadioDateTime(date: Date, timeZone: string = DEFAULT_TIMEZ
   const timePart = date.toLocaleTimeString("en-GB", { timeZone, hour: '2-digit', minute: '2-digit' });
   return `${datePart} ${timePart} ${timeZone}`;
 }
+
+export function getRadioMinutesOfDay(date: Date, timeZone: string = DEFAULT_TIMEZONE): number {
+  const timeStr = date.toLocaleTimeString("en-GB", { timeZone, hour: '2-digit', minute: '2-digit' });
+  const [hours, minutes] = timeStr.split(":");
+  return Number(hours ?? 0) * 60 + Number(minutes ?? 0);
+}
