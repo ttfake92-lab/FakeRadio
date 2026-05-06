@@ -34,6 +34,7 @@ type SongUrlResponse = {
 
 export type CreateNeteaseHttpMusicAdapterOptions = Partial<CreateNeteaseHttpClientOptions> & {
   fetchJson?: NeteaseFetchJson;
+  audioLevel?: string;
 };
 
 const DEFAULT_SEARCH_LIMIT = 10;
@@ -41,6 +42,7 @@ const DEFAULT_SEARCH_LIMIT = 10;
 export function createNeteaseHttpMusicAdapter(
   options: CreateNeteaseHttpMusicAdapterOptions = {}
 ): MusicAdapter {
+  const { audioLevel } = options;
   const fetchJson =
     options.fetchJson ??
     createNeteaseHttpClient({
@@ -52,9 +54,12 @@ export function createNeteaseHttpMusicAdapter(
   return {
     async search(query) {
       const response = (await fetchJson("/cloudsearch", {
-        keywords: query,
-        limit: DEFAULT_SEARCH_LIMIT,
-        type: 1
+        method: "POST",
+        query: {
+          keywords: query,
+          limit: DEFAULT_SEARCH_LIMIT,
+          type: 1
+        }
       })) as CloudSearchResponse;
 
       return (response.result?.songs ?? []).map(mapSongToTrack);
@@ -66,8 +71,29 @@ export function createNeteaseHttpMusicAdapter(
     },
 
     async resolve(track) {
+      if (audioLevel) {
+        try {
+          const preferredResponse = (await fetchJson("/song/url/v1", {
+            method: "POST",
+            query: {
+              id: track.id,
+              level: audioLevel
+            }
+          })) as SongUrlResponse;
+          const url = preferredResponse.data?.[0]?.url;
+          if (url) {
+            return { ...track, audioUrl: url };
+          }
+        } catch {
+          // ignore and fallback
+        }
+      }
+
       const response = (await fetchJson("/song/url", {
-        id: track.id
+        method: "POST",
+        query: {
+          id: track.id
+        }
       })) as SongUrlResponse;
       const audioUrl = response.data?.[0]?.url;
 
