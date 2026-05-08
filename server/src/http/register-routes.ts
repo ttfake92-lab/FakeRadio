@@ -15,6 +15,7 @@ import {
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { proxyAndRecord } from "../audio/audio-recorder.js";
@@ -38,6 +39,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     publicMetadataAdapter, webResearchAdapter, memory, state, systemPrompt,
     userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs
   };
+
+  let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   app.get("/api/health", async () =>
     HealthResponseSchema.parse({
@@ -88,6 +91,10 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       const newQueue = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 3 });
       state.setQueue(newQueue);
       stream.broadcast({ type: "queue-updated", payload: { queue: newQueue } });
+      if (snapshotTimer) clearTimeout(snapshotTimer);
+      snapshotTimer = setTimeout(async () => {
+        await stateRepo.snapshotQueue(newQueue, null);
+      }, 500);
     }
 
     const { track, decision, isFallback, candidates, candidateSource, rerankSource } = await resolveNextTrackAndDecision(episodeRunnerDeps);
@@ -98,7 +105,12 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.removeFromQueue(track.id);
     if (state.queueSize() < 2) {
       const refill = await deps.music.recommend({ mood: currentMoodHint, limit: 3 });
-      state.setQueue([...state.getQueue(), ...refill]);
+      const queue = [...state.getQueue(), ...refill];
+      state.setQueue(queue);
+      if (snapshotTimer) clearTimeout(snapshotTimer);
+      snapshotTimer = setTimeout(async () => {
+        await stateRepo.snapshotQueue(queue, null);
+      }, 500);
     }
     state.setDj({
       say: decision.say,
@@ -188,6 +200,15 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
     state.rememberSelectedTrack(track);
+    await stateRepo.recordPlayedTrack({
+      id: randomUUID(),
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album ?? null,
+      source: track.source,
+      playedAt: new Date().toISOString()
+    });
 
     const sources = await gatherEpisodeSources(
       storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
@@ -201,6 +222,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
       fallbackReason
     };
+    await stateRepo.appendDjMessage({ text: decision.say, trackId: track.id, storyType: storyType });
 
     return EpisodeNextResponseSchema.parse({ episode });
   });
