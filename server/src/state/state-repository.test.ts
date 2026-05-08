@@ -125,13 +125,17 @@ describe("createStateRepository", () => {
   // --- snapshotQueue & getLatestQueueSnapshot ---
 
   it("snapshots the queue and retrieves it", async () => {
-    const trackIds = ["track-1", "track-2", "track-3"];
+    const tracks = [
+      { id: "track-1", title: "Track 1", artist: "Artist", source: "mock" as const },
+      { id: "track-2", title: "Track 2", artist: "Artist", source: "mock" as const },
+      { id: "track-3", title: "Track 3", artist: "Artist", source: "mock" as const }
+    ];
     const blockAt = "2026-05-08T12:00:00Z";
 
-    const snapshot = await repo.snapshotQueue(trackIds, blockAt);
+    const snapshot = await repo.snapshotQueue(tracks, blockAt);
 
     expect(snapshot.id).toBeDefined();
-    expect(snapshot.trackIds).toEqual(trackIds);
+    expect(snapshot.trackIds).toEqual(tracks);
     expect(snapshot.blockAt).toBe(blockAt);
     expect(snapshot.createdAt).toBeDefined();
   });
@@ -142,15 +146,22 @@ describe("createStateRepository", () => {
   });
 
   it("getLatestQueueSnapshot returns the most recent snapshot", async () => {
-    await repo.snapshotQueue(["a", "b"], null);
+    await repo.snapshotQueue([
+      { id: "a", title: "A", artist: "X", source: "mock" as const },
+      { id: "b", title: "B", artist: "X", source: "mock" as const }
+    ], null);
     await new Promise(r => setTimeout(r, 10)); // small delay to ensure different timestamps
-    const latest = await repo.snapshotQueue(["x", "y", "z"], "2026-05-08T12:00:00Z");
+    const latest = await repo.snapshotQueue([
+      { id: "x", title: "X", artist: "Y", source: "mock" as const },
+      { id: "y", title: "Y", artist: "Y", source: "mock" as const },
+      { id: "z", title: "Z", artist: "Y", source: "mock" as const }
+    ], "2026-05-08T12:00:00Z");
 
     const result = await repo.getLatestQueueSnapshot();
 
     expect(result).not.toBeNull();
     expect(result!.id).toBe(latest.id);
-    expect(result!.trackIds).toEqual(["x", "y", "z"]);
+    expect(result!.trackIds).toEqual(latest.trackIds);
   });
 
   // --- upsertPref & getPref ---
@@ -189,7 +200,10 @@ describe("createStateRepository", () => {
     // Add some data
     await repo.recordPlayedTrack({ id: "pt-1", trackId: "t1", title: "T1", artist: "A", album: null, source: "mock", playedAt: new Date().toISOString() });
     await repo.appendDjMessage({ text: "DJ hello", trackId: null, storyType: null });
-    await repo.snapshotQueue(["q1", "q2"], null);
+    await repo.snapshotQueue([
+      { id: "q1", title: "Q1", artist: "A", source: "mock" as const },
+      { id: "q2", title: "Q2", artist: "A", source: "mock" as const }
+    ], null);
     await repo.upsertPref("key1", "value1");
 
     const state = await repo.getStartupState();
@@ -197,7 +211,9 @@ describe("createStateRepository", () => {
     expect(state.lastPlayedTracks.length).toBeGreaterThanOrEqual(1);
     expect(state.todayDjMessages.length).toBeGreaterThanOrEqual(1);
     expect(state.lastQueueSnapshot).not.toBeNull();
-    expect(state.lastQueueSnapshot!.trackIds).toEqual(["q1", "q2"]);
+    expect(state.lastQueueSnapshot!.trackIds).toHaveLength(2);
+    expect(state.lastQueueSnapshot!.trackIds[0]!.id).toBe("q1");
+    expect(state.lastQueueSnapshot!.trackIds[1]!.id).toBe("q2");
     expect(state.latestPrefs.length).toBeGreaterThanOrEqual(1);
     expect(state.latestPrefs.find(p => p.key === "key1")).toBeDefined();
   });

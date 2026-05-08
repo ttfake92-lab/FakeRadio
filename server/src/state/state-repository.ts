@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type { Track } from "@fakeradio/shared";
+import { TrackSchema } from "@fakeradio/shared";
 
 export type PlayedTrack = {
   id: string;
@@ -21,7 +22,7 @@ export type DjMessage = {
 
 export type QueueSnapshot = {
   id: string;
-  trackIds: string[];
+  trackIds: Track[];
   blockAt: string | null;
   createdAt: string;
 };
@@ -38,7 +39,7 @@ export type StateRepository = {
   getRecentlyPlayed(limit: number, since?: string): Promise<PlayedTrack[]>;
   appendDjMessage(msg: Omit<DjMessage, "id" | "createdAt">): Promise<DjMessage>;
   getDjMessagesToday(): Promise<DjMessage[]>;
-  snapshotQueue(trackIds: string[], blockAt: string | null): Promise<QueueSnapshot>;
+  snapshotQueue(tracks: Track[], blockAt: string | null): Promise<QueueSnapshot>;
   getLatestQueueSnapshot(): Promise<QueueSnapshot | null>;
   upsertPref(key: string, value: unknown): Promise<void>;
   getPref<T>(key: string): Promise<T | null>;
@@ -151,19 +152,19 @@ export function createStateRepository(dbPath: string): StateRepository {
       ).then(rows => rows.map(mapRowToDjMessage));
     },
 
-    snapshotQueue(trackIds: string[], blockAt: string | null): Promise<QueueSnapshot> {
+    snapshotQueue(tracks: Track[], blockAt: string | null): Promise<QueueSnapshot> {
       const id = crypto.randomUUID();
       const createdAt = new Date().toISOString();
-      stmtSnapshotQueue.run({ id, trackIds: JSON.stringify(trackIds), blockAt, createdAt });
-      return Promise.resolve({ id, trackIds, blockAt, createdAt });
+      stmtSnapshotQueue.run({ id, trackIds: JSON.stringify(tracks), blockAt, createdAt });
+      return Promise.resolve({ id, trackIds: tracks, blockAt, createdAt });
     },
 
     getLatestQueueSnapshot(): Promise<QueueSnapshot | null> {
       const row = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
-      return Promise.resolve(row
-        ? { id: row.id as string, trackIds: JSON.parse(row.track_ids as string), blockAt: row.block_at as string | null, createdAt: row.created_at as string }
-        : null
-      );
+      if (!row) return Promise.resolve(null);
+      const parsed = JSON.parse(row.track_ids as string);
+      const trackIds = Array.isArray(parsed) ? parsed.map((t: unknown) => TrackSchema.parse(t)) : [];
+      return Promise.resolve({ id: row.id as string, trackIds, blockAt: row.block_at as string | null, createdAt: row.created_at as string });
     },
 
     upsertPref(key: string, value: unknown): Promise<void> {
@@ -188,12 +189,17 @@ export function createStateRepository(dbPath: string): StateRepository {
       const lastQueueSnapshotRow = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
       const latestPrefsRows = db.prepare(`SELECT * FROM prefs_updates ORDER BY updated_at DESC LIMIT 100`).all() as unknown[];
 
+      let lastQueueSnapshot: QueueSnapshot | null = null;
+      if (lastQueueSnapshotRow) {
+        const parsed = JSON.parse(lastQueueSnapshotRow.track_ids as string);
+        const trackIds = Array.isArray(parsed) ? parsed.map((t: unknown) => TrackSchema.parse(t)) : [];
+        lastQueueSnapshot = { id: lastQueueSnapshotRow.id as string, trackIds, blockAt: lastQueueSnapshotRow.block_at as string | null, createdAt: lastQueueSnapshotRow.created_at as string };
+      }
+
       return Promise.resolve({
         lastPlayedTracks: lastPlayedTracks.map(mapRowToPlayedTrack),
         todayDjMessages: todayDjMessages.map(mapRowToDjMessage),
-        lastQueueSnapshot: lastQueueSnapshotRow
-          ? { id: lastQueueSnapshotRow.id as string, trackIds: JSON.parse(lastQueueSnapshotRow.track_ids as string), blockAt: lastQueueSnapshotRow.block_at as string | null, createdAt: lastQueueSnapshotRow.created_at as string }
-          : null,
+        lastQueueSnapshot,
         latestPrefs: latestPrefsRows.map(mapRowToPrefsUpdate)
       });
     },

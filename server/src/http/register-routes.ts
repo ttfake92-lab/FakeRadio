@@ -27,7 +27,7 @@ import type { RegisterRoutesDeps } from "./types.js";
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
-    app, state, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
+    app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
     storySourceStatus, webResearchStatus, neteaseAuth, baseDir
