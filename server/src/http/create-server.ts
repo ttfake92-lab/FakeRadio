@@ -25,6 +25,7 @@ import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, We
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
+import { createSchedulerLoop } from "../scheduler/scheduler-loop.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
@@ -154,6 +155,14 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     neteaseAuth,
     baseDir: resolve(process.cwd())
   });
+
+  const schedulerLoop = createSchedulerLoop({
+    nowProvider,
+    planBuilder: (now: Date) => buildTodayPlan(now, userPreferences.playlists),
+    intervalMs: 60_000,
+  });
+  schedulerLoop.start();
+  app.addHook("onClose", () => schedulerLoop.stop());
 
   return app;
 }
