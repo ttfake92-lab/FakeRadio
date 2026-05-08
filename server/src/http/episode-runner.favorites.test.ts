@@ -1,0 +1,268 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { EpisodeRunnerDeps } from "./episode-runner.js";
+import { resolveNextTrackAndDecision } from "./episode-runner.js";
+import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
+import type { MusicAdapter } from "../adapters/types.js";
+import type { Track } from "@fakeradio/shared";
+import { createPlaybackState } from "./playback-state.js";
+
+function makeTrack(id: string, title: string, artist: string = "Test Artist"): Track {
+  return { id, title, artist, album: "Test Album", durationMs: 180000, source: "netease" };
+}
+
+function createMockLikedSongsRepo(tracks: Track[]): LikedSongsRepository {
+  return {
+    getDiagnostics: vi.fn().mockResolvedValue({
+      loaded: true,
+      totalCount: tracks.length,
+      validCount: tracks.length,
+      invalidCount: 0,
+      samples: tracks.slice(0, 3).map((t) => ({ id: t.id, title: t.title, artist: t.artist, album: t.album }))
+    }),
+    list: vi.fn().mockResolvedValue(tracks)
+  };
+}
+
+function createMockMusicAdapter(): MusicAdapter {
+  return {
+    search: vi.fn().mockResolvedValue([makeTrack("search-001", "Search Result")]),
+    recommend: vi.fn().mockResolvedValue([makeTrack("queue-001", "Queue Result")]),
+    resolve: vi.fn().mockImplementation(async (track: Track) => ({
+      ...track,
+      audioUrl: `https://example.com/audio/${track.id}.mp3`
+    }))
+  };
+}
+
+function createMockLlmAdapter() {
+  return {
+    compute: vi.fn().mockResolvedValue({
+      say: "Here is a track for you.",
+      play: { query: "warm morning indie", reason: "Test reason" },
+      segue: "Now playing...",
+      reason: "Test reason"
+    })
+  };
+}
+
+function createMockWeatherAdapter() {
+  return {
+    current: vi.fn().mockResolvedValue({ summary: "Sunny", moodHint: "warm", temperatureC: 22 })
+  };
+}
+
+function createMockCalendarAdapter() {
+  return {
+    upcoming: vi.fn().mockResolvedValue([])
+  };
+}
+
+function createMockDeviceAdapter() {
+  return {
+    list: vi.fn().mockResolvedValue([{ name: "Local Browser", type: "browser" }])
+  };
+}
+
+function createMockMemoryRepository() {
+  return {
+    recent: vi.fn().mockResolvedValue([]),
+    append: vi.fn().mockResolvedValue(undefined)
+  };
+}
+
+function buildDeps(overrides: Partial<EpisodeRunnerDeps> & { likedSongs?: LikedSongsRepository; music?: MusicAdapter }): EpisodeRunnerDeps {
+  const likedSongs = overrides.likedSongs ?? createMockLikedSongsRepo([]);
+  const music = overrides.music ?? createMockMusicAdapter();
+  const state = overrides.state ?? createPlaybackState([]);
+
+  return {
+    llm: createMockLlmAdapter() as EpisodeRunnerDeps["llm"],
+    music: music as EpisodeRunnerDeps["music"],
+    tts: { synthesize: vi.fn().mockResolvedValue({ audioUrl: "/cache/tts/mock.wav", text: "test" }) } as EpisodeRunnerDeps["tts"],
+    ttsCacheDir: "/tmp/tts",
+    weather: createMockWeatherAdapter() as EpisodeRunnerDeps["weather"],
+    calendar: createMockCalendarAdapter() as EpisodeRunnerDeps["calendar"],
+    devices: createMockDeviceAdapter() as EpisodeRunnerDeps["devices"],
+    storySource: { gather: vi.fn().mockResolvedValue([]) } as EpisodeRunnerDeps["storySource"],
+    publicMetadataAdapter: undefined,
+    webResearchAdapter: undefined,
+    memory: createMockMemoryRepository() as EpisodeRunnerDeps["memory"],
+    state: state as EpisodeRunnerDeps["state"],
+    systemPrompt: "You are FakeRadio DJ.",
+    userPreferences: {
+      taste: "test taste",
+      routines: "test routines",
+      moodRules: "test mood rules",
+      playlists: []
+    } as EpisodeRunnerDeps["userPreferences"],
+    musicStatus: "mock",
+    currentMoodHint: "warm morning indie",
+    nowProvider: () => new Date(2026, 3, 30, 8, 0, 0),
+    likedSongs: likedSongs as EpisodeRunnerDeps["likedSongs"]
+  };
+}
+
+describe("resolveNextTrackAndDecision favorites-backed candidate selection", () => {
+  describe("candidateSource", () => {
+    it("is 'favorites' when a favorite candidate is available and resolved", async () => {
+      const favTrack = makeTrack("fav-001", "Favorite Track");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      const music = createMockMusicAdapter();
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("favorites");
+      expect(result.track.title).toBe("Favorite Track");
+      expect(music.resolve).toHaveBeenCalledWith(favTrack);
+    });
+
+    it("is 'search' when favorites list is empty", async () => {
+      const likedSongs = createMockLikedSongsRepo([]);
+      const music = createMockMusicAdapter();
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("search");
+      expect(result.track.title).toBe("Search Result");
+    });
+
+    it("is 'search' when favorite candidate cannot be resolved", async () => {
+      const favTrack = makeTrack("fav-001", "Unresolvable Favorite");
+      const searchTrack = makeTrack("search-001", "Search Result");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      // Use createMockMusicAdapter as base (works in other tests) and override resolve
+      // to reject only for the favorite track, succeed for search track
+      const music = createMockMusicAdapter();
+      music.search = vi.fn().mockResolvedValue([searchTrack]);
+      music.resolve = vi.fn().mockImplementation(async (track: Track) => {
+        if (track.id === "fav-001") {
+          throw new Error("cannot resolve");
+        }
+        return { ...track, audioUrl: `https://example.com/audio/${track.id}.mp3` };
+      });
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("search");
+      expect(result.track.title).toBe("Search Result");
+    });
+
+    it("is 'queue' when favorites and search return no candidates", async () => {
+      const likedSongs = createMockLikedSongsRepo([]);
+      const queueTrack = makeTrack("queue-001", "Queue Track");
+      const music = createMockMusicAdapter();
+      music.search = vi.fn().mockResolvedValue([]);
+      music.resolve = vi.fn().mockImplementation(async (track: Track) => ({
+        ...track,
+        audioUrl: `https://example.com/audio/${track.id}.mp3`
+      }));
+      const state = createPlaybackState([queueTrack]);
+      const deps = buildDeps({ likedSongs, music, state });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("queue");
+      expect(result.track.title).toBe("Queue Track");
+    });
+
+    it("is 'mock' when favorites, search, and queue are all empty", async () => {
+      const likedSongs = createMockLikedSongsRepo([]);
+      const music = createMockMusicAdapter();
+      music.search = vi.fn().mockResolvedValue([]);
+      music.resolve = vi.fn().mockRejectedValue(new Error("should not be called"));
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("mock");
+      expect(result.isFallback).toBe(true);
+    });
+  });
+
+  describe("favorites deduplication against recent and current tracks", () => {
+    it("skips a favorite track that is in recentlySelectedTrackIds", async () => {
+      const favTrack1 = makeTrack("fav-001", "Recently Played Favorite");
+      const favTrack2 = makeTrack("fav-002", "Available Favorite");
+      const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
+      const music = createMockMusicAdapter();
+      const state = createPlaybackState([]);
+      // Simulate favTrack1 was recently selected
+      state.rememberSelectedTrack(favTrack1);
+      const deps = buildDeps({ likedSongs, music, state });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("favorites");
+      expect(result.track.title).toBe("Available Favorite");
+    });
+
+    it("skips a favorite track that is currently playing", async () => {
+      const favTrack1 = makeTrack("fav-001", "Current Track");
+      const favTrack2 = makeTrack("fav-002", "Next Favorite");
+      const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
+      const music = createMockMusicAdapter();
+      const state = createPlaybackState([]);
+      state.setTrack(favTrack1);
+      const deps = buildDeps({ likedSongs, music, state });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("favorites");
+      expect(result.track.title).toBe("Next Favorite");
+    });
+
+    // Note: selectCandidate's ?? tracks[0] fallback means we cannot test "all favorites
+    // excluded" scenario - it will always return a track from the list. The existing
+    // deduplication tests above verify that excluded tracks are properly filtered when
+    // alternatives exist. The "empty favorites" path is covered by the test above.
+  });
+
+  describe("DJ decision toolResults include favorites info", () => {
+    it("includes favorites.available and favorites.candidateSource in toolResults", async () => {
+      const favTrack = makeTrack("fav-001", "My Favorite");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      const music = createMockMusicAdapter();
+      const deps = buildDeps({ likedSongs, music });
+
+      await resolveNextTrackAndDecision(deps);
+
+      // The second computeDjDecision call includes toolResults
+      const llm = deps.llm as ReturnType<typeof createMockLlmAdapter>;
+      const lastCall = llm.compute.mock.calls.at(-1);
+      // toolResults are embedded in the "用户输入和工具结果" fragment content
+      const requestFragment = lastCall?.[0]?.find((m: { label: string }) => m.label === "用户输入和工具结果");
+      const content: string = requestFragment?.content ?? "";
+      expect(content).toContain("favorites.available:");
+      expect(content).toContain("favorites.candidateSource:");
+    });
+  });
+
+  describe("track always gets audioUrl via music.resolve", () => {
+    it("resolves favorite track through music adapter", async () => {
+      const favTrack = makeTrack("fav-001", "Resolved Favorite");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      const music = createMockMusicAdapter();
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.track.audioUrl).toBeDefined();
+      expect(result.track.audioUrl).toContain("example.com");
+      expect(music.resolve).toHaveBeenCalledWith(favTrack);
+    });
+
+    it("resolves search track through music adapter when no favorites", async () => {
+      const likedSongs = createMockLikedSongsRepo([]);
+      const music = createMockMusicAdapter();
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.track.audioUrl).toBeDefined();
+      expect(music.resolve).toHaveBeenCalled();
+    });
+  });
+});

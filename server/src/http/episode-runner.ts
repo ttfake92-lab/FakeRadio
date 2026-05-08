@@ -1,0 +1,207 @@
+import type { RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
+import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
+import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import type { MemoryRepository } from "../state/memory-repository.js";
+import type { PlaybackState } from "./playback-state.js";
+import type { UserPreferences } from "../user/load-user-preference.js";
+import { computeDjDecision } from "../brain/dj-brain.js";
+import type { WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
+
+import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
+
+export type EpisodeRunnerDeps = {
+  llm: LlmAdapter;
+  music: MusicAdapter;
+  tts: TtsAdapter;
+  ttsCacheDir: string;
+  weather: WeatherAdapter;
+  calendar: CalendarAdapter;
+  devices: DeviceAdapter;
+  storySource: StorySourceAdapter;
+  publicMetadataAdapter?: StorySourceAdapter | undefined;
+  webResearchAdapter?: StorySourceAdapter | undefined;
+  memory: MemoryRepository;
+  state: PlaybackState;
+  systemPrompt: string;
+  userPreferences: UserPreferences;
+  musicStatus: string;
+  currentMoodHint: string;
+  nowProvider: () => Date;
+  likedSongs: LikedSongsRepository;
+};
+
+export type ResolveResult = {
+  track: Track;
+  decision: Awaited<ReturnType<typeof computeDjDecision>>;
+  isFallback: boolean;
+  candidates: Track[];
+  candidateSource: "favorites" | "search" | "queue" | "mock";
+};
+
+export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Promise<ResolveResult> {
+  const { llm, music, weather, calendar, devices, memory, state, systemPrompt, userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs } = deps;
+  const now = nowProvider();
+  const weatherSnapshot = await weather.current();
+  const calendarItems = await calendar.upcoming();
+  const playbackDevices = await devices.list();
+  const recentMemoryEntries = await memory.recent(5);
+  const currentTrack = state.getCurrentTrack();
+
+  const draftDecision = await computeDjDecision({
+    llm,
+    now,
+    systemPrompt,
+    userTaste: userPreferences.taste,
+    routines: userPreferences.routines,
+    moodRules: userPreferences.moodRules,
+    recentMemory: recentMemoryEntries.map((entry) => entry.content),
+    toolResults: [],
+    executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
+    environment: {
+      weather: weatherSnapshot,
+      calendar: calendarItems,
+      devices: playbackDevices
+    }
+  });
+
+  const favoritesTracks = await likedSongs.list();
+  const queue = state.getQueue();
+  let track: Track;
+  let candidateSource: ResolveResult["candidateSource"];
+
+  // Step 1: Try favorites-first candidate selection
+  const favoriteCandidate = state.selectCandidate(favoritesTracks);
+  if (favoriteCandidate) {
+    try {
+      track = await music.resolve(favoriteCandidate);
+      candidateSource = "favorites";
+    } catch {
+      // Favorite candidate could not be resolved; fall through to search
+      candidateSource = "search";
+    }
+  } else {
+    candidateSource = "search";
+  }
+
+  // Step 2: If no favorite track resolved, fall back to search
+  if (candidateSource === "search") {
+    const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
+    const candidate = state.selectCandidate(candidates);
+    const queueCandidate = state.selectCandidate(queue);
+
+    if (candidate) {
+      track = await music.resolve(candidate);
+      candidateSource = "search";
+    } else if (queueCandidate) {
+      track = await music.resolve(queueCandidate);
+      candidateSource = "queue";
+    } else {
+      const mockMusic = createMockMusicAdapter();
+      const fallbackTracks = await mockMusic.search(currentMoodHint);
+      track = await mockMusic.resolve(fallbackTracks[0]!);
+      candidateSource = "mock";
+    }
+  }
+
+  const isFallback = candidateSource === "mock";
+
+  const decision = await computeDjDecision({
+    llm,
+    now,
+    systemPrompt,
+    userTaste: userPreferences.taste,
+    routines: userPreferences.routines,
+    moodRules: userPreferences.moodRules,
+    recentMemory: recentMemoryEntries.map((entry) => entry.content),
+    toolResults: [
+      `music.provider: ${musicStatus}`,
+      `favorites.available: ${favoritesTracks.length}`,
+      `favorites.candidateSource: ${candidateSource}`,
+      ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
+      `music.selectedTrack: ${track.title} - ${track.artist}`,
+      ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
+    ],
+    executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
+    environment: {
+      weather: weatherSnapshot,
+      calendar: calendarItems,
+      devices: playbackDevices
+    }
+  });
+
+  return { track, decision, isFallback, candidates: favoritesTracks, candidateSource };
+}
+
+export async function synthesizeWithFallback(
+  tts: TtsAdapter,
+  ttsCacheDir: string,
+  text: string
+): Promise<{ result: TtsResult; fallbackReason?: string }> {
+  try {
+    return { result: await tts.synthesize(text) };
+  } catch (error) {
+    console.error("TTS synthesis failed, falling back to mock:", error);
+    const mockTts = createMockTtsAdapter({ cacheDir: ttsCacheDir });
+    return {
+      result: await mockTts.synthesize(text),
+      fallbackReason: "TTS synthesis failed; fell back to mock TTS"
+    };
+  }
+}
+
+export async function gatherEpisodeSources(
+  storySource: StorySourceAdapter,
+  publicMetadataAdapter: StorySourceAdapter | undefined,
+  webResearchAdapter: StorySourceAdapter | undefined,
+  braveApiKey: string | undefined,
+  track: Track
+): Promise<RadioEpisode["sources"]> {
+  let lyricSources: RadioEpisode["sources"] = [];
+  try {
+    const adapterSources = await storySource.gather(track);
+    lyricSources = adapterSources.length > 0 ? adapterSources : [];
+  } catch (error) {
+    console.warn("Story source gather failed:", error);
+    lyricSources = [];
+  }
+
+  let metadataSources: RadioEpisode["sources"] = [];
+  try {
+    const publicMetadata = publicMetadataAdapter ?? (await import("../adapters/index.js")).createPublicMetadataAdapter();
+    const adapterSources = await publicMetadata.gather(track);
+    metadataSources = adapterSources.length > 0 ? adapterSources : [];
+  } catch (error) {
+    console.warn("Public metadata gather failed:", error);
+    metadataSources = [];
+  }
+
+  let webSources: RadioEpisode["sources"] = [];
+  try {
+    const { createWebResearchAdapter } = await import("../adapters/index.js");
+    const webResearch = webResearchAdapter ?? createWebResearchAdapter(
+      braveApiKey ? { apiKey: braveApiKey } : {}
+    );
+    const adapterSources = await webResearch.gather(track);
+    webSources = adapterSources.length > 0 ? adapterSources : [];
+  } catch (error) {
+    console.warn("Web research gather failed:", error);
+    webSources = [];
+  }
+
+  const combinedSources = [...lyricSources, ...metadataSources, ...webSources];
+  return combinedSources.length > 0 ? combinedSources : [
+    {
+      kind: "mock",
+      title: "mock source",
+      content: "Placeholder source note for story generation."
+    }
+  ];
+}
+
+export function determineStoryType(sources: RadioEpisode["sources"]): RadioEpisode["story"]["type"] {
+  const hasLyricSource = sources.some((s) => s.kind === "lyric");
+  const hasBackgroundSource = sources.some((s) =>
+    (s.kind === "metadata" || s.kind === "web") && (s.confidence ?? 0) >= 0.5
+  );
+  return hasBackgroundSource ? "background" : hasLyricSource ? "lyric-theme" : "mood-reading";
+}
