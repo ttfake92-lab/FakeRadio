@@ -297,8 +297,8 @@ export async function narrateStoryWithSources(
   moodRules: string
 ): Promise<{ narration: string; storyType: RadioEpisode["story"]["type"] }> {
   const rawType = determineStoryType(sources);
-  const effectiveType = (rawType === "background" && !hasHighConfidenceBackgroundSource(sources))
-    ? (sources.some((s) => s.kind === "lyric") ? "lyric-theme" : "mood-reading")
+  const effectiveType = (rawType === "background" && sources.some((s) => s.kind === "lyric"))
+    ? "lyric-theme"
     : rawType;
 
   const sourceContext = formatSourcesForLLM(sources);
