@@ -15,16 +15,29 @@ function mapWeatherToMood(data: OpenWeatherMapResponse): string {
 }
 
 export function createWeatherAdapter({ apiKey }: { apiKey: string }): WeatherAdapter {
+  if (!apiKey || apiKey.trim() === "") {
+    throw new Error("[WeatherAdapter] apiKey is required");
+  }
   return {
     async current(): Promise<WeatherSnapshot> {
-      const data = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?q=Shanghai&units=metric&appid=${apiKey}`
-      ).then((r) => r.json() as unknown as OpenWeatherMapResponse);
-      return {
-        summary: data.weather[0]?.description ?? "unknown",
-        moodHint: mapWeatherToMood(data),
-        temperatureC: data.main.temp,
-      };
+      try {
+        const response = await fetch(
+          `https://api.openweathermap.org/data/2.5/weather?q=Shanghai&units=metric&appid=${apiKey}`
+        );
+        if (!response.ok) {
+          throw new Error(`[WeatherAdapter] API request failed with status ${response.status}`);
+        }
+        const data = (await response.json()) as unknown as OpenWeatherMapResponse;
+        return {
+          summary: data.weather[0]?.description ?? "unknown",
+          moodHint: mapWeatherToMood(data),
+          temperatureC: data.main.temp,
+        };
+      } catch (err) {
+        throw new Error(
+          `[WeatherAdapter] Failed to fetch weather: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
     },
   };
 }
