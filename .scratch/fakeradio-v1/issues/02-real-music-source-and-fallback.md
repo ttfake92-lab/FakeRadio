@@ -1,6 +1,7 @@
 # 02 真实音乐来源与回退可用链路
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Category: enhancement
 Type: AFK
 

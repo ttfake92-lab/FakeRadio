@@ -1,6 +1,7 @@
 # 04 播放器展示真实来源、队列与诊断
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent

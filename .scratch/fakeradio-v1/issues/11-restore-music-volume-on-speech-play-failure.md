@@ -1,6 +1,7 @@
 # 11 TTS 播放失败时恢复音乐音量
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent

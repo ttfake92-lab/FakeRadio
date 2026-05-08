@@ -1,6 +1,7 @@
 # 09 空音乐结果时 `/api/next` 可控失败或回退
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent

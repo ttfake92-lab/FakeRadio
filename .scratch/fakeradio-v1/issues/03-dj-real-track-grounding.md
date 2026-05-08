@@ -1,6 +1,7 @@
 # 03 DJ 基于真实曲目做口播与理由
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Category: enhancement
 Type: AFK
 

@@ -1,6 +1,7 @@
 # 08 本地运行与可观测性规范
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent

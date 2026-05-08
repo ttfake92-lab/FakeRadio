@@ -1,6 +1,7 @@
 # 05 状态与节律连续性
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent

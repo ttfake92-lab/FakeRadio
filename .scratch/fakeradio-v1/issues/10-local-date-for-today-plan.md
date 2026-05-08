@@ -1,6 +1,7 @@
 # 10 当日电台计划使用本地日期
 
-Status: ready-for-human
+Status: archived
+Implemented: 2026-05-08
 Type: AFK
 
 ## Parent
