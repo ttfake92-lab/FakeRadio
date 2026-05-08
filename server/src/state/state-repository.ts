@@ -104,6 +104,16 @@ export function createStateRepository(dbPath: string): StateRepository {
     };
   }
 
+  function mapRowToPrefsUpdate(row: unknown): PrefsUpdate {
+    const r = row as Record<string, unknown>;
+    return {
+      id: r.id as string,
+      key: r.key as string,
+      valueJson: r.value_json as string,
+      updatedAt: r.updated_at as string
+    };
+  }
+
   return {
     recordPlayedTrack(track: PlayedTrack): Promise<void> {
       stmtInsertTrack.run({
@@ -119,10 +129,11 @@ export function createStateRepository(dbPath: string): StateRepository {
     },
 
     getRecentlyPlayed(limit: number, since?: string): Promise<PlayedTrack[]> {
+      const safeLimit = Math.floor(Number(limit));
       return Promise.resolve(
         since
-          ? (db.prepare(`SELECT * FROM played_tracks WHERE played_at >= ? ORDER BY played_at DESC LIMIT ?`).all(since, limit) as unknown[])
-          : (db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT ?`).all(limit) as unknown[])
+          ? (db.prepare(`SELECT * FROM played_tracks WHERE played_at >= ? ORDER BY played_at DESC LIMIT ?`).all(since, safeLimit) as unknown[])
+          : (db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT ?`).all(safeLimit) as unknown[])
       ).then(rows => rows.map(mapRowToPlayedTrack));
     },
 
@@ -134,7 +145,7 @@ export function createStateRepository(dbPath: string): StateRepository {
     },
 
     getDjMessagesToday(): Promise<DjMessage[]> {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA');
       return Promise.resolve(
         db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[]
       ).then(rows => rows.map(mapRowToDjMessage));
@@ -172,10 +183,10 @@ export function createStateRepository(dbPath: string): StateRepository {
 
     getStartupState() {
       const lastPlayedTracks = db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT 50`).all() as unknown[];
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA');
       const todayDjMessages = db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[];
       const lastQueueSnapshotRow = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
-      const latestPrefs = db.prepare(`SELECT * FROM prefs_updates ORDER BY updated_at DESC`).all() as unknown as PrefsUpdate[];
+      const latestPrefsRows = db.prepare(`SELECT * FROM prefs_updates ORDER BY updated_at DESC LIMIT 100`).all() as unknown[];
 
       return Promise.resolve({
         lastPlayedTracks: lastPlayedTracks.map(mapRowToPlayedTrack),
@@ -183,7 +194,7 @@ export function createStateRepository(dbPath: string): StateRepository {
         lastQueueSnapshot: lastQueueSnapshotRow
           ? { id: lastQueueSnapshotRow.id as string, trackIds: JSON.parse(lastQueueSnapshotRow.track_ids as string), blockAt: lastQueueSnapshotRow.block_at as string | null, createdAt: lastQueueSnapshotRow.created_at as string }
           : null,
-        latestPrefs
+        latestPrefs: latestPrefsRows.map(mapRowToPrefsUpdate)
       });
     },
 

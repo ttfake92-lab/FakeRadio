@@ -202,6 +202,24 @@ describe("createStateRepository", () => {
     expect(state.latestPrefs.find(p => p.key === "key1")).toBeDefined();
   });
 
+  it("getStartupState latestPrefs maps value_json to valueJson correctly", async () => {
+    await repo.upsertPref("theme", "dark");
+    await repo.upsertPref("volume", 80);
+
+    const state = await repo.getStartupState();
+
+    const themePref = state.latestPrefs.find(p => p.key === "theme");
+    const volumePref = state.latestPrefs.find(p => p.key === "volume");
+
+    expect(themePref).toBeDefined();
+    expect(volumePref).toBeDefined();
+    // Verify the mapper used camelCase property, not snake_case
+    expect(themePref!.valueJson).toBe('"dark"');
+    expect(volumePref!.valueJson).toBe("80");
+    // Ensure snake_case key does NOT exist on the mapped object
+    expect((themePref as unknown as Record<string, unknown>).value_json).toBeUndefined();
+  });
+
   // --- pruneOldData ---
 
   it("pruneOldData deletes tracks before the given timestamp", async () => {
