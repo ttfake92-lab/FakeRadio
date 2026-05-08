@@ -22,7 +22,7 @@ import { proxyAndRecord } from "../audio/audio-recorder.js";
 import { startExportTask, getExportTask, getExportFilePath } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import type { PlaybackState } from "./playback-state.js";
-import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, determineStoryType, type EpisodeRunnerDeps } from "./episode-runner.js";
+import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
 import { handleChat } from "./chat-intent-router.js";
 import type { RegisterRoutesDeps } from "./types.js";
 
@@ -197,7 +197,6 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.get("/api/episode/next", async () => {
     const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
-    const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
     state.rememberSelectedTrack(track);
     await stateRepo.recordPlayedTrack({
@@ -213,16 +212,35 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     const sources = await gatherEpisodeSources(
       storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
     );
-    const storyType = determineStoryType(sources);
+
+    const weatherSnapshot = await weather.current();
+    const calendarItems = await calendar.upcoming();
+    const playbackDevices = await devices.list();
+    const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
+    const recentMemoryEntries = await memory.recent(5);
+
+    const { narration, storyType } = await narrateStoryWithSources(
+      llm,
+      track,
+      sources,
+      systemPrompt,
+      recentMemoryEntries.map((entry) => entry.content),
+      contextEnv,
+      userPreferences.taste,
+      userPreferences.routines,
+      userPreferences.moodRules
+    );
+
+    const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
 
     const episode: RadioEpisode = {
       track,
-      story: { text: decision.say, audioUrl: storyTtsResult.audioUrl, type: storyType },
+      story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
       sources,
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
       fallbackReason
     };
-    await stateRepo.appendDjMessage({ text: decision.say, trackId: track.id, storyType: storyType });
+    await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
 
     return EpisodeNextResponseSchema.parse({ episode });
   });
