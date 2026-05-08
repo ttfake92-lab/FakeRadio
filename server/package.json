@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "predev": "pnpm --filter @fakeradio/shared build",
-    "dev": "tsx src/index.ts",
+    "dev": "cd .. && TZ=Asia/Shanghai tsx server/src/index.ts",
     "prebuild": "pnpm --filter @fakeradio/shared build",
     "build": "tsc -b tsconfig.json --force",
     "pretypecheck": "pnpm --filter @fakeradio/shared build",
     "typecheck": "tsc -b tsconfig.json --force",
     "pretest": "pnpm --filter @fakeradio/shared build",
-    "test": "cd .. && vitest run server/src",
+    "test": "cd .. && TZ=Asia/Shanghai vitest run server/src",
     "prelint": "pnpm --filter @fakeradio/shared build",
     "lint": "tsc -b tsconfig.json --force"
   },
@@ -19,12 +19,16 @@
     "@fakeradio/shared": "workspace:*",
     "@fastify/cors": "^11.2.0",
     "@fastify/websocket": "^11.0.2",
+    "archiver": "^7.0.1",
+    "better-sqlite3": "^12.9.0",
     "dotenv": "^17.2.3",
     "edge-tts": "^1.0.1",
     "fastify": "^5.6.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "tsx": "^4.20.6",
     "vitest": "^3.2.4"
   }
