@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import { createRadioServer } from "./create-server.js";
 
 let app: FastifyInstance | undefined;
+let isolatedBaseDirs: string[] = [];
 
 function createMockMusicAdapterResult() {
   return {
@@ -12,14 +16,33 @@ function createMockMusicAdapterResult() {
   };
 }
 
+function createEmptyLikedSongsBaseDir() {
+  const dir = mkdtempSync(join(tmpdir(), "fakeradio-server-test-"));
+  mkdirSync(join(dir, "user"), { recursive: true });
+  writeFileSync(join(dir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+  isolatedBaseDirs.push(dir);
+  return dir;
+}
+
+function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
+  return createRadioServer({
+    ...options,
+    baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
+  });
+}
+
 afterEach(async () => {
   await app?.close();
   app = undefined;
+  for (const dir of isolatedBaseDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  isolatedBaseDirs = [];
 });
 
 describe("createRadioServer", () => {
   it("serves health, now, plan, next, taste, and chat contracts", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter()
     });
@@ -35,11 +58,11 @@ describe("createRadioServer", () => {
 
     const plan = await app.inject({ method: "GET", url: "/api/plan/today" });
     expect(plan.statusCode).toBe(200);
-    expect(plan.json().blocks).toHaveLength(3);
+    expect(plan.json().blocks).toHaveLength(6);
 
     const taste = await app.inject({ method: "GET", url: "/api/taste" });
     expect(taste.statusCode).toBe(200);
-    expect(taste.json().playlists[0].id).toBe("morning-soft-start");
+    expect(taste.json().playlists[0].id).toBe("midnight-quiet");
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
@@ -57,7 +80,7 @@ describe("createRadioServer", () => {
   });
 
   it("keeps the latest DJ speech in now after computing next", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter()
     });
@@ -83,7 +106,7 @@ describe("createRadioServer", () => {
   });
 
   it("allows the local web app origin during development", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter()
     });
@@ -92,11 +115,67 @@ describe("createRadioServer", () => {
       method: "GET",
       url: "/api/health",
       headers: {
-        origin: "http://127.0.0.1:3002"
+        origin: "http://127.0.0.1:3302"
       }
     });
 
-    expect(health.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3002");
+    expect(health.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3302");
+  });
+
+  it("serves Netease login status and QR login endpoints", async () => {
+    const neteaseAuth = {
+      getStatus: vi.fn().mockResolvedValue({
+        loggedIn: true,
+        cookieStored: true,
+        nickname: "FakeRadio Listener",
+        userId: 1001
+      }),
+      createQrLogin: vi.fn().mockResolvedValue({
+        key: "qr-key-1",
+        qrImageUrl: "data:image/png;base64,abc",
+        qrUrl: "https://music.163.com/login?code=1"
+      }),
+      checkQrLogin: vi.fn().mockResolvedValue({
+        code: 803,
+        message: "授权登录成功",
+        loggedIn: true,
+        cookieSaved: true
+      }),
+      logout: vi.fn().mockResolvedValue({
+        loggedIn: false,
+        cookieStored: false
+      })
+    };
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      neteaseAuthService: neteaseAuth
+    });
+
+    const status = await app.inject({ method: "GET", url: "/api/netease/login/status" });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      loggedIn: true,
+      cookieStored: true,
+      nickname: "FakeRadio Listener"
+    });
+
+    const qr = await app.inject({ method: "POST", url: "/api/netease/login/qr" });
+    expect(qr.statusCode).toBe(200);
+    expect(qr.json()).toMatchObject({
+      key: "qr-key-1",
+      qrImageUrl: "data:image/png;base64,abc"
+    });
+
+    const check = await app.inject({ method: "GET", url: "/api/netease/login/qr/qr-key-1" });
+    expect(check.statusCode).toBe(200);
+    expect(check.json()).toMatchObject({
+      code: 803,
+      loggedIn: true,
+      cookieSaved: true
+    });
+    expect(neteaseAuth.checkQrLogin).toHaveBeenCalledWith("qr-key-1");
   });
 
   it("uses the selected music adapter for health, initial queue, and next track", async () => {
@@ -126,7 +205,7 @@ describe("createRadioServer", () => {
       resolve: vi.fn().mockResolvedValue(resolvedTrack)
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -182,7 +261,7 @@ describe("createRadioServer", () => {
       resolve: vi.fn().mockResolvedValue(resolvedTrack)
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -235,7 +314,7 @@ describe("createRadioServer", () => {
       }))
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -260,7 +339,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: failingTts
     });
@@ -268,7 +347,7 @@ describe("createRadioServer", () => {
     const response = await app.inject({ method: "GET", url: "/api/next" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().tts.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
+    expect(response.json().tts.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.wav$/);
   });
 
   it("falls back to mock track when search and queue are empty", async () => {
@@ -278,7 +357,7 @@ describe("createRadioServer", () => {
       resolve: vi.fn().mockRejectedValue(new Error("should not be called"))
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -321,7 +400,7 @@ describe("createRadioServer", () => {
       }))
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -340,7 +419,7 @@ describe("createRadioServer", () => {
   });
 
   it("produces rain-aware DJ decision when weather contains rain", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       weatherAdapter: {
@@ -358,7 +437,7 @@ describe("createRadioServer", () => {
   });
 
   it("produces empty-calendar DJ decision when calendar is empty", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       calendarAdapter: {
@@ -376,7 +455,7 @@ describe("createRadioServer", () => {
   });
 
   it("produces no-device DJ decision when no playback devices are available", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       deviceAdapter: {
@@ -394,7 +473,7 @@ describe("createRadioServer", () => {
   });
 
   it("returns a complete radio episode from /api/episode/next", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -432,7 +511,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -462,7 +541,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricStorySource,
@@ -493,7 +572,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -534,7 +613,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricSource,
@@ -565,7 +644,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -598,7 +677,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -643,7 +722,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -666,7 +745,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -688,7 +767,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: failingTts,
       webResearchAdapter: createMockStorySourceAdapter(),
@@ -699,7 +778,7 @@ describe("createRadioServer", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    expect(body.episode.story.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
+    expect(body.episode.story.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.wav$/);
     expect(body.episode.fallbackReason).toContain("TTS");
   });
 
@@ -716,7 +795,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: lyricStorySource,
@@ -740,7 +819,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: emptyStorySource,
@@ -763,7 +842,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: failingStorySource,
@@ -779,7 +858,7 @@ describe("createRadioServer", () => {
     expect(body.episode.sources[0].kind).toBe("mock");
   });
   it("reports story source provider status in health", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -798,7 +877,7 @@ describe("createRadioServer", () => {
       }
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
@@ -813,7 +892,7 @@ describe("createRadioServer", () => {
 
 
   it("uses injected user preferences for DJ decisions", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       userPreferences: {
@@ -837,7 +916,7 @@ describe("createRadioServer", () => {
   });
 
   it("exposes loaded user preferences via /api/taste", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       userPreferences: {
@@ -864,7 +943,7 @@ describe("createRadioServer", () => {
   });
 
   it("returns loaded playlists from /api/taste", async () => {
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       userPreferences: {
@@ -923,7 +1002,7 @@ describe("createRadioServer", () => {
       }))
     };
 
-    app = await createRadioServer({
+    app = await createTestRadioServer({
       musicAdapterResult: {
         music,
         status: "ready"
@@ -952,9 +1031,96 @@ describe("createRadioServer", () => {
   });
 });
 
-import { mkdtempSync, writeFileSync, rmdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+describe("Liked songs diagnostics endpoint", () => {
+  let tempDir: string;
+  let diagApp: FastifyInstance | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "liked-songs-diag-test-"));
+  });
+
+  afterEach(async () => {
+    await diagApp?.close();
+    diagApp = undefined;
+    try {
+      rmdirSync(tempDir, { recursive: true });
+    } catch {}
+  });
+
+  it("returns diagnostics with loaded=false when file is missing", async () => {
+    diagApp = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir: tempDir
+    });
+
+    const response = await diagApp.inject({ method: "GET", url: "/api/favorites/diagnostics" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      loaded: false,
+      totalCount: 0,
+      validCount: 0,
+      invalidCount: 0,
+      samples: []
+    });
+  });
+
+  it("returns diagnostics with loaded=true and valid count for populated file", async () => {
+    const userDir = join(tempDir, "user");
+    mkdirSync(userDir, { recursive: true });
+    writeFileSync(
+      join(userDir, "netease-liked-songs.raw.json"),
+      JSON.stringify([
+        {
+          id: 1,
+          name: "Test Song",
+          ar: [{ name: "Test Artist" }],
+          al: { name: "Test Album", picUrl: "https://example.com/pic.jpg" }
+        }
+      ]),
+      "utf-8"
+    );
+
+    diagApp = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir: tempDir
+    });
+
+    const response = await diagApp.inject({ method: "GET", url: "/api/favorites/diagnostics" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      loaded: true,
+      totalCount: 1,
+      validCount: 1,
+      invalidCount: 0,
+      samples: [{ id: "1", title: "Test Song", artist: "Test Artist", album: "Test Album" }]
+    });
+  });
+
+  it("limits samples to max 3 even with more songs", async () => {
+    const userDir = join(tempDir, "user");
+    mkdirSync(userDir, { recursive: true });
+    const songs = [
+      { id: 1, name: "Song 1", ar: [{ name: "Artist 1" }], al: { name: "Album 1" } },
+      { id: 2, name: "Song 2", ar: [{ name: "Artist 2" }], al: { name: "Album 2" } },
+      { id: 3, name: "Song 3", ar: [{ name: "Artist 3" }], al: { name: "Album 3" } },
+      { id: 4, name: "Song 4", ar: [{ name: "Artist 4" }], al: { name: "Album 4" } }
+    ];
+    writeFileSync(join(userDir, "netease-liked-songs.raw.json"), JSON.stringify(songs), "utf-8");
+
+    diagApp = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir: tempDir
+    });
+
+    const response = await diagApp.inject({ method: "GET", url: "/api/favorites/diagnostics" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().totalCount).toBe(4);
+    expect(response.json().samples).toHaveLength(3);
+  });
+});
 
 describe("TTS cache route", () => {
   let tempDir: string;
@@ -967,15 +1133,13 @@ describe("TTS cache route", () => {
   afterEach(async () => {
     await ttsApp?.close();
     ttsApp = undefined;
-    try {
-      rmdirSync(tempDir, { recursive: true });
-    } catch {}
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("serves valid cached audio files", async () => {
     writeFileSync(`${tempDir}/abc123.mp3`, Buffer.from("fake audio"));
 
-    ttsApp = await createRadioServer({
+    ttsApp = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       ttsCacheDir: tempDir
@@ -991,7 +1155,7 @@ describe("TTS cache route", () => {
     const siblingDir = mkdtempSync(join(tmpdir(), "tts-cache-sibling-"));
     writeFileSync(`${siblingDir}/secret.mp3`, Buffer.from("secret audio"));
 
-    ttsApp = await createRadioServer({
+    ttsApp = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       ttsCacheDir: tempDir
@@ -1001,16 +1165,14 @@ describe("TTS cache route", () => {
 
     expect(response.statusCode).toBe(404);
 
-    try {
-      rmdirSync(siblingDir, { recursive: true });
-    } catch {}
+    rmSync(siblingDir, { recursive: true, force: true });
   });
 
   it("rejects absolute path outside cache dir", async () => {
     const outsideDir = mkdtempSync(join(tmpdir(), "tts-cache-outside-"));
     writeFileSync(`${outsideDir}/outside.mp3`, Buffer.from("outside audio"));
 
-    ttsApp = await createRadioServer({
+    ttsApp = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
       ttsCacheDir: tempDir
@@ -1020,8 +1182,6 @@ describe("TTS cache route", () => {
 
     expect(response.statusCode).toBe(404);
 
-    try {
-      rmdirSync(outsideDir, { recursive: true });
-    } catch {}
+    rmSync(outsideDir, { recursive: true, force: true });
   });
 });

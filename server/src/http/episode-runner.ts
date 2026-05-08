@@ -1,4 +1,4 @@
-import type { RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
+import type { DjDecision, RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
 import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
 import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import type { MemoryRepository } from "../state/memory-repository.js";
@@ -36,7 +36,48 @@ export type ResolveResult = {
   isFallback: boolean;
   candidates: Track[];
   candidateSource: "favorites" | "search" | "queue" | "mock";
+  rerankSource: "llm-pick" | "fallback";
 };
+
+function normalizeForMatch(value: string): string {
+  return value.toLocaleLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+function decisionMentionsTrack(decision: DjDecision, track: Track): boolean {
+  const haystack = normalizeForMatch([
+    decision.say,
+    decision.reason,
+    decision.play.reason,
+    decision.play.query ?? "",
+    decision.play.trackId ?? "",
+    decision.segue
+  ].join("\n"));
+  const title = normalizeForMatch(track.title);
+  const artist = normalizeForMatch(track.artist);
+  return haystack.includes(title) || haystack.includes(artist) || haystack.includes(normalizeForMatch(track.id));
+}
+
+function buildGroundedFallbackDecision(
+  track: Track,
+  candidateSource: ResolveResult["candidateSource"]
+): DjDecision {
+  const sourceLabel: Record<ResolveResult["candidateSource"], string> = {
+    favorites: "你的收藏库",
+    search: "网易云搜索结果",
+    queue: "当前队列",
+    mock: "本地兜底曲库"
+  };
+  const source = sourceLabel[candidateSource];
+  return {
+    say: `现在接上 ${track.title}，来自 ${track.artist}。这首歌来自${source}，先让它把当前的节奏稳住。`,
+    play: {
+      trackId: track.id,
+      reason: `${track.title} - ${track.artist} 来自${source}，并已解析为可播放曲目。`
+    },
+    reason: `已选择 ${track.title} - ${track.artist}，使用确定性文案避免口播偏离所选曲目。`,
+    segue: `接上 ${track.title}。`
+  };
+}
 
 export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Promise<ResolveResult> {
   const { llm, music, weather, calendar, devices, memory, state, systemPrompt, userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs } = deps;
@@ -46,6 +87,10 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   const playbackDevices = await devices.list();
   const recentMemoryEntries = await memory.recent(5);
   const currentTrack = state.getCurrentTrack();
+
+  // Collect candidates: favorites + search results, deduplicated, up to 20
+  const favoritesTracks = await likedSongs.list();
+  const uniqueCandidates = favoritesTracks.slice(0, 20);
 
   const draftDecision = await computeDjDecision({
     llm,
@@ -61,51 +106,69 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       weather: weatherSnapshot,
       calendar: calendarItems,
       devices: playbackDevices
-    }
+    },
+    candidates: uniqueCandidates
   });
 
-  const favoritesTracks = await likedSongs.list();
   const queue = state.getQueue();
-  let track: Track;
-  let candidateSource: ResolveResult["candidateSource"];
+  let track: Track | null = null;
+  let candidateSource: ResolveResult["candidateSource"] = "search";
+  let rerankSource: "llm-pick" | "fallback" = "fallback";
 
-  // Step 1: Try favorites-first candidate selection
-  const favoriteCandidate = state.selectCandidate(favoritesTracks);
-  if (favoriteCandidate) {
-    try {
-      track = await music.resolve(favoriteCandidate);
-      candidateSource = "favorites";
-    } catch {
-      // Favorite candidate could not be resolved; fall through to search
-      candidateSource = "search";
-    }
-  } else {
-    candidateSource = "search";
+  // Try LLM pick first (if it returned a trackId from candidates)
+  let llmPickedTrack: Track | undefined;
+  if (draftDecision.play.trackId) {
+    llmPickedTrack = uniqueCandidates.find((t) => t.id === draftDecision.play.trackId);
   }
 
-  // Step 2: If no favorite track resolved, fall back to search
-  if (candidateSource === "search") {
-    const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
-    const candidate = state.selectCandidate(candidates);
-    const queueCandidate = state.selectCandidate(queue);
+  if (llmPickedTrack) {
+    try {
+      track = await music.resolve(llmPickedTrack);
+      candidateSource = favoritesTracks.some((f) => f.id === llmPickedTrack!.id) ? "favorites" : "search";
+      rerankSource = "llm-pick";
+    } catch {
+      llmPickedTrack = undefined;
+    }
+  }
 
-    if (candidate) {
-      track = await music.resolve(candidate);
-      candidateSource = "search";
-    } else if (queueCandidate) {
-      track = await music.resolve(queueCandidate);
-      candidateSource = "queue";
+  // Fall back to deterministic selection if LLM didn't pick or resolve failed
+  if (!track) {
+    const favoriteCandidate = state.selectCandidate(favoritesTracks);
+    if (favoriteCandidate) {
+      try {
+        track = await music.resolve(favoriteCandidate);
+        candidateSource = "favorites";
+      } catch {
+        candidateSource = "search";
+      }
     } else {
-      const mockMusic = createMockMusicAdapter();
-      const fallbackTracks = await mockMusic.search(currentMoodHint);
-      track = await mockMusic.resolve(fallbackTracks[0]!);
-      candidateSource = "mock";
+      candidateSource = "search";
+    }
+
+    // Step 2: If no favorite track resolved, fall back to search
+    if (!track) {
+      const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
+      const candidate = state.selectCandidate(candidates);
+      const queueCandidate = state.selectCandidate(queue);
+
+      if (candidate) {
+        track = await music.resolve(candidate);
+        candidateSource = "search";
+      } else if (queueCandidate) {
+        track = await music.resolve(queueCandidate);
+        candidateSource = "queue";
+      } else {
+        const mockMusic = createMockMusicAdapter();
+        const fallbackTracks = await mockMusic.search(currentMoodHint);
+        track = await mockMusic.resolve(fallbackTracks[0]!);
+        candidateSource = "mock";
+      }
     }
   }
 
   const isFallback = candidateSource === "mock";
 
-  const decision = await computeDjDecision({
+  const rawDecision = await computeDjDecision({
     llm,
     now,
     systemPrompt,
@@ -116,7 +179,9 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     toolResults: [
       `music.provider: ${musicStatus}`,
       `favorites.available: ${favoritesTracks.length}`,
-      `favorites.candidateSource: ${candidateSource}`,
+      `candidates.count: ${uniqueCandidates.length}`,
+      `candidates.source: ${candidateSource}`,
+      `candidates.rerankSource: ${rerankSource}`,
       ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
       `music.selectedTrack: ${track.title} - ${track.artist}`,
       ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
@@ -128,8 +193,11 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       devices: playbackDevices
     }
   });
+  const decision = decisionMentionsTrack(rawDecision, track)
+    ? rawDecision
+    : buildGroundedFallbackDecision(track, candidateSource);
 
-  return { track, decision, isFallback, candidates: favoritesTracks, candidateSource };
+  return { track, decision, isFallback, candidates: uniqueCandidates, candidateSource, rerankSource };
 }
 
 export async function synthesizeWithFallback(

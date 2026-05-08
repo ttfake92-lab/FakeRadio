@@ -76,7 +76,7 @@ function buildDeps(overrides: Partial<EpisodeRunnerDeps> & { likedSongs?: LikedS
   const state = overrides.state ?? createPlaybackState([]);
 
   return {
-    llm: createMockLlmAdapter() as EpisodeRunnerDeps["llm"],
+    llm: (overrides.llm ?? createMockLlmAdapter()) as EpisodeRunnerDeps["llm"],
     music: music as EpisodeRunnerDeps["music"],
     tts: { synthesize: vi.fn().mockResolvedValue({ audioUrl: "/cache/tts/mock.wav", text: "test" }) } as EpisodeRunnerDeps["tts"],
     ttsCacheDir: "/tmp/tts",
@@ -236,7 +236,37 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const requestFragment = lastCall?.[0]?.find((m: { label: string }) => m.label === "用户输入和工具结果");
       const content: string = requestFragment?.content ?? "";
       expect(content).toContain("favorites.available:");
-      expect(content).toContain("favorites.candidateSource:");
+      expect(content).toContain("candidates.source:");
+    });
+
+    it("falls back to selected-track copy when LLM narration mentions a different song", async () => {
+      const favTrack = makeTrack("fav-001", "Actual Favorite", "Favorite Artist");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      const music = createMockMusicAdapter();
+      const llm = {
+        compute: vi.fn()
+          .mockResolvedValueOnce({
+            say: "Draft query.",
+            play: { query: "warm morning indie", reason: "draft" },
+            segue: "draft",
+            reason: "draft"
+          })
+          .mockResolvedValueOnce({
+            say: "来听这首 Deep Focus Electronics。",
+            play: { query: "Deep Focus Electronics", reason: "wrong track" },
+            segue: "wrong segue",
+            reason: "wrong track"
+          })
+      };
+      const deps = buildDeps({ likedSongs, music, llm: llm as EpisodeRunnerDeps["llm"] });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.track.title).toBe("Actual Favorite");
+      expect(result.decision.say).toContain("Actual Favorite");
+      expect(result.decision.say).toContain("Favorite Artist");
+      expect(result.decision.say).not.toContain("Deep Focus Electronics");
+      expect(result.decision.play.trackId).toBe("fav-001");
     });
   });
 

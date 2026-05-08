@@ -1,5 +1,5 @@
 import { formatRadioDateTime } from "../utils/time.js";
-import type { ContextFragment } from "@fakeradio/shared";
+import type { ContextFragment, Track } from "@fakeradio/shared";
 import type { CalendarItem, PlaybackDevice, WeatherSnapshot } from "../adapters/types.js";
 
 export type ContextEnvironment = {
@@ -19,6 +19,7 @@ export type BuildContextInput = {
   toolResults: string[];
   executionState: string;
   environment: ContextEnvironment;
+  candidates?: Track[];
 };
 
 export function buildContextWindow(input: BuildContextInput): ContextFragment[] {
@@ -56,6 +57,17 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
       priority: 4,
       source: "memory"
     },
+    ...(input.candidates && input.candidates.length > 0
+      ? [
+          {
+            id: "candidates" as const,
+            label: "候选曲目列表" as const,
+            content: formatCandidates(input.candidates),
+            priority: 4.5 as const,
+            source: "request" as const
+          }
+        ]
+      : []),
     {
       id: "request",
       label: "用户输入和工具结果",
@@ -87,4 +99,10 @@ function formatCalendar(calendar: CalendarItem[]): string {
 
 function formatDevices(devices: PlaybackDevice[]): string {
   return devices.map((device) => `${device.name} ${device.status}`).join(", ");
+}
+
+function formatCandidates(candidates: Track[]): string {
+  return candidates
+    .map((t) => `[${t.id}] ${t.title} - ${t.artist} (${t.album ?? "unknown"}, source: ${t.source})`)
+    .join("\n");
 }

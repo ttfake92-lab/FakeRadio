@@ -90,7 +90,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       stream.broadcast({ type: "queue-updated", payload: { queue: newQueue } });
     }
 
-    const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+    const { track, decision, isFallback, candidates, candidateSource, rerankSource } = await resolveNextTrackAndDecision(episodeRunnerDeps);
     const { result: ttsResult } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
     state.setTrack(track);
@@ -127,7 +127,15 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       decision,
       track,
       queue: state.getQueue(),
-      tts: ttsResult
+      tts: ttsResult,
+      diagnostics: {
+        candidateSource,
+        rerankSource,
+        favoritesAvailable: candidates.length,
+        candidatesCount: candidates.length,
+        isFallback,
+        musicProvider: deps.musicStatus
+      }
     });
   });
 

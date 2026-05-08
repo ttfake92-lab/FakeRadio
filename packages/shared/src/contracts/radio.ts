@@ -19,18 +19,7 @@ export const ContextFragmentSchema = z.object({
   source: z.enum(["system", "user", "environment", "memory", "request", "execution"])
 });
 
-export type DjDecision = {
-  say: string;
-  play: {
-    query?: string;
-    trackId?: string;
-    reason: string;
-  };
-  reason: string;
-  segue: string;
-};
-
-const DjDecisionBaseSchema = z.object({
+export const DjDecisionSchema = z.object({
   say: z.string().min(1),
   play: z
     .object({
@@ -45,26 +34,7 @@ const DjDecisionBaseSchema = z.object({
   segue: z.string().min(1)
 });
 
-export const DjDecisionSchema = DjDecisionBaseSchema.transform((decision): DjDecision => {
-  const play: DjDecision["play"] = {
-    reason: decision.play.reason
-  };
-
-  if (decision.play.query !== undefined) {
-    play.query = decision.play.query;
-  }
-
-  if (decision.play.trackId !== undefined) {
-    play.trackId = decision.play.trackId;
-  }
-
-  return {
-    say: decision.say,
-    play,
-    reason: decision.reason,
-    segue: decision.segue
-  };
-});
+export type DjDecision = z.infer<typeof DjDecisionSchema>;
 
 export const TtsResultSchema = z.object({
   text: z.string().min(1),
@@ -84,11 +54,21 @@ export const NowResponseSchema = z.object({
   updatedAt: z.string().datetime()
 });
 
+export const RecommendationDiagnosticsSchema = z.object({
+  candidateSource: z.enum(["favorites", "search", "queue", "mock"]),
+  rerankSource: z.enum(["llm-pick", "fallback"]),
+  favoritesAvailable: z.number().int().nonnegative(),
+  candidatesCount: z.number().int().nonnegative(),
+  isFallback: z.boolean(),
+  musicProvider: z.string()
+});
+
 export const NextResponseSchema = z.object({
   decision: DjDecisionSchema,
   track: TrackSchema,
   queue: z.array(TrackSchema),
-  tts: TtsResultSchema
+  tts: TtsResultSchema,
+  diagnostics: RecommendationDiagnosticsSchema.optional()
 });
 
 export const ChatRequestSchema = z.object({
@@ -97,7 +77,13 @@ export const ChatRequestSchema = z.object({
 
 export const ChatResponseSchema = z.object({
   message: z.string().min(1),
-  decision: DjDecisionSchema
+  decision: DjDecisionSchema,
+  action: z.object({
+    type: z.enum(["next-track", "add-favorite"]),
+    trackId: z.string().optional(),
+    title: z.string().optional(),
+    artist: z.string().optional()
+  }).optional()
 });
 
 export const TasteResponseSchema = z.object({
@@ -172,6 +158,70 @@ export const EpisodeNextResponseSchema = z.object({
   episode: RadioEpisodeSchema
 });
 
+export const FavoriteTrackSchema = z.object({
+  trackId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  album: z.string().optional(),
+  favoritedAt: z.string().datetime()
+});
+
+export const FavoriteRequestSchema = z.object({
+  trackId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  album: z.string().optional()
+});
+
+export const FavoritesResponseSchema = z.object({
+  favorites: z.array(FavoriteTrackSchema)
+});
+
+export const NeteaseLoginStatusSchema = z.object({
+  loggedIn: z.boolean(),
+  cookieStored: z.boolean(),
+  nickname: z.string().optional(),
+  userId: z.number().int().optional(),
+  message: z.string().optional()
+});
+
+export const NeteaseQrLoginChallengeSchema = z.object({
+  key: z.string().min(1),
+  qrImageUrl: z.string().min(1),
+  qrUrl: z.string().optional()
+});
+
+export const NeteaseQrLoginCheckSchema = z.object({
+  code: z.number().int(),
+  message: z.string(),
+  loggedIn: z.boolean(),
+  cookieSaved: z.boolean()
+});
+
+export const NeteaseCookieSubmitRequestSchema = z.object({
+  cookie: z.string().min(1)
+});
+
+export const NeteaseCookieSubmitResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string()
+});
+
+export const LikedSongsDiagnosticsSchema = z.object({
+  loaded: z.boolean(),
+  totalCount: z.number().int().nonnegative(),
+  validCount: z.number().int().nonnegative(),
+  invalidCount: z.number().int().nonnegative(),
+  samples: z.array(
+    z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      artist: z.string().min(1),
+      album: z.string().min(1)
+    })
+  ).max(3)
+});
+
 export type Track = z.infer<typeof TrackSchema>;
 export type ContextFragment = z.infer<typeof ContextFragmentSchema>;
 export type TtsResult = z.infer<typeof TtsResultSchema>;
@@ -188,3 +238,13 @@ export type Story = z.infer<typeof StorySchema>;
 export type PlaybackPlan = z.infer<typeof PlaybackPlanSchema>;
 export type RadioEpisode = z.infer<typeof RadioEpisodeSchema>;
 export type EpisodeNextResponse = z.infer<typeof EpisodeNextResponseSchema>;
+export type FavoriteTrack = z.infer<typeof FavoriteTrackSchema>;
+export type FavoriteRequest = z.infer<typeof FavoriteRequestSchema>;
+export type FavoritesResponse = z.infer<typeof FavoritesResponseSchema>;
+export type NeteaseLoginStatus = z.infer<typeof NeteaseLoginStatusSchema>;
+export type NeteaseQrLoginChallenge = z.infer<typeof NeteaseQrLoginChallengeSchema>;
+export type NeteaseQrLoginCheck = z.infer<typeof NeteaseQrLoginCheckSchema>;
+export type NeteaseCookieSubmitRequest = z.infer<typeof NeteaseCookieSubmitRequestSchema>;
+export type NeteaseCookieSubmitResponse = z.infer<typeof NeteaseCookieSubmitResponseSchema>;
+export type LikedSongsDiagnostics = z.infer<typeof LikedSongsDiagnosticsSchema>;
+export type RecommendationDiagnostics = z.infer<typeof RecommendationDiagnosticsSchema>;
