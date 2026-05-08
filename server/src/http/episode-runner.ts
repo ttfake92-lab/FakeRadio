@@ -1,5 +1,6 @@
 import type { DjDecision, RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
 import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
+import { buildContextWindow, type ContextEnvironment } from "../context/context-builder.js";
 import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import type { MemoryRepository } from "../state/memory-repository.js";
 import type { PlaybackState } from "./playback-state.js";
@@ -272,4 +273,47 @@ export function determineStoryType(sources: RadioEpisode["sources"]): RadioEpiso
     (s.kind === "metadata" || s.kind === "web") && (s.confidence ?? 0) >= 0.5
   );
   return hasBackgroundSource ? "background" : hasLyricSource ? "lyric-theme" : "mood-reading";
+}
+
+function hasHighConfidenceBackgroundSource(sources: RadioEpisode["sources"]): boolean {
+  return sources.some(
+    (s) => (s.kind === "metadata" || s.kind === "web") && (s.confidence ?? 0) >= 0.5
+  );
+}
+
+function formatSourcesForLLM(sources: RadioEpisode["sources"]): string {
+  return sources.map((s) => `[${s.kind}] ${s.title}\n${s.content}`).join("\n---\n");
+}
+
+export async function narrateStoryWithSources(
+  llm: LlmAdapter,
+  track: Track,
+  sources: RadioEpisode["sources"],
+  systemPrompt: string,
+  recentMemory: string[],
+  contextEnv: ContextEnvironment,
+  userTaste: string,
+  routines: string,
+  moodRules: string
+): Promise<{ narration: string; storyType: RadioEpisode["story"]["type"] }> {
+  const rawType = determineStoryType(sources);
+  const effectiveType = (rawType === "background" && !hasHighConfidenceBackgroundSource(sources))
+    ? (sources.some((s) => s.kind === "lyric") ? "lyric-theme" : "mood-reading")
+    : rawType;
+
+  const sourceContext = formatSourcesForLLM(sources);
+  const fragments = buildContextWindow({
+    now: new Date(),
+    systemPrompt: systemPrompt + `\n\n你是故事叙述者。基于以下曲目来源信息，为听众创作一段电台口播叙述。\n\n曲目: ${track.title} - ${track.artist}\n故事类型: ${effectiveType}\n\n来源:\n${sourceContext}`,
+    userTaste,
+    routines,
+    moodRules,
+    recentMemory,
+    toolResults: [],
+    executionState: "narrate-story",
+    environment: contextEnv,
+  });
+
+  const decision = await llm.compute(fragments);
+  return { narration: decision.say, storyType: effectiveType };
 }
