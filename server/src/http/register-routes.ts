@@ -196,53 +196,63 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   });
 
   app.get("/api/episode/next", async () => {
-    const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
-    trackRegistry.register(track);
-    state.rememberSelectedTrack(track);
-    await stateRepo.recordPlayedTrack({
-      id: randomUUID(),
-      trackId: track.id,
-      title: track.title,
-      artist: track.artist,
-      album: track.album ?? null,
-      source: track.source,
-      playedAt: new Date().toISOString()
-    });
+    try {
+      const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+      if (!track) {
+        throw new Error("No track available");
+      }
+      trackRegistry.register(track);
+      state.rememberSelectedTrack(track);
+      await stateRepo.recordPlayedTrack({
+        id: randomUUID(),
+        trackId: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album ?? null,
+        source: track.source,
+        playedAt: new Date().toISOString()
+      });
 
-    const sources = await gatherEpisodeSources(
-      storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
-    );
+      const sources = await gatherEpisodeSources(
+        storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
+      );
 
-    const weatherSnapshot = await weather.current();
-    const calendarItems = await calendar.upcoming();
-    const playbackDevices = await devices.list();
-    const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
-    const recentMemoryEntries = await memory.recent(5);
+      const [weatherSnapshot, calendarItems, playbackDevices, recentMemoryEntries] = await Promise.all([
+        weather.current(),
+        calendar.upcoming(),
+        devices.list(),
+        memory.recent(5)
+      ]);
+      const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
 
-    const { narration, storyType } = await narrateStoryWithSources(
-      llm,
-      track,
-      sources,
-      systemPrompt,
-      recentMemoryEntries.map((entry) => entry.content),
-      contextEnv,
-      userPreferences.taste,
-      userPreferences.routines,
-      userPreferences.moodRules
-    );
+      const { narration, storyType } = await narrateStoryWithSources(
+        llm,
+        track,
+        sources,
+        systemPrompt,
+        recentMemoryEntries.map((entry) => entry.content),
+        contextEnv,
+        userPreferences.taste,
+        userPreferences.routines,
+        userPreferences.moodRules
+      );
 
-    const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
+      const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
 
-    const episode: RadioEpisode = {
-      track,
-      story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
-      sources,
-      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
-      fallbackReason
-    };
-    await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
+      const episode: RadioEpisode = {
+        track,
+        story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
+        sources,
+        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
+        fallbackReason
+      };
+      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
 
-    return EpisodeNextResponseSchema.parse({ episode });
+      return EpisodeNextResponseSchema.parse({ episode });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return { error: message };
+    }
   });
 
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(nowProvider(), userPreferences.playlists)));
