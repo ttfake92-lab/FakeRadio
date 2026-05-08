@@ -146,7 +146,7 @@ export function createStateRepository(dbPath: string): StateRepository {
     },
 
     getDjMessagesToday(): Promise<DjMessage[]> {
-      const today = new Date().toLocaleDateString('en-CA');
+      const today = new Date().toISOString().split('T')[0];
       return Promise.resolve(
         db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[]
       ).then(rows => rows.map(mapRowToDjMessage));
@@ -163,7 +163,12 @@ export function createStateRepository(dbPath: string): StateRepository {
       const row = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
       if (!row) return Promise.resolve(null);
       const parsed = JSON.parse(row.track_ids as string);
-      const trackIds = Array.isArray(parsed) ? parsed.map((t: unknown) => TrackSchema.parse(t)) : [];
+      const trackIds = Array.isArray(parsed)
+        ? parsed.reduce<Track[]>((acc, t) => {
+            const result = TrackSchema.safeParse(t);
+            return result.success ? [...acc, result.data] : acc;
+          }, [])
+        : [];
       return Promise.resolve({ id: row.id as string, trackIds, blockAt: row.block_at as string | null, createdAt: row.created_at as string });
     },
 
@@ -184,7 +189,7 @@ export function createStateRepository(dbPath: string): StateRepository {
 
     getStartupState() {
       const lastPlayedTracks = db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT 50`).all() as unknown[];
-      const today = new Date().toLocaleDateString('en-CA');
+      const today = new Date().toISOString().split('T')[0];
       const todayDjMessages = db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[];
       const lastQueueSnapshotRow = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
       const latestPrefsRows = db.prepare(`SELECT * FROM prefs_updates ORDER BY updated_at DESC LIMIT 100`).all() as unknown[];
@@ -192,7 +197,12 @@ export function createStateRepository(dbPath: string): StateRepository {
       let lastQueueSnapshot: QueueSnapshot | null = null;
       if (lastQueueSnapshotRow) {
         const parsed = JSON.parse(lastQueueSnapshotRow.track_ids as string);
-        const trackIds = Array.isArray(parsed) ? parsed.map((t: unknown) => TrackSchema.parse(t)) : [];
+        const trackIds = Array.isArray(parsed)
+          ? parsed.reduce<Track[]>((acc, t) => {
+              const result = TrackSchema.safeParse(t);
+              return result.success ? [...acc, result.data] : acc;
+            }, [])
+          : [];
         lastQueueSnapshot = { id: lastQueueSnapshotRow.id as string, trackIds, blockAt: lastQueueSnapshotRow.block_at as string | null, createdAt: lastQueueSnapshotRow.created_at as string };
       }
 
