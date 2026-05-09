@@ -16,3 +16,4 @@ user/favorites.json
 user/netease-liked-songs*.json
 user/网易云歌单.md
 .worktrees/
+.superpowers/
