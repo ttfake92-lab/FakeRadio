@@ -60,6 +60,10 @@ export async function sendChat(message: string) {
 
 export async function getNextEpisode() {
   const response = await fetch(buildApiUrl("/api/episode/next"));
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Episode generation failed: ${response.status}`);
+  }
   return EpisodeNextResponseSchema.parse(await response.json());
 }
 

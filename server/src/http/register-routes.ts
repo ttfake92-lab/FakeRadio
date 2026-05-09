@@ -198,7 +198,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.type(mimeType).send(createReadStream(filePath));
   });
 
-  app.get("/api/episode/next", async () => {
+  app.get("/api/episode/next", async (request, reply) => {
     try {
       const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
@@ -254,7 +254,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       return EpisodeNextResponseSchema.parse({ episode });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      return { error: message };
+      return reply.status(500).send({ error: message });
     }
   });
 
