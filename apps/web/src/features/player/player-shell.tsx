@@ -74,6 +74,7 @@ export function PlayerShell() {
   const nowDate = useMemo(() => new Date(), []);
   const onAirClock = useMemo(() => buildOnAirClock(nowDate), [nowDate]);
   const onAirModeLabel = useMemo(() => getOnAirModeLabel(nowDate.getHours()), [nowDate]);
+  const onAirTheme = onAirModeLabel === "Morning" ? "morning-console" : "terminal-fm";
   const onAirConnectionLabel = getConnectionLabel(
     streamStatus.label === "已连接" ? "connected" : streamStatus.label === "连接中" ? "connecting" : "disconnected"
   );
@@ -174,7 +175,7 @@ export function PlayerShell() {
   return (
     <>
       <OnAirTerminal
-        theme="terminal-fm"
+        theme={onAirTheme}
         clock={onAirClock}
         modeLabel={onAirModeLabel}
         connectionLabel={onAirConnectionLabel}

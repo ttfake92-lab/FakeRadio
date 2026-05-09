@@ -763,3 +763,64 @@ h2 {
   justify-content: space-between;
   padding: 0 5%;
 }
+
+.theme-morning-console {
+  --on-air-accent: #5e9f8a;
+  --on-air-bg: #f1dcc0;
+  --on-air-border: rgba(57, 48, 36, 0.16);
+  --on-air-muted: #786d5e;
+  --on-air-panel: rgba(255, 246, 226, 0.62);
+  --on-air-panel-strong: #2a2a24;
+  --on-air-text: #241f18;
+  --on-air-top: rgba(235, 213, 181, 0.88);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 229, 182, 0.60), transparent 36%),
+    #e7d0ad;
+}
+
+.theme-morning-console .on-air-panel {
+  background:
+    linear-gradient(rgba(241, 220, 192, 0.92), rgba(40, 58, 58, 0.72)),
+    radial-gradient(circle, rgba(95, 122, 108, 0.42) 1px, transparent 1px);
+  background-size: auto, 12px 12px;
+}
+
+.theme-morning-console .on-air-clock {
+  background:
+    linear-gradient(rgba(255, 245, 223, 0.76), rgba(255, 239, 206, 0.66)),
+    radial-gradient(circle, rgba(95, 122, 108, 0.38) 1px, transparent 1px);
+  background-size: auto, 12px 12px;
+}
+
+.theme-morning-console .on-air-time {
+  color: #2a241c;
+  text-shadow: 0 0 10px rgba(255, 250, 235, 0.62);
+}
+
+.theme-morning-console .on-air-weekday {
+  color: #332c22;
+}
+
+.theme-morning-console .on-air-play-strip,
+.theme-morning-console .on-air-input-bar {
+  background: rgba(249, 231, 199, 0.68);
+}
+
+.theme-morning-console .on-air-dj-room {
+  background:
+    linear-gradient(rgba(242, 221, 189, 0.70), rgba(47, 62, 57, 0.52)),
+    radial-gradient(circle, rgba(95, 122, 108, 0.34) 1px, transparent 1px);
+  background-size: auto, 12px 12px;
+}
+
+.theme-morning-console .on-air-message-bubble,
+.theme-morning-console .on-air-input-bar textarea {
+  background: rgba(255, 248, 232, 0.82);
+  color: #241f18;
+}
+
+.theme-morning-console .on-air-input-bar button[type="submit"] {
+  background: #28423a;
+  border-color: #28423a;
+  color: #fff8e8;
+}
