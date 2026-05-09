@@ -179,3 +179,82 @@ export function shouldStartCrossfade(
   const remainingMs = (durationSec - currentTimeSec) * 1000;
   return remainingMs <= crossfadeStartOffsetMs;
 }
+
+export const ON_AIR_THEMES = ["terminal-fm", "morning-console"] as const;
+
+export type OnAirThemeId = (typeof ON_AIR_THEMES)[number];
+
+export type OnAirClock = {
+  time: string;
+  weekday: string;
+  date: string;
+};
+
+export type StreamConnectionState = "connected" | "connecting" | "disconnected";
+
+export function getThemeLabel(theme: OnAirThemeId): string {
+  const labels: Record<OnAirThemeId, string> = {
+    "terminal-fm": "Terminal FM",
+    "morning-console": "Morning Console"
+  };
+  return labels[theme];
+}
+
+export function buildOnAirClock(date: Date, timeZone?: string): OnAirClock {
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    timeZone
+  });
+  const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    timeZone
+  });
+  const dayFormatter = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    timeZone
+  });
+  const monthFormatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    timeZone
+  });
+  const yearFormatter = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    timeZone
+  });
+
+  return {
+    time: timeFormatter.format(date),
+    weekday: weekdayFormatter.format(date),
+    date: `${dayFormatter.format(date)}·${monthFormatter.format(date).toUpperCase()}·${yearFormatter.format(date)}`
+  };
+}
+
+export function getOnAirModeLabel(hour: number): string {
+  if (hour >= 7 && hour < 9) return "Morning";
+  if (hour >= 9 && hour < 12) return "Focus";
+  if (hour >= 14 && hour < 18) return "Afternoon";
+  if (hour >= 21 || hour < 7) return "Night";
+  return "On Air";
+}
+
+export function getQueueCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "TRACK" : "TRACKS"}`;
+}
+
+export function getConnectionLabel(state: StreamConnectionState): string {
+  const labels: Record<StreamConnectionState, string> = {
+    connected: "CONNECTED",
+    connecting: "CONNECTING",
+    disconnected: "OFFLINE"
+  };
+  return labels[state];
+}
+
+export function getDjMessageText(message: string | undefined): string {
+  const trimmed = message?.trim();
+  return trimmed && trimmed.length > 0
+    ? trimmed
+    : "FakeRadio 已连接。告诉 DJ 你想进入什么状态。";
+}

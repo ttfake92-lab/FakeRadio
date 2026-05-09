@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildOnAirClock,
   computeFadedVolume,
   formatDuration,
+  getConnectionLabel,
+  getDjMessageText,
   getEpisodeStateLabel,
   getNextEpisodeLabel,
+  getOnAirModeLabel,
   getPlaybackLabel,
   getProviderStatusLabel,
+  getQueueCountLabel,
   getSourceKindLabel,
   getStorySourceDescription,
   getStoryTypeLabel,
+  getThemeLabel,
   getTrackSourceLabel,
+  ON_AIR_THEMES,
   shouldStartCrossfade,
   shouldWarnOnMockMusic,
   transitEpisodeStateSafely,
@@ -223,5 +230,45 @@ describe("getNextEpisodeLabel", () => {
 
   it("returns error label when error exists even if episode is available (error wins)", () => {
     expect(getNextEpisodeLabel(true, true, false)).toBe("下一集预备失败");
+  });
+});
+
+describe("on air terminal view model", () => {
+  it("defines terminal and morning theme labels", () => {
+    expect(ON_AIR_THEMES).toEqual(["terminal-fm", "morning-console"]);
+    expect(getThemeLabel("terminal-fm")).toBe("Terminal FM");
+    expect(getThemeLabel("morning-console")).toBe("Morning Console");
+  });
+
+  it("formats on air clock for the terminal header", () => {
+    const clock = buildOnAirClock(new Date("2026-04-20T13:11:00.000Z"), "UTC");
+
+    expect(clock.time).toBe("13:11");
+    expect(clock.weekday).toBe("Monday");
+    expect(clock.date).toBe("20·APR·2026");
+  });
+
+  it("maps hour of day to an on air mode label", () => {
+    expect(getOnAirModeLabel(8)).toBe("Morning");
+    expect(getOnAirModeLabel(10)).toBe("Focus");
+    expect(getOnAirModeLabel(15)).toBe("Afternoon");
+    expect(getOnAirModeLabel(22)).toBe("Night");
+  });
+
+  it("labels queue count in the reference layout language", () => {
+    expect(getQueueCountLabel(0)).toBe("0 TRACKS");
+    expect(getQueueCountLabel(3)).toBe("3 TRACKS");
+  });
+
+  it("uses stream status to produce a compact connection label", () => {
+    expect(getConnectionLabel("connected")).toBe("CONNECTED");
+    expect(getConnectionLabel("connecting")).toBe("CONNECTING");
+    expect(getConnectionLabel("disconnected")).toBe("OFFLINE");
+  });
+
+  it("prefers live DJ text and falls back to a calm on air message", () => {
+    expect(getDjMessageText("  现在进入写代码专注模式。  ")).toBe("现在进入写代码专注模式。");
+    expect(getDjMessageText("")).toBe("FakeRadio 已连接。告诉 DJ 你想进入什么状态。");
+    expect(getDjMessageText(undefined)).toBe("FakeRadio 已连接。告诉 DJ 你想进入什么状态。");
   });
 });
