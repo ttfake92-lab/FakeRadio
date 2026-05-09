@@ -2,7 +2,7 @@
 
 import type { ChatResponse, FavoriteTrack, HealthResponse, NextResponse, NowResponse } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNext, getNow, removeFavorite, sendChat } from "../../lib/api-client";
 import {
   buildOnAirClock,
@@ -48,6 +48,14 @@ export function PlayerShell() {
   const [isActing, setIsActing] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [nowDate, setNowDate] = useState(() => new Date());
+  const [theme, setTheme] = useState<"terminal-fm" | "morning-console">("terminal-fm");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const audio = useAudioEngine();
   const playback = usePlaybackState(audio);
@@ -71,10 +79,8 @@ export function PlayerShell() {
   const shouldWarn = shouldWarnOnMockMusic(musicStatus);
   const isFavorited = track !== null && favorites.some((f) => f.trackId === track.id);
 
-  const nowDate = useMemo(() => new Date(), []);
   const onAirClock = useMemo(() => buildOnAirClock(nowDate), [nowDate]);
   const onAirModeLabel = useMemo(() => getOnAirModeLabel(nowDate.getHours()), [nowDate]);
-  const onAirTheme = onAirModeLabel === "Morning" ? "morning-console" : "terminal-fm";
   const onAirConnectionLabel = getConnectionLabel(
     streamStatus.label === "已连接" ? "connected" : streamStatus.label === "连接中" ? "connecting" : "disconnected"
   );
@@ -95,6 +101,9 @@ export function PlayerShell() {
       setNow(nowResponse);
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
+      // Sync theme with time of day on load
+      const hour = new Date().getHours();
+      setTheme(hour >= 7 && hour < 9 ? "morning-console" : "terminal-fm");
     } catch (loadError) {
       playback.setError(`无法连接本地服务：${getErrorMessage(loadError)}`);
     } finally {
@@ -103,6 +112,68 @@ export function PlayerShell() {
   }, []);
 
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+
+  // Clock auto-update every second
+  useEffect(() => {
+    clockIntervalRef.current = setInterval(() => {
+      setNowDate(new Date());
+    }, 1000);
+    return () => {
+      if (clockIntervalRef.current !== null) {
+        clearInterval(clockIntervalRef.current);
+        clockIntervalRef.current = null;
+      }
+    };
+  }, []);
+
+  // WebSocket fallback polling when disconnected
+  useEffect(() => {
+    if (streamStatus.label === "已连接" || streamStatus.label === "连接中") {
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      return;
+    }
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const [nowRes, healthRes] = await Promise.all([getNow(), getHealth()]);
+        setNow(nowRes);
+        setHealth(healthRes);
+      } catch {
+        // silently fail polling
+      }
+    }, 10_000);
+    return () => {
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [streamStatus.label]);
+
+  // Audio time polling when playing
+  useEffect(() => {
+    if (!isPlaying) {
+      if (audioTimeRef.current !== null) {
+        clearInterval(audioTimeRef.current);
+        audioTimeRef.current = null;
+      }
+      return;
+    }
+    audioTimeRef.current = setInterval(() => {
+      const musicAudio = audio.musicRef.current;
+      if (musicAudio) {
+        setCurrentTime(musicAudio.currentTime);
+      }
+    }, 500);
+    return () => {
+      if (audioTimeRef.current !== null) {
+        clearInterval(audioTimeRef.current);
+        audioTimeRef.current = null;
+      }
+    };
+  }, [isPlaying, audio.musicRef]);
 
   const handleNext = async () => {
     setIsActing(true);
@@ -172,17 +243,42 @@ export function PlayerShell() {
     }
   };
 
+  const handlePlayPause = useCallback(() => {
+    const musicAudio = audio.musicRef.current;
+    if (!musicAudio) return;
+    if (musicAudio.paused) {
+      musicAudio.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      musicAudio.pause();
+      setIsPlaying(false);
+    }
+    setCurrentTime(musicAudio.currentTime);
+  }, [audio.musicRef]);
+
+  const handleThemeChange = useCallback((newTheme: "terminal-fm" | "morning-console") => {
+    setTheme(newTheme);
+  }, []);
+
+  const handleReplay = useCallback(() => {
+    const speechAudio = audio.speechRef.current;
+    if (speechAudio && speechAudio.src) {
+      speechAudio.currentTime = 0;
+      speechAudio.play().catch(() => {});
+    }
+  }, [audio.speechRef]);
+
   return (
     <>
       <OnAirTerminal
-        theme={onAirTheme}
+        theme={theme}
         clock={onAirClock}
         modeLabel={onAirModeLabel}
         connectionLabel={onAirConnectionLabel}
         currentTrackTitle={currentTrackTitle}
         currentTrackArtist={currentTrackArtist}
         playbackLabel={currentPlaybackLabel}
-        progressLabel="0:17"
+        progressLabel={`${Math.floor(currentTime / 60)}:${String(Math.floor(currentTime % 60)).padStart(2, "0")}`}
         durationLabel={formatDuration(playback.episodeData?.track.durationMs ?? track?.durationMs)}
         queueCountLabel={queueCountLabel}
         djName="FakeRadio"
@@ -192,9 +288,13 @@ export function PlayerShell() {
         chatMessage={chatMessage}
         isActing={isActing || isLoading}
         isFavorited={isFavorited}
+        isPlaying={isPlaying}
         onPlay={playback.playEpisode}
+        onPlayPause={handlePlayPause}
         onNext={handleNext}
         onToggleFavorite={handleToggleFavorite}
+        onThemeChange={handleThemeChange}
+        onReplay={handleReplay}
         onChatMessageChange={setChatMessage}
         onSubmitChat={handleChat}
       />

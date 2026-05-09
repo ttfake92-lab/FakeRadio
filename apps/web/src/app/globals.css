@@ -542,6 +542,7 @@ h2 {
   grid-template-columns: 12% minmax(0, 1fr) auto;
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
+  overflow: hidden;
   padding: 2% 5% 1.5%;
 }
 
@@ -568,11 +569,31 @@ h2 {
 
 .on-air-track-copy {
   min-width: 0;
+  overflow: hidden;
 }
 
 .on-air-track-copy p {
   font-size: clamp(0.68rem, 3.2cqw, 0.88rem);
   font-weight: 700;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  white-space: nowrap;
+  /* Fade right edge when overflowing */
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 12%, black 100%);
+  mask-image: linear-gradient(to right, transparent 0%, black 12%, black 100%);
+}
+
+.on-air-track-copy p::-webkit-scrollbar {
+  display: none;
+}
+
+.on-air-track-copy small {
+  color: var(--glass-muted);
+  display: block;
+  font-size: clamp(0.52rem, 2.5cqw, 0.68rem);
+  font-weight: 500;
+  margin-top: 0.2em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -863,4 +884,60 @@ h2 {
   background: rgba(94, 159, 138, 0.2);
   border-color: rgba(94, 159, 138, 0.35);
   color: var(--glass-accent);
+}
+
+/* ── Breathing & motion keyframes ── */
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.04); }
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes glow-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(69, 217, 189, 0.04) inset, 0 4px 24px rgba(0, 0, 0, 0.5), 0 16px 64px rgba(0, 0, 0, 0.3); }
+  50% { box-shadow: 0 0 0 1px rgba(69, 217, 189, 0.08) inset, 0 4px 32px rgba(0, 0, 0, 0.6), 0 16px 80px rgba(0, 0, 0, 0.4), 0 0 40px rgba(69, 217, 189, 0.06); }
+}
+
+/* ── Breathing motion — applied to stage background ── */
+.theme-terminal-fm .on-air-stage {
+  animation: breathe 8s ease-in-out infinite;
+}
+
+.theme-terminal-fm .on-air-panel {
+  animation: glow-breathe 6s ease-in-out infinite;
+}
+
+/* ── Live dot pulse ── */
+.on-air-live span {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+/* ── Morning console variant ── */
+@keyframes glow-breathe-morning {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(94, 159, 138, 0.06) inset, 0 4px 24px rgba(57, 48, 36, 0.2), 0 16px 64px rgba(57, 48, 36, 0.15); }
+  50% { box-shadow: 0 0 0 1px rgba(94, 159, 138, 0.1) inset, 0 4px 32px rgba(57, 48, 36, 0.3), 0 16px 80px rgba(57, 48, 36, 0.25), 0 0 30px rgba(94, 159, 138, 0.06); }
+}
+
+.theme-morning-console .on-air-stage {
+  animation: breathe 10s ease-in-out infinite;
+}
+
+.theme-morning-console .on-air-panel {
+  animation: glow-breathe-morning 7s ease-in-out infinite;
+}
+
+/* ── Respect prefers-reduced-motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .theme-terminal-fm .on-air-stage,
+  .theme-terminal-fm .on-air-panel,
+  .theme-morning-console .on-air-stage,
+  .theme-morning-console .on-air-panel,
+  .on-air-live span {
+    animation: none;
+  }
 }

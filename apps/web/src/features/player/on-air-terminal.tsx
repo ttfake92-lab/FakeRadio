@@ -21,9 +21,13 @@ export type OnAirTerminalProps = {
   chatMessage: string;
   isActing: boolean;
   isFavorited: boolean;
+  isPlaying: boolean;
   onPlay(): void;
+  onPlayPause(): void;
   onNext(): void;
   onToggleFavorite(): void;
+  onThemeChange(theme: OnAirThemeId): void;
+  onReplay(): void;
   onChatMessageChange(value: string): void;
   onSubmitChat(event: FormEvent<HTMLFormElement>): void;
 };
@@ -46,9 +50,13 @@ export function OnAirTerminal({
   chatMessage,
   isActing,
   isFavorited,
+  isPlaying,
   onPlay,
+  onPlayPause,
   onNext,
   onToggleFavorite,
+  onThemeChange,
+  onReplay,
   onChatMessageChange,
   onSubmitChat
 }: OnAirTerminalProps) {
@@ -62,8 +70,20 @@ export function OnAirTerminal({
           </div>
           <nav className="on-air-top-actions" aria-label="FakeRadio status actions">
             <a href="/settings">LOGIN</a>
-            <button type="button" aria-pressed={theme === "terminal-fm"}>DARK</button>
-            <button type="button" aria-pressed={theme === "morning-console"}>LIGHT</button>
+            <button
+              type="button"
+              aria-pressed={theme === "terminal-fm"}
+              onClick={() => onThemeChange("terminal-fm")}
+            >
+              DARK
+            </button>
+            <button
+              type="button"
+              aria-pressed={theme === "morning-console"}
+              onClick={() => onThemeChange("morning-console")}
+            >
+              LIGHT
+            </button>
           </nav>
         </header>
 
@@ -87,8 +107,9 @@ export function OnAirTerminal({
             <small>{playbackLabel}</small>
           </div>
           <div className="on-air-controls" aria-label="Playback controls">
-            <button type="button" onClick={onNext} disabled={isActing} aria-label="上一段">◀</button>
-            <button type="button" onClick={onPlay} disabled={isActing} aria-label="播放或暂停">Ⅱ</button>
+            <button type="button" onClick={onPlayPause} disabled={isActing} aria-label={isPlaying ? "暂停" : "播放"}>
+              {isPlaying ? "❚❚" : "▶"}
+            </button>
             <button type="button" onClick={onNext} disabled={isActing} aria-label="下一段">▶</button>
             <button type="button" onClick={onToggleFavorite} disabled={isActing} aria-label={isFavorited ? "取消收藏" : "收藏"}>
               {isFavorited ? "♥" : "♡"}
@@ -117,7 +138,7 @@ export function OnAirTerminal({
             <div>
               <p className="on-air-message-author">{djName.toUpperCase()}</p>
               <div className="on-air-message-bubble">{djMessage}</div>
-              <p className="on-air-message-meta">{messageTimeLabel} <button type="button">▶ REPLAY</button></p>
+              <p className="on-air-message-meta">{messageTimeLabel} <button type="button" onClick={onReplay}>▶ REPLAY</button></p>
               <p className="on-air-now-playing">{nowPlayingLabel}</p>
             </div>
           </article>
@@ -132,7 +153,7 @@ export function OnAirTerminal({
             placeholder="Say something to the DJ..."
             rows={1}
           />
-          <button type="button" aria-label="Voice input">◉</button>
+          <button type="button" aria-label="Voice input" disabled>◉</button>
           <button type="submit" disabled={isActing || chatMessage.trim().length === 0} aria-label="Send to DJ">↑</button>
         </form>
 
