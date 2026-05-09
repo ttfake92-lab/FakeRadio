@@ -68,7 +68,7 @@ export function OnAirTerminal({
         </header>
 
         <section className="on-air-clock" aria-label="On Air status">
-          <span className="on-air-clock-marker" aria-hidden="true">I</span>
+          <span className="on-air-clock-marker" aria-hidden="true">◴</span>
           <p className="on-air-time">{clock.time}</p>
           <p className="on-air-weekday">{clock.weekday}</p>
           <p className="on-air-date">{clock.date}</p>
