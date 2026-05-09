@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 const DEFAULT_USER_TASTE = "喜欢低刺激、持续陪伴的音乐。";
@@ -30,11 +29,10 @@ export type UserPreferences = {
 };
 
 function defaultBaseDir(): string {
-  try {
-    return resolve(fileURLToPath(new URL("../../../", import.meta.url)));
-  } catch {
-    return resolve(process.cwd(), "..");
+  if (process.env.FAKERADIO_BASE_DIR) {
+    return process.env.FAKERADIO_BASE_DIR;
   }
+  return process.cwd();
 }
 
 export async function loadUserPreferences(

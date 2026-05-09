@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export type TtsCacheManager = {
   resolvePath(cacheKey: string, ext?: string): string;
-  exists(cacheKey: string, ext?: string): boolean;
-  save(cacheKey: string, buffer: Buffer, ext?: string): void;
+  exists(cacheKey: string, ext?: string): Promise<boolean>;
+  save(cacheKey: string, buffer: Buffer, ext?: string): Promise<void>;
 };
 
 export function createTtsCacheManager(cacheDir: string): TtsCacheManager {
@@ -15,13 +15,18 @@ export function createTtsCacheManager(cacheDir: string): TtsCacheManager {
     resolvePath(cacheKey, override) {
       return ext(cacheKey, override);
     },
-    exists(cacheKey, override) {
-      return existsSync(ext(cacheKey, override));
+    async exists(cacheKey, override) {
+      try {
+        await access(ext(cacheKey, override));
+        return true;
+      } catch {
+        return false;
+      }
     },
-    save(cacheKey, buffer, override) {
+    async save(cacheKey, buffer, override) {
       const path = ext(cacheKey, override);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, buffer);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, buffer);
     }
   };
 }

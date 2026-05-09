@@ -43,7 +43,7 @@ export function createNeteaseHttpClient({
       }
 
       if (!url.searchParams.has("timestamp")) {
-          url.searchParams.set("timestamp", String(Date.now()));
+        url.searchParams.set("timestamp", String(Date.now()));
       }
 
       const headers: Record<string, string> = {

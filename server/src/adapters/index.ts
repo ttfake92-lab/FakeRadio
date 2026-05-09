@@ -4,6 +4,7 @@ export * from "./music/create-music-adapter.js";
 export * from "./music/mock-music-adapter.js";
 export * from "./music/netease-http-client.js";
 export * from "./music/netease-http-music-adapter.js";
+export * from "./music/netease-auth.js";
 export * from "./tts/mock-tts-adapter.js";
 export * from "./tts/edge-tts-adapter.js";
 export * from "./tts/mimo-tts-adapter.js";

@@ -41,6 +41,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   };
 
   let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  app.addHook("onClose", () => {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+  });
 
   app.get("/api/health", async () =>
     HealthResponseSchema.parse({

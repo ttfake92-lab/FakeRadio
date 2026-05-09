@@ -40,7 +40,7 @@ describe("mock adapters", () => {
     try {
       const tts = createMockTtsAdapter({ cacheDir: tempDir, baseUrl: "/cache/tts" });
       const ttsResult = await tts.synthesize("早上好");
-      expect(ttsResult.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.mp3$/);
+      expect(ttsResult.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.wav$/);
       expect(ttsResult.text).toBe("早上好");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

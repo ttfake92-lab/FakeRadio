@@ -34,10 +34,10 @@ describe("createMockTtsAdapter", () => {
 
     expect(result.text).toBe(text);
     expect(result.cacheKey).toBe(expectedCacheKey);
-    expect(result.audioUrl).toBe(`/cache/tts/${expectedCacheKey}.mp3`);
+    expect(result.audioUrl).toBe(`/cache/tts/${expectedCacheKey}.wav`);
 
     // Verify the file actually exists on disk
-    const filePath = join(tempDir, `${expectedCacheKey}.mp3`);
+    const filePath = join(tempDir, `${expectedCacheKey}.wav`);
     expect(existsSync(filePath)).toBe(true);
   });
 
@@ -62,7 +62,7 @@ describe("createMockTtsAdapter", () => {
     const result = await adapter.synthesize("test");
 
     expect(result.text).toBe("test");
-    expect(result.audioUrl).toBe("/cache/tts/mock-sentinel.mp3");
+    expect(result.audioUrl).toBe("/cache/tts/mock-sentinel.wav");
     expect(result.cacheKey).toBe("mock-sentinel");
   });
 
@@ -80,7 +80,7 @@ describe("createMockTtsAdapter", () => {
     // so afterEach rmSync won't fail on a non-directory
     try {
       const result = await adapter.synthesize("Write failure test");
-      expect(result.audioUrl).toBe("/cache/tts/mock-sentinel.mp3");
+      expect(result.audioUrl).toBe("/cache/tts/mock-sentinel.wav");
       expect(result.cacheKey).toBe("mock-sentinel");
     } finally {
       rmSync(tempDir, { force: true });
@@ -108,7 +108,7 @@ describe("generateSilenceWav (via createMockTtsAdapter)", () => {
     });
 
     const result = await adapter.synthesize("RIFF header test");
-    const filePath = join(tempDir, `${result.cacheKey}.mp3`);
+    const filePath = join(tempDir, `${result.cacheKey}.wav`);
 
     const { readFileSync } = await import("node:fs");
     const buffer = readFileSync(filePath);
@@ -144,7 +144,7 @@ describe("generateSilenceWav (via createMockTtsAdapter)", () => {
     });
 
     const result = await adapter.synthesize("Duration test");
-    const filePath = join(tempDir, `${result.cacheKey}.mp3`);
+    const filePath = join(tempDir, `${result.cacheKey}.wav`);
 
     const { readFileSync } = await import("node:fs");
     const buffer = readFileSync(filePath);
@@ -168,7 +168,7 @@ describe("generateSilenceWav (via createMockTtsAdapter)", () => {
     });
 
     const result = await adapter.synthesize("Silence check");
-    const filePath = join(tempDir, `${result.cacheKey}.mp3`);
+    const filePath = join(tempDir, `${result.cacheKey}.wav`);
 
     const { readFileSync } = await import("node:fs");
     const buffer = readFileSync(filePath);

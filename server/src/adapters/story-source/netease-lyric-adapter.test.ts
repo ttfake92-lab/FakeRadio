@@ -25,7 +25,7 @@ describe("createNeteaseLyricAdapter", () => {
     const adapter = createNeteaseLyricAdapter({ fetchJson });
     const result = await adapter.gather(makeTrack());
 
-    expect(fetchJson).toHaveBeenCalledWith("/lyric", { id: "123456" });
+    expect(fetchJson).toHaveBeenCalledWith("/lyric", { query: { id: "123456" } });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       kind: "lyric",

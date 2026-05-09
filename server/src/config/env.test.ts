@@ -11,6 +11,8 @@ describe("parseEnv", () => {
     expect(env.FAKERADIO_PROVIDER_MODE).toBe("auto");
     expect(env.FAKERADIO_NETEASE_API_BASE_URL).toBe("http://127.0.0.1:3300");
     expect(env.FAKERADIO_NETEASE_TIMEOUT_MS).toBe(2500);
+    expect(env.FAKERADIO_NETEASE_COOKIE_FILE).toBe("user/secrets/netease-cookie.txt");
+    expect(env.FAKERADIO_NETEASE_AUDIO_LEVEL).toBe("exhigh");
     expect(env.FAKERADIO_TTS_VOICE).toBe("zh-CN-XiaoxiaoNeural");
     expect(env.FAKERADIO_TTS_CACHE_DIR).toBe("cache/tts");
   });
@@ -19,12 +21,14 @@ describe("parseEnv", () => {
     const env = parseEnv({
       FAKERADIO_PROVIDER_MODE: "netease",
       FAKERADIO_NETEASE_API_BASE_URL: "http://127.0.0.1:4400",
-      FAKERADIO_NETEASE_TIMEOUT_MS: "1800"
+      FAKERADIO_NETEASE_TIMEOUT_MS: "1800",
+      FAKERADIO_NETEASE_AUDIO_LEVEL: "lossless"
     });
 
     expect(env.FAKERADIO_PROVIDER_MODE).toBe("netease");
     expect(env.FAKERADIO_NETEASE_API_BASE_URL).toBe("http://127.0.0.1:4400");
     expect(env.FAKERADIO_NETEASE_TIMEOUT_MS).toBe(1800);
+    expect(env.FAKERADIO_NETEASE_AUDIO_LEVEL).toBe("lossless");
   });
 
   it("supports custom tts voice and cache dir", () => {

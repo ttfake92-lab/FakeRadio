@@ -88,7 +88,8 @@ export function createPublicMetadataAdapter(options: CreatePublicMetadataAdapter
         };
 
         return [note];
-      } catch {
+      } catch (error) {
+        console.warn("Public metadata adapter gather failed:", error);
         return [];
       }
     }

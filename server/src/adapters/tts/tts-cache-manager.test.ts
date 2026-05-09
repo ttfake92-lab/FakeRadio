@@ -22,18 +22,18 @@ describe("tts cache manager", () => {
     expect(manager.resolvePath("abc123")).toBe(`${tempDir}/abc123.mp3`);
   });
 
-  it("checks existence", () => {
+  it("checks existence", async () => {
     const manager = createTtsCacheManager(tempDir);
-    expect(manager.exists("missing")).toBe(false);
+    expect(await manager.exists("missing")).toBe(false);
   });
 
-  it("saves and detects cached files", () => {
+  it("saves and detects cached files", async () => {
     const manager = createTtsCacheManager(tempDir);
     const buffer = Buffer.from("fake mp3 data");
 
-    manager.save("mykey", buffer);
+    await manager.save("mykey", buffer);
 
-    expect(manager.exists("mykey")).toBe(true);
+    expect(await manager.exists("mykey")).toBe(true);
     expect(manager.resolvePath("mykey")).toBe(`${tempDir}/mykey.mp3`);
   });
 });

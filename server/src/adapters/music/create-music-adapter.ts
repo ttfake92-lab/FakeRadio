@@ -12,6 +12,7 @@ type CreateMusicAdapterOptions = Partial<CreateNeteaseHttpClientOptions> & {
   providerMode: MusicProviderMode;
   probeNetease?: () => Promise<boolean>;
   createNeteaseAdapter?: () => MusicAdapter;
+  audioLevel?: "standard" | "higher" | "exhigh" | "lossless" | "hires";
 };
 
 type MusicAdapterResult = {
@@ -45,6 +46,8 @@ export async function createMusicAdapter({
   baseUrl = DEFAULT_NETEASE_BASE_URL,
   timeoutMs = DEFAULT_NETEASE_TIMEOUT_MS,
   fetchImpl,
+  cookieProvider,
+  audioLevel,
   probeNetease,
   createNeteaseAdapter
 }: CreateMusicAdapterOptions): Promise<MusicAdapterResult> {
@@ -75,7 +78,9 @@ export async function createMusicAdapter({
       createNeteaseHttpMusicAdapter({
         baseUrl,
         timeoutMs,
-        fetchImpl
+        fetchImpl,
+        cookieProvider,
+        ...(audioLevel === undefined ? {} : { audioLevel })
       }),
     status: "ready"
   };

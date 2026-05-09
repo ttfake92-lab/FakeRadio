@@ -9,3 +9,22 @@ await app.listen({
 });
 
 console.log(`FakeRadio server listening on http://127.0.0.1:${env.FAKERADIO_SERVER_PORT}`);
+
+function shutdown(signal: string) {
+  console.log(`Received ${signal}, shutting down...`);
+  const forceExit = setTimeout(() => {
+    console.error("Graceful shutdown timed out, forcing exit");
+    process.exit(1);
+  }, 5_000);
+  forceExit.unref();
+
+  app.close().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  });
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

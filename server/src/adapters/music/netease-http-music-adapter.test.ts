@@ -218,4 +218,30 @@ describe("createNeteaseHttpMusicAdapter", () => {
       })
     ).rejects.toThrow("Unable to resolve audio URL for track 101");
   });
+
+  it("passes cookieProvider to the internal HTTP client so requests carry auth cookie", async () => {
+    const capturedHeaders: Record<string, string> = {};
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { songs: [] } })
+    });
+    // Intercept to capture headers on the first call
+    const interceptorFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.headers && typeof init.headers === "object") {
+        Object.assign(capturedHeaders, init.headers as Record<string, string>);
+      }
+      return fakeFetch(url, init);
+    });
+
+    const adapter = createNeteaseHttpMusicAdapter({
+      baseUrl: "http://127.0.0.1:3300",
+      timeoutMs: 2500,
+      fetchImpl: interceptorFetch,
+      cookieProvider: async () => "MUSIC_U=test-session-cookie"
+    });
+
+    await adapter.search("ambient focus");
+
+    expect(capturedHeaders["cookie"]).toBe("MUSIC_U=test-session-cookie");
+  });
 });

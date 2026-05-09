@@ -83,4 +83,77 @@ describe("buildContextWindow", () => {
     expect(envFragment!.content).toContain("calendar: ");
     expect(envFragment!.content).toContain("devices: ");
   });
+
+  it("handles empty recent memory", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: [],
+      toolResults: [],
+      executionState: "idle",
+      environment: { weather: { summary: "晴", moodHint: "温暖" }, calendar: [], devices: [] }
+    });
+
+    const memoryFragment = fragments.find((f) => f.source === "memory");
+    expect(memoryFragment!.content).toBe("");
+  });
+
+  it("includes multiple memory entries separated by newlines", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: ["played: Morning Signal", "played: Quiet Compiler", "user said: 代码时间"],
+      toolResults: [],
+      executionState: "idle",
+      environment: { weather: { summary: "晴", moodHint: "温暖" }, calendar: [], devices: [] }
+    });
+
+    const memoryFragment = fragments.find((f) => f.source === "memory");
+    expect(memoryFragment!.content).toContain("played: Morning Signal");
+    expect(memoryFragment!.content).toContain("played: Quiet Compiler");
+    expect(memoryFragment!.content).toContain("user said: 代码时间");
+  });
+
+  it("defaults userMessage to empty string when undefined", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: [],
+      toolResults: ["tool output"],
+      executionState: "idle",
+      environment: { weather: { summary: "晴", moodHint: "温暖" }, calendar: [], devices: [] }
+    });
+
+    const requestFragment = fragments.find((f) => f.source === "request");
+    expect(requestFragment!.content).toContain("message: ");
+    expect(requestFragment!.content).toContain("tool output");
+  });
+
+  it("includes tool results in request fragment", () => {
+    const fragments = buildContextWindow({
+      now: new Date("2026-04-29T08:00:00.000Z"),
+      systemPrompt: "sys",
+      userTaste: "taste",
+      routines: "routines",
+      moodRules: "mood",
+      recentMemory: [],
+      userMessage: "test",
+      toolResults: ["music.search returned 5 tracks", "weather.current: sunny"],
+      executionState: "idle",
+      environment: { weather: { summary: "晴", moodHint: "温暖" }, calendar: [], devices: [] }
+    });
+
+    const requestFragment = fragments.find((f) => f.source === "request");
+    expect(requestFragment!.content).toContain("music.search returned 5 tracks");
+    expect(requestFragment!.content).toContain("weather.current: sunny");
+  });
 });

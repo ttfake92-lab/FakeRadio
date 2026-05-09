@@ -258,6 +258,19 @@ h2 {
   margin-top: 0.5rem;
 }
 
+.netease-login-box {
+  display: grid;
+  gap: 12px;
+}
+
+.netease-login-box img {
+  background: #f4efe5;
+  border-radius: 6px;
+  height: 180px;
+  padding: 8px;
+  width: 180px;
+}
+
 .chat-form {
   display: grid;
   gap: 10px;

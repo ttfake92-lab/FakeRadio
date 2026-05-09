@@ -27,6 +27,7 @@ Type: AFK
 - `.scratch/fakeradio-story-episode/issues/01-episode-contract-and-playable-story-skeleton.md`
 - `.scratch/fakeradio-story-episode/issues/02-netease-lyric-backed-episode.md`
 - `.scratch/fakeradio-story-episode/issues/03-public-metadata-backed-background-episode.md`
+- `.scratch/fakeradio-story-episode/issues/04-web-research-backed-creation-background.md`
 
 ## Comments
 

@@ -11,16 +11,20 @@ export type AdapterHealth = {
   upnp: AdapterStatus;
 };
 
+/** Generates DJ narration decisions from context fragments. */
 export type LlmAdapter = {
   compute(fragments: ContextFragment[]): Promise<DjDecision>;
+  computeRaw(fragments: ContextFragment[]): Promise<string>;
 };
 
+/** Searches, recommends, and resolves audio URLs for tracks. */
 export type MusicAdapter = {
   search(query: string): Promise<Track[]>;
   recommend(input: { mood: string; limit: number }): Promise<Track[]>;
   resolve(track: Track): Promise<Track>;
 };
 
+/** Converts text to speech audio. */
 export type TtsAdapter = {
   synthesize(text: string): Promise<TtsResult>;
 };
@@ -56,6 +60,7 @@ export type DeviceAdapter = {
   list(): Promise<PlaybackDevice[]>;
 };
 
+/** Gathers contextual source notes about a track for story generation. */
 export type StorySourceAdapter = {
   gather(track: Track): Promise<StorySourceNote[]>;
 };

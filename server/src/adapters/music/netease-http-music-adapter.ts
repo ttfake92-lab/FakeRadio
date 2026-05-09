@@ -48,7 +48,8 @@ export function createNeteaseHttpMusicAdapter(
     createNeteaseHttpClient({
       baseUrl: options.baseUrl ?? "http://127.0.0.1:3300",
       timeoutMs: options.timeoutMs ?? 2500,
-      fetchImpl: options.fetchImpl
+      fetchImpl: options.fetchImpl,
+      cookieProvider: options.cookieProvider
     }).fetchJson;
 
   return {

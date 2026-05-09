@@ -41,6 +41,8 @@ music provider 的选择由 `server/src/adapters/music/create-music-adapter.ts` 
 - `FAKERADIO_PROVIDER_MODE=auto | mock | netease`
 - `FAKERADIO_NETEASE_API_BASE_URL`
 - `FAKERADIO_NETEASE_TIMEOUT_MS`
+- `FAKERADIO_NETEASE_COOKIE_FILE`
+- `FAKERADIO_NETEASE_AUDIO_LEVEL=standard | higher | exhigh | lossless | hires`
 
 行为规则：
 
@@ -56,6 +58,27 @@ music provider 的选择由 `server/src/adapters/music/create-music-adapter.ts` 
 - `mock`：当前回退到 mock adapter
 
 前端播放器也会直接展示这个状态，并在 `mock` 时给出回退提示。
+
+## 网易云登录与音质
+
+> 截至 2026-05，music.163.com 已封禁网页版二维码登录（返回 code 8821）。FakeRadio 前端已提供 **Cookie 直接注入** 作为替代方案。
+
+播放器页提供“网易云登录”面板，支持两种方式：
+
+**Cookie 直接注入（推荐）**
+
+- `POST /api/netease/login/cookie`：提交完整 cookie 字符串（如 `MUSIC_U=xxx`），直接写入本地存储
+- `GET /api/netease/login/status`：查看当前 cookie 登录状态
+
+操作步骤：在浏览器打开 music.163.com 并登录 → F12 → Application → Cookies → music.163.com → 复制 `MUSIC_U` 值 → 在前端「手动注入 Cookie」区域粘贴提交。
+
+**二维码登录（当前不可用）**
+
+- `POST /api/netease/login/qr`：生成二维码
+- `GET /api/netease/login/qr/:key`：检查扫码结果（最终会收到 code 8821，无法完成）
+- `GET /api/netease/login/status`：查看当前 cookie 登录状态
+
+cookie 默认保存到 `user/secrets/netease-cookie.txt`，该目录不应提交到 git。登录后，`netease-http-music-adapter` 会自动带 cookie 请求网易云，并优先使用 `/song/url/v1` 加 `level` 参数请求更高音质。默认 `level` 是 `exhigh`，可以通过 `FAKERADIO_NETEASE_AUDIO_LEVEL` 调整。
 
 ## TTS adapter
 

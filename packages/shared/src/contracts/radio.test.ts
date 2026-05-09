@@ -51,19 +51,19 @@ describe("FakeRadio shared contracts", () => {
     expect(decision.play.query).toBe("warm morning indie");
   });
 
-  it("strips undefined optional play keys from DJ decisions", () => {
+  it("accepts DJ decisions with only query", () => {
     const decision = DjDecisionSchema.parse({
       say: "先用一首轻一点的歌进入状态。",
       play: {
         query: "quiet focus",
-        trackId: undefined,
         reason: "避免显式 undefined 泄漏到共享 contract 类型"
       },
       reason: "用户需要稳定、不打扰的背景音乐。",
       segue: "轻轻接上。"
     });
 
-    expect("trackId" in decision.play).toBe(false);
+    expect(decision.play.query).toBe("quiet focus");
+    expect(decision.play.trackId).toBeUndefined();
   });
 
   it("validates HTTP and stream payload shapes", () => {

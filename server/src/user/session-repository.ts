@@ -1,6 +1,6 @@
 import { formatRadioDate } from "../utils/time.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 
 export type SessionEntry = {
@@ -27,10 +27,12 @@ function getSessionPath(baseDir: string, date: string): string {
 
 export function createSessionRepository(baseDir: string, nowProvider?: () => Date): SessionRepository {
   const now = nowProvider ?? (() => new Date());
+  let writeLock: Promise<void> = Promise.resolve();
 
   async function readSession(date: string): Promise<SessionEntry[]> {
     const path = getSessionPath(baseDir, date);
-    if (!existsSync(path)) return [];
+    const fileExists = await access(path).then(() => true, () => false);
+    if (!fileExists) return [];
     try {
       const content = await readFile(path, "utf-8");
       const parsed = JSON.parse(content) as unknown;
@@ -46,12 +48,26 @@ export function createSessionRepository(baseDir: string, nowProvider?: () => Dat
     await writeFile(path, JSON.stringify(entries, null, 2), "utf-8");
   }
 
+  async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = writeLock;
+    let resolveLock!: () => void;
+    writeLock = new Promise<void>((resolve) => { resolveLock = resolve; });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      resolveLock();
+    }
+  }
+
   return {
     async appendMessage(entry) {
-      const date = formatDate(now());
-      const entries = await readSession(date);
-      entries.push(entry);
-      await writeSession(date, entries);
+      return withWriteLock(async () => {
+        const date = formatDate(now());
+        const entries = await readSession(date);
+        entries.push(entry);
+        await writeSession(date, entries);
+      });
     },
 
     async getToday() {

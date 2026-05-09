@@ -1,7 +1,12 @@
 import {
   ChatResponseSchema,
   EpisodeNextResponseSchema,
+  FavoritesResponseSchema,
   HealthResponseSchema,
+  NeteaseCookieSubmitResponseSchema,
+  NeteaseLoginStatusSchema,
+  NeteaseQrLoginChallengeSchema,
+  NeteaseQrLoginCheckSchema,
   NextResponseSchema,
   NowResponseSchema,
   TasteResponseSchema,
@@ -66,4 +71,51 @@ export async function getTaste() {
 export async function getTodayPlan() {
   const response = await fetch(buildApiUrl("/api/plan/today"));
   return TodayPlanResponseSchema.parse(await response.json());
+}
+
+export async function getFavorites() {
+  const response = await fetch(buildApiUrl("/api/favorites"));
+  return FavoritesResponseSchema.parse(await response.json());
+}
+
+export async function getNeteaseLoginStatus() {
+  const response = await fetch(buildApiUrl("/api/netease/login/status"));
+  return NeteaseLoginStatusSchema.parse(await response.json());
+}
+
+export async function createNeteaseQrLogin() {
+  const response = await fetch(buildApiUrl("/api/netease/login/qr"), {
+    method: "POST"
+  });
+  return NeteaseQrLoginChallengeSchema.parse(await response.json());
+}
+
+export async function checkNeteaseQrLogin(key: string) {
+  const response = await fetch(buildApiUrl(`/api/netease/login/qr/${encodeURIComponent(key)}`));
+  return NeteaseQrLoginCheckSchema.parse(await response.json());
+}
+
+export async function submitNeteaseCookie(cookie: string) {
+  const response = await fetch(buildApiUrl("/api/netease/login/cookie"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cookie })
+  });
+  return NeteaseCookieSubmitResponseSchema.parse(await response.json());
+}
+
+export async function addFavorite(track: { trackId: string; title: string; artist: string; album?: string }) {
+  const response = await fetch(buildApiUrl("/api/favorites"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(track)
+  });
+  return response.json() as Promise<{ favorite: { trackId: string; favoritedAt: string } }>;
+}
+
+export async function removeFavorite(trackId: string) {
+  const response = await fetch(buildApiUrl(`/api/favorites/${trackId}`), {
+    method: "DELETE"
+  });
+  return response.json() as Promise<{ removed: boolean }>;
 }

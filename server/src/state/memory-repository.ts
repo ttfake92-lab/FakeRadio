@@ -9,7 +9,7 @@ export type MemoryRepository = {
   append(content: string): Promise<MemoryEntry>;
 };
 
-export function createInMemoryMemoryRepository(seed: string[] = []): MemoryRepository {
+export function createInMemoryMemoryRepository(seed: string[] = [], maxEntries = 100): MemoryRepository {
   const entries: MemoryEntry[] = seed.map((content, index) => ({
     id: `seed-${index + 1}`,
     content,
@@ -27,6 +27,9 @@ export function createInMemoryMemoryRepository(seed: string[] = []): MemoryRepos
         createdAt: new Date().toISOString()
       };
       entries.push(entry);
+      while (entries.length > maxEntries) {
+        entries.shift();
+      }
       return entry;
     }
   };

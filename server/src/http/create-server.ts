@@ -129,13 +129,13 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const userPreferences = options.userPreferences ?? (await loadUserPreferences());
 
   // State
-  const stateRepo = createStateRepository(resolve(process.cwd(), "fakeradio.db"));
+  const stateRepo = createStateRepository(resolve(options.baseDir ?? process.cwd(), "fakeradio.db"));
   const { lastPlayedTracks, todayDjMessages, lastQueueSnapshot, latestPrefs } = await stateRepo.getStartupState();
   const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
   const currentPlanBlock = getCurrentPlanBlock(currentPlan, nowProvider());
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
   const initialQueue = await music.recommend({ mood: currentMoodHint, limit: 3 });
-  const queueToRestore = lastQueueSnapshot?.trackIds ?? initialQueue;
+  const queueToRestore = (lastQueueSnapshot?.trackIds && lastQueueSnapshot.trackIds.length > 0) ? lastQueueSnapshot.trackIds : initialQueue;
   const state = createPlaybackState(queueToRestore);
 
   const effectiveTtsStatus = options.ttsAdapter ? "mock" : ttsStatus;

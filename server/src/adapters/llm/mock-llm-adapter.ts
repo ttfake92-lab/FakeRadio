@@ -3,6 +3,14 @@ import type { LlmAdapter } from "../types.js";
 
 export function createMockLlmAdapter(): LlmAdapter {
   return {
+    async computeRaw(fragments) {
+      const env = readEnvironment(fragments);
+      if (env.isRaining) {
+        return "你偏好在雨天听温暖包裹感强的音乐，偏爱独立民谣与梦幻流行。";
+      }
+      return "你的品味以经典摇滚为基底，偏爱独立民谣与梦泡，注重情绪共鸣和听觉质感。";
+    },
+
     async compute(fragments) {
       const groundedTrack = readGroundedTrack(fragments);
       const previousTrack = readPreviousTrack(fragments);

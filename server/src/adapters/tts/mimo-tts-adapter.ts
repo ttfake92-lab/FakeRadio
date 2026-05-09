@@ -30,7 +30,7 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
     async synthesize(text) {
       const cacheKey = hashTtsPayload(text, "mimo", model, voice);
 
-      if (cacheManager.exists(cacheKey, ext)) {
+      if (await cacheManager.exists(cacheKey, ext)) {
         return { text, audioUrl: `/cache/tts/${cacheKey}.${ext}`, cacheKey };
       }
 
@@ -47,7 +47,8 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
             { role: "assistant", content: text }
           ],
           audio: { format, voice }
-        })
+        }),
+        signal: AbortSignal.timeout(15_000)
       });
 
       if (!response.ok) {
@@ -66,7 +67,7 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
       }
 
       const audioBuffer = Buffer.from(audioBase64, "base64");
-      cacheManager.save(cacheKey, audioBuffer, ext);
+      await cacheManager.save(cacheKey, audioBuffer, ext);
 
       return { text, audioUrl: `/cache/tts/${cacheKey}.${ext}`, cacheKey };
     }

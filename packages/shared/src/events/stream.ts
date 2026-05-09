@@ -26,6 +26,14 @@ export const StreamEventSchema = z.discriminatedUnion("type", [
       message: z.string().min(1),
       at: z.string().datetime()
     })
+  }),
+  z.object({
+    type: z.literal("agent-message"),
+    payload: z.object({
+      role: z.literal("agent"),
+      text: z.string().min(1),
+      trackId: z.string().min(1)
+    })
   })
 ]);
 

@@ -1,7 +1,7 @@
 import { formatRadioDate } from "../utils/time.js";
-import { writeFile, readFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { writeFile, readFile, mkdir, access } from "node:fs/promises";
 import { resolve, dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import archiver from "archiver";
 import { createWriteStream } from "node:fs";
 import type { FavoriteTrack } from "@fakeradio/shared";
@@ -31,6 +31,16 @@ export type ExportResult = {
   trackCount: number;
   date: string;
 };
+
+export type ExportTask = {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  progress?: ExportProgress;
+  result?: ExportResult;
+  error?: string;
+};
+
+const tasks = new Map<string, ExportTask>();
 
 function formatDate(date: Date): string {
   return formatRadioDate(date);
@@ -98,7 +108,12 @@ export async function exportToday(
     const track = deps.trackRegistry.get(fav.trackId);
     const musicPath = track ? getAudioFilePath(deps.audioDir, track.id) : null;
 
-    if (!musicPath || !existsSync(musicPath)) continue;
+    if (!musicPath) continue;
+    try {
+      await access(musicPath);
+    } catch {
+      continue;
+    }
 
     onProgress?.({ phase: "mixing", current: i + 1, total: favorites.length, trackTitle: fav.title });
 
@@ -160,5 +175,34 @@ export async function exportToday(
 
 export async function getExportFilePath(exportDir: string, date: string): Promise<string | null> {
   const zipPath = resolve(exportDir, `${date}.zip`);
-  return existsSync(zipPath) ? zipPath : null;
+  try {
+    await access(zipPath);
+    return zipPath;
+  } catch {
+    return null;
+  }
+}
+
+export function startExportTask(deps: ExportPipelineDeps): string {
+  const id = randomUUID();
+  tasks.set(id, { id, status: "pending" });
+
+  (async () => {
+    tasks.set(id, { id, status: "running" });
+    try {
+      const result = await exportToday(deps, (progress) => {
+        tasks.set(id, { ...tasks.get(id)!, status: "running", progress });
+      });
+      tasks.set(id, { id, status: "completed", result });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "export failed";
+      tasks.set(id, { id, status: "failed", error });
+    }
+  })();
+
+  return id;
+}
+
+export function getExportTask(id: string): ExportTask | undefined {
+  return tasks.get(id);
 }

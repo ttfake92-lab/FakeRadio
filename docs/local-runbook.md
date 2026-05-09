@@ -47,9 +47,36 @@ FakeRadio 默认配置：
 FAKERADIO_PROVIDER_MODE=auto
 FAKERADIO_NETEASE_API_BASE_URL=http://127.0.0.1:3300
 FAKERADIO_NETEASE_TIMEOUT_MS=2500
+FAKERADIO_NETEASE_COOKIE_FILE=user/secrets/netease-cookie.txt
+FAKERADIO_NETEASE_AUDIO_LEVEL=exhigh
 ```
 
 当本地网易云服务不可用时，FakeRadio 会自动回退到 mock 音乐来源，不会阻塞本地页面和基本播放流程。
+
+### 网易云登录
+
+FakeRadio 支持两种网易云登录方式：
+
+#### 1. Cookie 直接注入（推荐）
+
+由于 music.163.com 已封禁网页版二维码登录（返回 code 8821），当前推荐通过浏览器直接复制 cookie 注入：
+
+1. 在浏览器打开 music.163.com 并登录
+2. F12 → Application → Cookies → music.163.com → 复制 `MUSIC_U` 的值
+3. 在 FakeRadio 前端「网易云登录」面板的「手动注入 Cookie」区域粘贴并提交
+
+注入成功后立即生效，无需重启 server。cookie 默认保存到 `user/secrets/netease-cookie.txt`，该目录已加入 `.gitignore`，不要提交 cookie。
+
+登录后，网易云 music adapter 会在请求中自动带上 cookie，并优先使用 `/song/url/v1` 请求 `FAKERADIO_NETEASE_AUDIO_LEVEL` 指定的音质。默认值是 `exhigh`，也可以改成 `lossless` 或 `hires`，但实际能否获取取决于账号权益、歌曲版权和网易云接口返回。
+
+#### 2. 二维码登录（当前不可用）
+
+播放器页原来的二维码登录流程因网易服务端封禁已无法完成：
+
+- `POST /api/netease/login/qr`：生成二维码
+- `GET /api/netease/login/qr/:key`：轮询扫码结果（最终会返回 8821）
+
+如网易未来恢复该接口，可重新使用此方式。
 
 ## 用户偏好文件
 
@@ -61,6 +88,22 @@ FakeRadio 启动时会读取 `user/` 目录下的偏好文件，用于 DJ 决策
 | `user/routines.md` | 日常节奏，注入 DJ brain 的 `routines` 上下文 | 回退到默认日程描述 |
 | `user/mood-rules.md` | Mood 规则，注入 DJ brain 的 `moodRules` 上下文 | 回退到默认 mood 规则 |
 | `user/playlists.json` | 歌单定义，用于生成 `buildTodayPlan` 的时段 block 和选歌 seeds | 回退到仅包含 `morning-soft-start` 的默认歌单 |
+| `user/netease-liked-songs.raw.json` | 网易云收藏歌曲原始数据，用于品味诊断和推荐候选 | 诊断 API 返回 `loaded: false`，不影响播放流程 |
+
+**网易云收藏文件格式：** 将网易云「我喜欢的音乐」导出的 JSON 数组写入 `user/netease-liked-songs.raw.json`。每首歌需包含 `id`、`name`、`ar`（艺术家数组）、`al`（专辑对象，含 `name`）。示例：
+
+```json
+[
+  {
+    "id": 12345678,
+    "name": "歌曲名",
+    "ar": [{ "name": "艺术家名" }],
+    "al": { "name": "专辑名", "picUrl": "https://example.com/cover.jpg" }
+  }
+]
+```
+
+写入后可通过 `curl http://localhost:3301/api/favorites/diagnostics` 查看加载状态。
 
 修改这些文件后重启 server 即可生效，无需改代码。
 
@@ -96,6 +139,9 @@ screen -S fakeradio-netease -X quit
 | `FAKERADIO_SERVER_PORT` | Server 端口 | `3301` | 否 |
 | `FAKERADIO_PROVIDER_MODE` | 音乐来源：`auto` / `mock` / `netease` | `auto` | 否 |
 | `FAKERADIO_NETEASE_API_BASE_URL` | 网易云 API 地址 | `http://127.0.0.1:3300` | 否 |
+| `FAKERADIO_NETEASE_TIMEOUT_MS` | 网易云 API 请求超时 | `2500` | 否 |
+| `FAKERADIO_NETEASE_COOKIE_FILE` | 网易云登录 cookie 本地保存路径 | `user/secrets/netease-cookie.txt` | 否 |
+| `FAKERADIO_NETEASE_AUDIO_LEVEL` | 网易云音质：`standard` / `higher` / `exhigh` / `lossless` / `hires` | `exhigh` | 否 |
 | `FAKERADIO_DEEPSEEK_API_KEY` | DeepSeek API key（LLM） | — | 否（无 key 时回退到 mock LLM） |
 | `FAKERADIO_DEEPSEEK_MODEL` | DeepSeek 模型名 | `deepseek-v4-flash` | 否 |
 | `FAKERADIO_DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/v1` | 否 |
@@ -168,6 +214,7 @@ curl http://localhost:3301/api/plan/today
 - `/api/now` 的 `track.source` 和 `queue[].source`
 - `/api/next` 的 `decision.reason` 是否围绕真实曲目生成
 - `/api/plan/today` 的 `blocks[].moodHint` 是否来自对应 playlist 的首个 seed
+- `/api/next` 的 `diagnostics` 字段：`candidateSource` 反映候选来源（favorites 优先于 search）、`rerankSource` 反映 LLM 是否从候选中选曲、`favoritesAvailable` 为收藏曲目数量
 - 前端页面是否显示 `Music Provider` 和来源标签
 
 验证网页研究（web research）功能：

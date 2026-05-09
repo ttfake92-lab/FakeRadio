@@ -167,4 +167,30 @@ describe("createDeepSeekAdapter", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("passes 30s AbortSignal.timeout to fetch", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: JSON.stringify(validDecision) } }] })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createDeepSeekAdapter({ apiKey: "test-key" });
+    await adapter.compute(makeFragments());
+
+    const signal = fetchSpy.mock.calls[0][1].signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+
+    vi.restoreAllMocks();
+  });
+
+  it("propagates timeout error from fetch", async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new DOMException("The operation was aborted.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createDeepSeekAdapter({ apiKey: "test-key" });
+    await expect(adapter.compute(makeFragments())).rejects.toThrow();
+
+    vi.restoreAllMocks();
+  });
 });

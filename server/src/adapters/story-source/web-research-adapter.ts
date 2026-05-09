@@ -77,7 +77,8 @@ export function createWebResearchAdapter(
           };
           return note;
         });
-      } catch {
+      } catch (error) {
+        console.warn("Web research adapter gather failed:", error);
         return [];
       }
     }

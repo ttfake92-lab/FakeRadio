@@ -35,6 +35,8 @@ curl http://127.0.0.1:3301/api/health
 
 当返回 `adapters.music: "ready"` 时，表示当前已经走到真实网易云来源；返回 `"mock"` 时，表示当前处于回退路径。
 
+> 注意：截至 2026-05，music.163.com 已封禁网页版二维码登录（返回 code 8821）。FakeRadio 前端已提供 Cookie 注入作为替代登录方式，详见 `docs/local-runbook.md`。
+
 ## 真实 LLM 与 TTS
 
 FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：

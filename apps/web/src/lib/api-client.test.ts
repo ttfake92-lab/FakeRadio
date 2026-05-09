@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildApiUrl, buildMediaUrl, buildStreamUrl, getHealth, getServerBaseUrl } from "./api-client";
+import {
+  buildApiUrl,
+  buildMediaUrl,
+  buildStreamUrl,
+  checkNeteaseQrLogin,
+  createNeteaseQrLogin,
+  getHealth,
+  getNeteaseLoginStatus,
+  getServerBaseUrl
+} from "./api-client";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -55,5 +64,29 @@ describe("api-client", () => {
     const health = await getHealth();
 
     expect(health.adapters.music).toBe("ready");
+  });
+
+  it("loads Netease login status and QR login payloads", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        json: async () => ({ loggedIn: false, cookieStored: false, message: "尚未登录" })
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({ key: "qr-key-1", qrImageUrl: "data:image/png;base64,abc" })
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({ code: 803, message: "授权登录成功", loggedIn: true, cookieSaved: true })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getNeteaseLoginStatus()).resolves.toMatchObject({ loggedIn: false });
+    await expect(createNeteaseQrLogin()).resolves.toMatchObject({ key: "qr-key-1" });
+    await expect(checkNeteaseQrLogin("qr-key-1")).resolves.toMatchObject({ loggedIn: true });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:3301/api/netease/login/status");
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:3301/api/netease/login/qr", {
+      method: "POST"
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:3301/api/netease/login/qr/qr-key-1");
   });
 });

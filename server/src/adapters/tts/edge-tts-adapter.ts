@@ -17,7 +17,7 @@ export function createEdgeTtsAdapter(options: CreateEdgeTtsAdapterOptions): TtsA
     async synthesize(text) {
       const cacheKey = hashText(text);
 
-      if (cacheManager.exists(cacheKey)) {
+      if (await cacheManager.exists(cacheKey)) {
         return {
           text,
           audioUrl: `${baseUrl}/${cacheKey}.mp3`,
@@ -26,7 +26,7 @@ export function createEdgeTtsAdapter(options: CreateEdgeTtsAdapterOptions): TtsA
       }
 
       const buffer = await tts(text, { voice });
-      cacheManager.save(cacheKey, buffer);
+      await cacheManager.save(cacheKey, buffer);
 
       return {
         text,

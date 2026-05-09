@@ -166,4 +166,30 @@ describe("createMimoTtsAdapter", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("passes 15s AbortSignal.timeout to fetch", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ audio: { data: audioBase64 } })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir });
+    await adapter.synthesize("超时测试");
+
+    const signal = fetchSpy.mock.calls[0][1].signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+
+    vi.restoreAllMocks();
+  });
+
+  it("propagates timeout error from fetch", async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new DOMException("The operation was aborted.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir });
+    await expect(adapter.synthesize("超时测试")).rejects.toThrow();
+
+    vi.restoreAllMocks();
+  });
 });

@@ -10,6 +10,8 @@ const EnvSchema = z.object({
   FAKERADIO_PROVIDER_MODE: z.enum(["auto", "mock", "netease"]).default("auto"),
   FAKERADIO_NETEASE_API_BASE_URL: z.string().url().default("http://127.0.0.1:3300"),
   FAKERADIO_NETEASE_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
+  FAKERADIO_NETEASE_COOKIE_FILE: z.string().min(1).default("user/secrets/netease-cookie.txt"),
+  FAKERADIO_NETEASE_AUDIO_LEVEL: z.enum(["standard", "higher", "exhigh", "lossless", "hires"]).default("exhigh"),
   FAKERADIO_TTS_PROVIDER: z.enum(["edge", "mimo"]).default("edge"),
   FAKERADIO_TTS_VOICE: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
   FAKERADIO_TTS_CACHE_DIR: z.string().min(1).default("cache/tts"),

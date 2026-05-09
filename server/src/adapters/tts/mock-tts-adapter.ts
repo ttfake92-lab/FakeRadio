@@ -46,20 +46,20 @@ export function createMockTtsAdapter(options: CreateMockTtsAdapterOptions = {}):
 
       if (cacheManager) {
         try {
-          if (cacheManager.exists(cacheKey)) {
+          if (await cacheManager.exists(cacheKey, "wav")) {
             return {
               text,
-              audioUrl: `${baseUrl}/${cacheKey}.mp3`,
+              audioUrl: `${baseUrl}/${cacheKey}.wav`,
               cacheKey
             };
           }
 
           const silenceBuffer = generateSilenceWav(500);
-          cacheManager.save(cacheKey, silenceBuffer);
+          await cacheManager.save(cacheKey, silenceBuffer, "wav");
 
           return {
             text,
-            audioUrl: `${baseUrl}/${cacheKey}.mp3`,
+            audioUrl: `${baseUrl}/${cacheKey}.wav`,
             cacheKey
           };
         } catch {
@@ -70,7 +70,7 @@ export function createMockTtsAdapter(options: CreateMockTtsAdapterOptions = {}):
       // Sentinel: cacheDir unavailable or write failed
       return {
         text,
-        audioUrl: "/cache/tts/mock-sentinel.mp3",
+        audioUrl: "/cache/tts/mock-sentinel.wav",
         cacheKey: "mock-sentinel"
       };
     }
