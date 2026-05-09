@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type { Track } from "@fakeradio/shared";
+import { formatRadioDate } from "../utils/time.js";
 import { TrackSchema } from "@fakeradio/shared";
 
 export type PlayedTrack = {
@@ -62,7 +63,7 @@ export function createStateRepository(dbPath: string): StateRepository {
     );
     CREATE TABLE IF NOT EXISTS dj_messages (
       id TEXT PRIMARY KEY, text TEXT NOT NULL, track_id TEXT,
-      story_type TEXT, created_at TEXT NOT NULL
+      story_type TEXT, created_at TEXT NOT NULL, radio_date TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS queue_snapshots (
       id TEXT PRIMARY KEY, track_ids TEXT NOT NULL, block_at TEXT, created_at TEXT NOT NULL
@@ -72,12 +73,13 @@ export function createStateRepository(dbPath: string): StateRepository {
     );
     CREATE INDEX IF NOT EXISTS idx_played_tracks_played_at ON played_tracks(played_at);
     CREATE INDEX IF NOT EXISTS idx_dj_messages_created_at ON dj_messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_dj_messages_radio_date ON dj_messages(radio_date);
     CREATE INDEX IF NOT EXISTS idx_queue_snapshots_created_at ON queue_snapshots(created_at);
   `);
 
   // Prepared statements for inserts
   const stmtInsertTrack = db.prepare(`INSERT INTO played_tracks (id, track_id, title, artist, album, source, played_at) VALUES (@id, @trackId, @title, @artist, @album, @source, @playedAt)`);
-  const stmtInsertDj = db.prepare(`INSERT INTO dj_messages (id, text, track_id, story_type, created_at) VALUES (@id, @text, @trackId, @storyType, @createdAt)`);
+  const stmtInsertDj = db.prepare(`INSERT INTO dj_messages (id, text, track_id, story_type, created_at, radio_date) VALUES (@id, @text, @trackId, @storyType, @createdAt, @radioDate)`);
   const stmtSnapshotQueue = db.prepare(`INSERT INTO queue_snapshots (id, track_ids, block_at, created_at) VALUES (@id, @trackIds, @blockAt, @createdAt)`);
   const stmtUpsertPref = db.prepare(`INSERT INTO prefs_updates (id, key, value_json, updated_at) VALUES (@id, @key, @valueJson, @updatedAt) ON CONFLICT(key) DO UPDATE SET value_json = @valueJson, updated_at = @updatedAt`);
 
@@ -141,14 +143,15 @@ export function createStateRepository(dbPath: string): StateRepository {
     appendDjMessage(msg: Omit<DjMessage, "id" | "createdAt">): Promise<DjMessage> {
       const id = crypto.randomUUID();
       const createdAt = new Date().toISOString();
-      stmtInsertDj.run({ id, text: msg.text, trackId: msg.trackId ?? null, storyType: msg.storyType ?? null, createdAt });
+      const radioDate = formatRadioDate(new Date());
+      stmtInsertDj.run({ id, text: msg.text, trackId: msg.trackId ?? null, storyType: msg.storyType ?? null, createdAt, radioDate });
       return Promise.resolve({ id, ...msg, createdAt });
     },
 
     getDjMessagesToday(): Promise<DjMessage[]> {
-      const today = new Date().toISOString().split('T')[0];
+      const today = formatRadioDate(new Date());
       return Promise.resolve(
-        db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[]
+        db.prepare(`SELECT * FROM dj_messages WHERE radio_date = ? ORDER BY created_at ASC`).all(today) as unknown[]
       ).then(rows => rows.map(mapRowToDjMessage));
     },
 
@@ -189,8 +192,8 @@ export function createStateRepository(dbPath: string): StateRepository {
 
     getStartupState() {
       const lastPlayedTracks = db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT 50`).all() as unknown[];
-      const today = new Date().toISOString().split('T')[0];
-      const todayDjMessages = db.prepare(`SELECT * FROM dj_messages WHERE created_at >= ? ORDER BY created_at ASC`).all(today) as unknown[];
+      const today = formatRadioDate(new Date());
+      const todayDjMessages = db.prepare(`SELECT * FROM dj_messages WHERE radio_date = ? ORDER BY created_at ASC`).all(today) as unknown[];
       const lastQueueSnapshotRow = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
       const latestPrefsRows = db.prepare(`SELECT * FROM prefs_updates ORDER BY updated_at DESC LIMIT 100`).all() as unknown[];
 
