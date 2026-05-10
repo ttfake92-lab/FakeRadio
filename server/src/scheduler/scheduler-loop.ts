@@ -41,3 +41,68 @@ export function createSchedulerLoop(options: {
     },
   };
 }
+
+export type PrewarmScheduler = {
+  start(): void;
+  stop(): void;
+};
+
+export function createPrewarmScheduler(options: {
+  prewarmTime: string; // HH:mm format
+  prewarmEnabled: boolean;
+  nowProvider(): Date;
+  onPrewarmTick(): void;
+}): PrewarmScheduler {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastRunDate: string | null = null;
+
+  function parseTimeToMinutes(time: string): number {
+    const parts = time.split(":").map(Number);
+    const hours = parts[0] ?? 0;
+    const minutes = parts[1] ?? 0;
+    return hours * 60 + minutes;
+  }
+
+  function scheduleNext() {
+    if (!options.prewarmEnabled) return;
+
+    const now = options.nowProvider();
+    const timeParts = options.prewarmTime.split(":").map(Number);
+    const targetHour = timeParts[0] ?? 0;
+    const targetMinute = timeParts[1] ?? 0;
+    const targetMinutes = targetHour * 60 + targetMinute;
+
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    let nextRun: Date;
+    if (nowMinutes < targetMinutes) {
+      // Today hasn't hit the target time yet
+      nextRun = new Date(now);
+      nextRun.setHours(targetHour, targetMinute, 0, 0);
+    } else {
+      // Already past target today, schedule for tomorrow
+      nextRun = new Date(now);
+      nextRun.setDate(nextRun.getDate() + 1);
+      nextRun.setHours(targetHour, targetMinute, 0, 0);
+    }
+
+    const delay = nextRun.getTime() - now.getTime();
+    timer = setTimeout(() => {
+      const todayStr = options.nowProvider().toISOString().slice(0, 10);
+      if (lastRunDate !== todayStr) {
+        lastRunDate = todayStr;
+        options.onPrewarmTick();
+      }
+      scheduleNext();
+    }, delay);
+  }
+
+  return {
+    start() {
+      scheduleNext();
+    },
+    stop() {
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+    }
+  };
+}

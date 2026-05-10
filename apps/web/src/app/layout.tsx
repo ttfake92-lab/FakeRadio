@@ -1,8 +1,6 @@
-"use client";
-
 import type { Metadata } from "next";
-import { useEffect } from "react";
 import "./globals.css";
+import { ServiceWorkerRegistration } from "./_components/service-worker-registration";
 
 export const metadata: Metadata = {
   title: "FakeRadio",
@@ -11,15 +9,17 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(console.warn);
-    }
-  }, []);
-
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+      </head>
+      <body>
+        <ServiceWorkerRegistration />
+        {children}
+      </body>
     </html>
   );
 }

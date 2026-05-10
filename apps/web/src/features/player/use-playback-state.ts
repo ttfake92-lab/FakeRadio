@@ -26,6 +26,7 @@ export type PlaybackState = {
   episodeStateLabel: string;
   nextEpisodeLabel: string;
   musicAudioUrl: string | undefined;
+  episodeSource: "prepared" | "live" | null;
   playEpisode(): Promise<void>;
   setError(error: string | null): void;
   clearEpisodeState(): void;
@@ -38,11 +39,15 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   const [nextEpisodeError, setNextEpisodeError] = useState<string | null>(null);
   const [isPrefetching, setIsPrefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [episodeSource, setEpisodeSource] = useState<"prepared" | "live" | null>(null);
 
   const nextEpisodeRef = useRef<RadioEpisode | null>(null);
   const isPrefetchingRef = useRef(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onTimeUpdateRef = useRef<(() => void) | null>(null);
+  const episodeStateRef = useRef<EpisodePlaybackState>(episodeState);
+
+  episodeStateRef.current = episodeState;
 
   const episodeStateLabel = getEpisodeStateLabel(episodeState);
   const nextEpisodeLabel = getNextEpisodeLabel(nextEpisodeError !== null, nextEpisode !== null, isPrefetching);
@@ -158,7 +163,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   }
 
   const playEpisode = useCallback(async () => {
-    if (episodeState !== "idle" && episodeState !== "error" && episodeState !== "music") return;
+    if (episodeStateRef.current !== "idle" && episodeStateRef.current !== "error" && episodeStateRef.current !== "music") return;
 
     isPrefetchingRef.current = false;
     setIsPrefetching(false);
@@ -170,6 +175,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     try {
       const response: EpisodeNextResponse = await getNextEpisode();
       playEpisodeData(response.episode);
+      setEpisodeSource(response.source);
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("Invalid episode state transition")) {
         setEpisodeState("error");
@@ -230,6 +236,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     setNextEpisode(null);
     setNextEpisodeError(null);
     setError(null);
+    setEpisodeSource(null);
   }, []);
 
   return {
@@ -242,6 +249,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     episodeStateLabel,
     nextEpisodeLabel,
     musicAudioUrl,
+    episodeSource,
     playEpisode,
     setError,
     clearEpisodeState

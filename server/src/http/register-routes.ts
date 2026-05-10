@@ -7,6 +7,7 @@ import {
   NeteaseCookieSubmitRequestSchema,
   NeteaseCookieSubmitResponseSchema,
   NextResponseSchema,
+  PrewarmStatusSchema,
   StreamEventSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema,
@@ -18,6 +19,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
+import { formatRadioDate } from "../utils/time.js";
 import { proxyAndRecord } from "../audio/audio-recorder.js";
 import { startExportTask, getExportTask, getExportFilePath } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
@@ -62,6 +64,32 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       checkedAt: new Date().toISOString()
     })
   );
+
+  app.get("/api/prewarm/status", async () => {
+    const today = formatRadioDate(nowProvider());
+    const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+    const blockStatus = await Promise.all(
+      currentPlan.blocks.map(async (block) => {
+        const counts = await stateRepo.getPrewarmStatus(today);
+        return {
+          at: block.at,
+          label: block.label,
+          ready: counts.ready,
+          consumed: counts.consumed,
+          failed: counts.failed
+        };
+      })
+    );
+    const lastRun = await stateRepo.getPref<string>("prewarm:lastRun");
+    const nextRunAt = await stateRepo.getPref<string>("prewarm:nextRunAt");
+    return PrewarmStatusSchema.parse({
+      enabled: env.FAKERADIO_PREWARM_ENABLED ?? false,
+      targetDate: today,
+      lastRun: lastRun ?? null,
+      nextRunAt: nextRunAt ?? null,
+      blocks: blockStatus
+    });
+  });
 
   app.get("/api/now", async () => state.buildNowResponse());
 
@@ -200,6 +228,37 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.get("/api/episode/next", async (request, reply) => {
     try {
+      // Try to claim a prepared episode for the current block first
+      const today = formatRadioDate(nowProvider());
+      const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+      const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
+      const blockAt = currentBlock?.at ?? null;
+
+      if (blockAt !== null) {
+        const claimed = await stateRepo.claimPreparedEpisode(today, blockAt);
+        if (claimed !== null) {
+          const { episode } = claimed;
+          trackRegistry.register(episode.track);
+          state.rememberSelectedTrack(episode.track);
+          await stateRepo.recordPlayedTrack({
+            id: randomUUID(),
+            trackId: episode.track.id,
+            title: episode.track.title,
+            artist: episode.track.artist,
+            album: episode.track.album ?? null,
+            source: episode.track.source,
+            playedAt: new Date().toISOString()
+          });
+          await stateRepo.appendDjMessage({
+            text: episode.story.text,
+            trackId: episode.track.id,
+            storyType: episode.story.type
+          });
+          return EpisodeNextResponseSchema.parse({ episode, source: "prepared" });
+        }
+      }
+
+      // Fall back to live generation
       const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
         throw new Error("No track available");
@@ -251,7 +310,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       };
       await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
 
-      return EpisodeNextResponseSchema.parse({ episode });
+      return EpisodeNextResponseSchema.parse({ episode, source: "live" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return reply.status(500).send({ error: message });

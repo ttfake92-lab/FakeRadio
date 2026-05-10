@@ -21,7 +21,10 @@ const EnvSchema = z.object({
   FAKERADIO_BRAVE_API_KEY: z.string().optional(),
   FAKERADIO_DEEPSEEK_API_KEY: z.string().optional(),
   FAKERADIO_DEEPSEEK_MODEL: z.string().min(1).default("deepseek-v4-flash"),
-  FAKERADIO_DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com/v1")
+  FAKERADIO_DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com/v1"),
+  FAKERADIO_PREWARM_ENABLED: z.coerce.boolean().default(false),
+  FAKERADIO_PREWARM_TIME: z.string().min(1).default("02:00"),
+  FAKERADIO_PREWARM_EPISODES_PER_BLOCK: z.coerce.number().int().positive().default(3)
 });
 
 export function parseEnv(input: Record<string, string | undefined>) {

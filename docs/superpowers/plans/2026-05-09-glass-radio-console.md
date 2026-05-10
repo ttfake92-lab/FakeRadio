@@ -1,0 +1,671 @@
+# Glass Radio Console Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 将 `On Air` 页面从终端/像素视觉改造为 Glass Radio Console：暗色玻璃拟态、柔光卡片、高级控制台质感。只改前端展示层 CSS 和最小组件调整。
+
+**Architecture:** 保留 `9:16` 面板结构和所有数据流不变。将现有 `.on-air-*` CSS 区块和两个主题 token 整体替换为玻璃系统：半透明玻璃卡片、backdrop blur、内发光边框、细噪点背景。`on-air-terminal.tsx` 仅做最小 className 调整。
+
+**Tech Stack:** CSS variables、backdrop-filter、box-shadow、::before/::after 柔光。不改 JS/TS 业务逻辑。
+
+---
+
+## File Structure
+
+- Modify: `apps/web/src/app/globals.css:333-827`
+  - 替换所有 `.on-air-*` 区块为玻璃系统版本
+  - 重定义 `.theme-terminal-fm` 和 `.theme-morning-console` CSS 变量和覆盖
+- Modify: `apps/web/src/features/player/on-air-terminal.tsx`
+  - 最小结构调整：className 分组、clock marker glyph、topbar toggle 按钮样式
+
+---
+
+## Task 1: Rewrite Glass System CSS (globals.css)
+
+**Files:**
+- Modify: `apps/web/src/app/globals.css:333-827`
+
+- [ ] **Step 1: Replace .on-air-stage with glass background**
+
+Delete lines 347–356 in `globals.css` (the existing `.on-air-stage` block) and replace with:
+
+```css
+.on-air-stage {
+  align-items: center;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(88, 76, 165, 0.28) 0%, rgba(38, 60, 90, 0.18) 40%, transparent 70%),
+    radial-gradient(circle at 80% 80%, rgba(69, 217, 189, 0.06) 0%, transparent 40%),
+    #07080d;
+  display: grid;
+  justify-items: center;
+  min-height: 100svh;
+  padding: 12px;
+  position: relative;
+}
+
+/* Noise texture overlay */
+.on-air-stage::before {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+```
+
+- [ ] **Step 2: Replace .on-air-panel with glass card**
+
+Delete lines 358–371 (the existing `.on-air-panel` block) and replace with:
+
+```css
+.on-air-panel {
+  aspect-ratio: 9 / 16;
+  background: rgba(14, 16, 28, 0.75);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  box-shadow:
+    0 0 0 1px rgba(69, 217, 189, 0.04) inset,
+    0 4px 24px rgba(0, 0, 0, 0.5),
+    0 16px 64px rgba(0, 0, 0, 0.3);
+  color: #e8e4dc;
+  container-type: size;
+  display: grid;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  grid-template-rows: 9% 24% 16% 5.4% minmax(0, 1fr) 10% 4.8%;
+  max-height: calc(100svh - 24px);
+  overflow: hidden;
+  width: min(calc(100vw - 24px), calc((100svh - 24px) * 9 / 16), 430px);
+}
+```
+
+- [ ] **Step 3: Rewrite .theme-terminal-fm with glass tokens**
+
+Delete lines 373–389 (`.theme-terminal-fm` block) and replace with:
+
+```css
+.theme-terminal-fm {
+  --glass-accent: #45d9bd;
+  --glass-bg: #07080d;
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-highlight: rgba(69, 217, 189, 0.15);
+  --glass-muted: #6b6b78;
+  --glass-panel: rgba(14, 16, 28, 0.75);
+  --glass-panel-strong: rgba(8, 10, 18, 0.88);
+  --glass-text: #e8e4dc;
+  --glass-glow: 0 0 20px rgba(69, 217, 189, 0.12);
+}
+
+.theme-terminal-fm .on-air-panel {
+  background: var(--glass-panel);
+  border-color: var(--glass-border);
+}
+```
+
+- [ ] **Step 4: Rewrite topbar glass style**
+
+Delete lines 391–410 (`.on-air-topbar` through `.on-air-top-actions`) and replace with:
+
+```css
+.on-air-topbar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0 5%;
+}
+
+.on-air-brand-lockup,
+.on-air-top-actions,
+.on-air-controls,
+.on-air-progress,
+.on-air-input-bar,
+.on-air-footer {
+  align-items: center;
+  display: flex;
+}
+
+.on-air-avatar,
+.on-air-message-avatar {
+  background: linear-gradient(135deg, rgba(242, 221, 183, 0.9), var(--glass-accent) 60%, rgba(39, 49, 79, 0.9));
+  border-radius: 999px;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.12);
+  flex: 0 0 auto;
+}
+
+.on-air-avatar {
+  height: clamp(20px, 7cqw, 28px);
+  width: clamp(20px, 7cqw, 28px);
+}
+
+.on-air-brand {
+  font-size: clamp(1.2rem, 7cqw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-left: 10px;
+}
+
+.on-air-top-actions {
+  gap: 6px;
+}
+
+.on-air-top-actions a,
+.on-air-top-actions button {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #9b9ba8;
+  font-size: clamp(0.52rem, 2.5cqw, 0.72rem);
+  font-weight: 700;
+  min-height: 0;
+  padding: 0.45em 0.7em;
+  transition: background 0.2s, color 0.2s;
+}
+
+.on-air-top-actions button[aria-pressed="true"] {
+  background: rgba(69, 217, 189, 0.15);
+  border-color: rgba(69, 217, 189, 0.3);
+  color: var(--glass-accent);
+}
+```
+
+- [ ] **Step 5: Rewrite clock zone with luminous display**
+
+Delete lines 454–514 (`.on-air-clock` through `.on-air-live`) and replace with:
+
+```css
+.on-air-clock {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.015);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: grid;
+  grid-template-columns: 10% minmax(0, 1fr) 10%;
+  grid-template-rows: 1fr auto auto auto;
+  justify-items: center;
+  padding: 3% 5%;
+}
+
+.on-air-clock-marker {
+  color: var(--glass-accent);
+  font-size: clamp(1.6rem, 8cqw, 2.4rem);
+  font-weight: 300;
+  grid-column: 1;
+  grid-row: 1 / 4;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+.on-air-time,
+.on-air-weekday,
+.on-air-date,
+.on-air-live,
+.on-air-track-copy p,
+.on-air-track-copy small,
+.on-air-dj-room p,
+.on-air-message-meta,
+.on-air-now-playing {
+  margin: 0;
+}
+
+.on-air-time {
+  color: #f0ece4;
+  font-size: clamp(2.6rem, 16cqw, 4rem);
+  font-weight: 700;
+  grid-column: 2;
+  grid-row: 1;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  text-shadow: 0 0 30px rgba(69, 217, 189, 0.2), 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.on-air-weekday {
+  color: #a8a8b0;
+  font-size: clamp(0.72rem, 3.5cqw, 0.92rem);
+  font-weight: 500;
+  grid-column: 2;
+  grid-row: 2;
+  letter-spacing: 0.04em;
+  margin-top: 0.5em;
+}
+
+.on-air-date,
+.on-air-live {
+  color: var(--glass-muted);
+  font-size: clamp(0.54rem, 2.6cqw, 0.72rem);
+  font-weight: 600;
+  grid-column: 2;
+  margin-top: 0.6em;
+}
+
+.on-air-live {
+  color: var(--glass-accent);
+  margin-top: 0.4em;
+}
+```
+
+- [ ] **Step 6: Rewrite play strip with glass controls**
+
+Delete lines 516–564 (`.on-air-play-strip` through `.on-air-track-copy small`) and replace with:
+
+```css
+.on-air-play-strip {
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 12% minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 2% 5% 1.5%;
+}
+
+.on-air-track-meter {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  height: 18px;
+  place-self: center start;
+}
+
+.on-air-track-meter span {
+  background: var(--glass-accent);
+  border-radius: 1px;
+  display: block;
+  opacity: 0.6;
+  width: 2.5px;
+}
+
+.on-air-track-meter span:nth-child(1) { height: 7px; }
+.on-air-track-meter span:nth-child(2) { height: 12px; }
+.on-air-track-meter span:nth-child(3) { height: 5px; }
+.on-air-track-meter span:nth-child(4) { height: 9px; }
+
+.on-air-track-copy {
+  min-width: 0;
+}
+
+.on-air-track-copy p {
+  font-size: clamp(0.68rem, 3.2cqw, 0.88rem);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.on-air-track-copy small {
+  color: var(--glass-muted);
+  display: block;
+  font-size: clamp(0.52rem, 2.5cqw, 0.68rem);
+  font-weight: 500;
+  margin-top: 0.2em;
+}
+
+.on-air-controls {
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.on-air-controls button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: #c0bdb8;
+  display: grid;
+  font-size: clamp(0.56rem, 2.6cqw, 0.72rem);
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: clamp(26px, 7cqw, 34px);
+}
+
+.on-air-controls button:hover:not(:disabled) {
+  background: rgba(69, 217, 189, 0.12);
+  border-color: rgba(69, 217, 189, 0.25);
+  color: var(--glass-accent);
+}
+
+.on-air-progress {
+  color: var(--glass-muted);
+  font-size: clamp(0.52rem, 2.4cqw, 0.68rem);
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.on-air-progress div {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 1px;
+  flex: 1;
+  height: 2px;
+}
+
+.on-air-progress div span {
+  background: var(--glass-accent);
+  border-radius: 1px;
+  display: block;
+  height: 100%;
+  width: 17%;
+}
+```
+
+- [ ] **Step 7: Rewrite queue strip as subtle status band**
+
+Delete lines 605–615 (`.on-air-queue-strip`) and replace with:
+
+```css
+.on-air-queue-strip {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--glass-muted);
+  display: flex;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(0.58rem, 2.8cqw, 0.76rem);
+  font-weight: 600;
+  justify-content: space-between;
+  letter-spacing: 0.06em;
+  padding: 0 5%;
+}
+```
+
+- [ ] **Step 8: Rewrite DJ room as glass notification card**
+
+Delete lines 617–712 (`.on-air-dj-room` through `.on-air-footer`) and replace with:
+
+```css
+.on-air-dj-room {
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  display: grid;
+  grid-template-rows: 14% auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.on-air-dj-room header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 5%;
+}
+
+.on-air-dj-room header p {
+  font-size: clamp(0.82rem, 4cqw, 1.1rem);
+  font-weight: 700;
+}
+
+.on-air-dj-room header span,
+.on-air-dj-room header p span {
+  color: var(--glass-accent);
+}
+
+.on-air-server-line {
+  color: var(--glass-muted);
+  font-size: clamp(0.52rem, 2.5cqw, 0.68rem);
+  padding: 1em 0 0.6em;
+  text-align: center;
+}
+
+.on-air-message {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 32px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 5% 3%;
+}
+
+.on-air-message-avatar {
+  height: 32px;
+  width: 32px;
+}
+
+.on-air-message-author {
+  color: var(--glass-muted);
+  font-size: clamp(0.52rem, 2.4cqw, 0.68rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5em;
+}
+
+.on-air-message-bubble {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  font-size: clamp(0.74rem, 3.5cqw, 0.96rem);
+  font-weight: 500;
+  line-height: 1.6;
+  max-height: 12em;
+  overflow: auto;
+  padding: 0.85em 1em;
+}
+
+.on-air-message-meta {
+  align-items: center;
+  color: var(--glass-muted);
+  display: flex;
+  font-size: clamp(0.52rem, 2.4cqw, 0.68rem);
+  gap: 0.5rem;
+  margin-top: 0.7em;
+}
+
+.on-air-message-meta button {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #8a8a96;
+  font-size: inherit;
+  font-weight: 600;
+  min-height: 0;
+  padding: 0.3em 0.65em;
+}
+
+.on-air-now-playing {
+  color: #52525e;
+  font-size: clamp(0.54rem, 2.6cqw, 0.7rem);
+  margin-top: 1.5em;
+  text-align: center;
+}
+
+.on-air-input-bar {
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr clamp(28px, 7.5cqw, 34px) clamp(34px, 8.5cqw, 40px);
+  padding: 2.8% 5%;
+}
+
+.on-air-input-bar textarea {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #e8e4dc;
+  font-size: clamp(0.72rem, 3.4cqw, 0.9rem);
+  font-weight: 500;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.7em 0.85em;
+  resize: none;
+}
+
+.on-air-input-bar textarea::placeholder {
+  color: #52525e;
+}
+
+.on-air-input-bar button {
+  align-items: center;
+  border-radius: 999px;
+  display: grid;
+  font-size: clamp(0.6rem, 2.8cqw, 0.78rem);
+  font-weight: 700;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+}
+
+.on-air-input-bar button[type="button"] {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #7a7a88;
+}
+
+.on-air-input-bar button[type="submit"] {
+  background: rgba(69, 217, 189, 0.18);
+  border: 1px solid rgba(69, 217, 189, 0.3);
+  color: var(--glass-accent);
+}
+
+.on-air-footer {
+  background: rgba(255, 255, 255, 0.02);
+  color: #45454e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(0.52rem, 2.5cqw, 0.68rem);
+  font-weight: 600;
+  justify-content: space-between;
+  letter-spacing: 0.06em;
+  padding: 0 5%;
+}
+```
+
+- [ ] **Step 9: Rewrite morning-console theme with warm glass tokens**
+
+Delete lines 768–827 (`.theme-morning-console` and all its overrides) and replace with:
+
+```css
+.theme-morning-console {
+  --glass-accent: #5e9f8a;
+  --glass-bg: #e7d0ad;
+  --glass-border: rgba(57, 48, 36, 0.14);
+  --glass-highlight: rgba(94, 159, 138, 0.12);
+  --glass-muted: #7a6e5e;
+  --glass-panel: rgba(255, 248, 232, 0.68);
+  --glass-panel-strong: rgba(242, 221, 189, 0.82);
+  --glass-text: #241f18;
+  --glass-glow: 0 0 20px rgba(94, 159, 138, 0.1);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 229, 182, 0.5) 0%, transparent 40%),
+    #d9c4a0;
+}
+
+.theme-morning-console .on-air-panel {
+  background: var(--glass-panel);
+  border-color: var(--glass-border);
+  box-shadow:
+    0 0 0 1px rgba(94, 159, 138, 0.06) inset,
+    0 4px 24px rgba(57, 48, 36, 0.2),
+    0 16px 64px rgba(57, 48, 36, 0.15);
+}
+
+.theme-morning-console .on-air-clock {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.theme-morning-console .on-air-time {
+  color: #2a241c;
+  text-shadow: 0 0 24px rgba(255, 250, 235, 0.5), 0 2px 8px rgba(57, 48, 36, 0.15);
+}
+
+.theme-morning-console .on-air-weekday {
+  color: #5a4e3e;
+}
+
+.theme-morning-console .on-air-date,
+.theme-morning-console .on-air-live {
+  color: var(--glass-muted);
+}
+
+.theme-morning-console .on-air-live {
+  color: var(--glass-accent);
+}
+
+.theme-morning-console .on-air-message-bubble,
+.theme-morning-console .on-air-input-bar textarea {
+  background: rgba(255, 248, 232, 0.7);
+  border-color: rgba(57, 48, 36, 0.12);
+  color: #241f18;
+}
+
+.theme-morning-console .on-air-input-bar button[type="submit"] {
+  background: rgba(40, 66, 58, 0.85);
+  border-color: rgba(40, 66, 58, 0.9);
+  color: #f0ece4;
+}
+
+.theme-morning-console .on-air-top-actions button[aria-pressed="true"] {
+  background: rgba(94, 159, 138, 0.2);
+  border-color: rgba(94, 159, 138, 0.35);
+  color: var(--glass-accent);
+}
+```
+
+- [ ] **Step 10: Run typecheck and tests**
+
+Run:
+```bash
+pnpm --filter @fakeradio/web typecheck
+pnpm --filter @fakeradio/web test -- player-view-model.test.ts
+```
+
+Expected: PASS for both.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add apps/web/src/app/globals.css
+git commit -m "feat(web): glass radio console visual redesign"
+```
+
+---
+
+## Task 2: Minimal on-air-terminal.tsx Adjustments
+
+**Files:**
+- Modify: `apps/web/src/features/player/on-air-terminal.tsx`
+
+- [ ] **Step 1: Update clock marker glyph**
+
+The `on-air-clock-marker` currently shows `I`. Change it to a softer abstract glyph. Find:
+
+```tsx
+<span className="on-air-clock-marker" aria-hidden="true">I</span>
+```
+
+Replace with:
+
+```tsx
+<span className="on-air-clock-marker" aria-hidden="true">◴</span>
+```
+
+- [ ] **Step 2: Verify no other structural changes needed**
+
+The component should not need changes beyond the clock marker. If any className adjustments are needed for the glass hierarchy to work, they are minor and do not change props or event handlers.
+
+- [ ] **Step 3: Typecheck**
+
+Run:
+```bash
+pnpm --filter @fakeradio/web typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/web/src/features/player/on-air-terminal.tsx
+git commit -m "feat(web): minimal glass terminal component adjustments"
+```
+
+---
+
+## Final Verification
+
+- [ ] `pnpm --filter @fakeradio/web typecheck` passes
+- [ ] `pnpm --filter @fakeradio/web test -- player-view-model.test.ts` passes (83 tests)
+- Browser verification at desktop `1280×800`: panel centered, glass background and柔光层级 visible
+- Browser at mobile `390×844`: panel keeps `9:16`, bottom input visible
+- Browser at `360×640`: no stretch, no overlap
+- Force `theme="terminal-fm"` and `theme="morning-console"` to confirm both glass variants render correctly
+- Long DJ message: bubble scrolls internally without breaking panel proportions

@@ -24,8 +24,10 @@ import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
 import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
+import { formatRadioDate } from "../utils/time.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
-import { createSchedulerLoop } from "../scheduler/scheduler-loop.js";
+import { createSchedulerLoop, createPrewarmScheduler, type PrewarmScheduler } from "../scheduler/scheduler-loop.js";
+import { runPrewarmForDate, shouldRunPrewarm, markPrewarmRunComplete, type PrewarmDeps } from "../scheduler/daily-episode-prewarmer.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
@@ -163,6 +165,60 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   });
   schedulerLoop.start();
   app.addHook("onClose", () => schedulerLoop.stop());
+
+  // Prewarm scheduler
+  const prewarmDeps: PrewarmDeps = {
+    llm,
+    music,
+    tts,
+    ttsCacheDir,
+    weather,
+    calendar,
+    devices,
+    storySource,
+    publicMetadataAdapter: options.publicMetadataAdapter,
+    webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
+    likedSongs,
+    stateRepo,
+    nowProvider,
+    audioDir
+  };
+
+  const prewarmScheduler: PrewarmScheduler = createPrewarmScheduler({
+    prewarmTime: env.FAKERADIO_PREWARM_TIME,
+    prewarmEnabled: env.FAKERADIO_PREWARM_ENABLED,
+    nowProvider,
+    onPrewarmTick: async () => {
+      if (!env.FAKERADIO_PREWARM_ENABLED) return;
+      const tomorrow = new Date(nowProvider());
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const targetDate = formatRadioDate(tomorrow);
+      const tomorrowPlan = buildTodayPlan(tomorrow, userPreferences.playlists);
+      const canRun = await shouldRunPrewarm(prewarmDeps, targetDate);
+      if (!canRun) {
+        console.log(`[prewarm] Already ran for ${targetDate}, skipping.`);
+        return;
+      }
+      console.log(`[prewarm] Starting prewarm for ${targetDate}...`);
+      try {
+        const results = await runPrewarmForDate(
+          prewarmDeps,
+          targetDate,
+          tomorrowPlan.blocks,
+          env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
+          systemPrompt
+        );
+        const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
+        const totalFailed = results.reduce((s, r) => s + r.failed, 0);
+        console.log(`[prewarm] Completed for ${targetDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
+        await markPrewarmRunComplete(prewarmDeps, targetDate);
+      } catch (err) {
+        console.error(`[prewarm] Prewarm failed for ${targetDate}:`, err);
+      }
+    }
+  });
+  prewarmScheduler.start();
+  app.addHook("onClose", () => prewarmScheduler.stop());
 
   return app;
 }

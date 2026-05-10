@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import type { Track } from "@fakeradio/shared";
+import type { Track, PreparedEpisodeRecord, RadioEpisode } from "@fakeradio/shared";
 import { formatRadioDate } from "../utils/time.js";
-import { TrackSchema } from "@fakeradio/shared";
+import { TrackSchema, RadioEpisodeSchema } from "@fakeradio/shared";
 
 export type PlayedTrack = {
   id: string;
@@ -51,6 +51,11 @@ export type StateRepository = {
     latestPrefs: PrefsUpdate[];
   }>;
   pruneOldData(beforeIso: string): Promise<number>;
+  savePreparedEpisode(record: Omit<PreparedEpisodeRecord, "id" | "createdAt" | "updatedAt">): Promise<PreparedEpisodeRecord>;
+  claimPreparedEpisode(radioDate: string, blockAt: string): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null>;
+  getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
+  getBlockPrewarmStatus(radioDate: string, blockAt: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
+  markPreparedEpisodeAudioDownloaded(id: string, downloaded: boolean): Promise<void>;
 };
 
 export function createStateRepository(dbPath: string): StateRepository {
@@ -71,10 +76,23 @@ export function createStateRepository(dbPath: string): StateRepository {
     CREATE TABLE IF NOT EXISTS prefs_updates (
       id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, value_json TEXT NOT NULL, updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS prepared_episodes (
+      id TEXT PRIMARY KEY,
+      radio_date TEXT NOT NULL,
+      block_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      episode_json TEXT,
+      audio_downloaded INTEGER DEFAULT 0,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_played_tracks_played_at ON played_tracks(played_at);
     CREATE INDEX IF NOT EXISTS idx_dj_messages_created_at ON dj_messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_dj_messages_radio_date ON dj_messages(radio_date);
     CREATE INDEX IF NOT EXISTS idx_queue_snapshots_created_at ON queue_snapshots(created_at);
+    CREATE INDEX IF NOT EXISTS idx_prepared_episodes_radio_date_block ON prepared_episodes(radio_date, block_at);
+    CREATE INDEX IF NOT EXISTS idx_prepared_episodes_status ON prepared_episodes(status);
   `);
 
   // Prepared statements for inserts
@@ -82,6 +100,7 @@ export function createStateRepository(dbPath: string): StateRepository {
   const stmtInsertDj = db.prepare(`INSERT INTO dj_messages (id, text, track_id, story_type, created_at, radio_date) VALUES (@id, @text, @trackId, @storyType, @createdAt, @radioDate)`);
   const stmtSnapshotQueue = db.prepare(`INSERT INTO queue_snapshots (id, track_ids, block_at, created_at) VALUES (@id, @trackIds, @blockAt, @createdAt)`);
   const stmtUpsertPref = db.prepare(`INSERT INTO prefs_updates (id, key, value_json, updated_at) VALUES (@id, @key, @valueJson, @updatedAt) ON CONFLICT(key) DO UPDATE SET value_json = @valueJson, updated_at = @updatedAt`);
+  const stmtInsertPrepared = db.prepare(`INSERT INTO prepared_episodes (id, radio_date, block_at, status, episode_json, audio_downloaded, error, created_at, updated_at) VALUES (@id, @radioDate, @blockAt, @status, @episodeJson, @audioDownloaded, @error, @createdAt, @updatedAt)`);
 
   function mapRowToPlayedTrack(row: unknown): PlayedTrack {
     const r = row as Record<string, unknown>;
@@ -220,6 +239,98 @@ export function createStateRepository(dbPath: string): StateRepository {
     pruneOldData(beforeIso: string): Promise<number> {
       const result = db.prepare(`DELETE FROM played_tracks WHERE played_at < ?`).run(beforeIso);
       return Promise.resolve(result.changes);
+    },
+
+    savePreparedEpisode(record: Omit<PreparedEpisodeRecord, "id" | "createdAt" | "updatedAt">): Promise<PreparedEpisodeRecord> {
+      if (record.episodeJson) {
+        const parsed = JSON.parse(record.episodeJson);
+        RadioEpisodeSchema.parse(parsed);
+      }
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      stmtInsertPrepared.run({
+        id,
+        radioDate: record.radioDate,
+        blockAt: record.blockAt,
+        status: record.status,
+        episodeJson: record.episodeJson ?? null,
+        audioDownloaded: record.audioDownloaded ? 1 : 0,
+        error: record.error ?? null,
+        createdAt: now,
+        updatedAt: now
+      });
+      return Promise.resolve({ id, ...record, createdAt: now, updatedAt: now });
+    },
+
+    claimPreparedEpisode(radioDate: string, blockAt: string): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null> {
+      const transaction = db.transaction((rDate: string, bAt: string) => {
+        const row = db.prepare(
+          `SELECT * FROM prepared_episodes WHERE radio_date = ? AND block_at = ? AND status = 'ready' ORDER BY created_at ASC LIMIT 1`
+        ).get(rDate, bAt) as Record<string, unknown> | undefined;
+        if (!row) return null;
+        const updatedAt = new Date().toISOString();
+        db.prepare(`UPDATE prepared_episodes SET status = 'consumed', updated_at = ? WHERE id = ?`).run(updatedAt, row.id);
+        return { row, updatedAt };
+      });
+
+      const result = transaction(radioDate, blockAt);
+      if (!result) return Promise.resolve(null);
+
+      const { row, updatedAt } = result;
+      const episodeJson = row.episode_json as string | null;
+      if (!episodeJson) return Promise.resolve(null);
+
+      const parsed = JSON.parse(episodeJson);
+      const validation = RadioEpisodeSchema.safeParse(parsed);
+      if (!validation.success) return Promise.resolve(null);
+
+      const record: PreparedEpisodeRecord = {
+        id: row.id as string,
+        radioDate: row.radio_date as string,
+        blockAt: row.block_at as string,
+        status: "consumed",
+        episodeJson,
+        audioDownloaded: Boolean(row.audio_downloaded),
+        error: (row.error as string | null) ?? undefined,
+        createdAt: row.created_at as string,
+        updatedAt
+      };
+
+      return Promise.resolve({ record, episode: validation.data });
+    },
+
+    getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }> {
+      const result = db.prepare(
+        `SELECT status, COUNT(*) as count FROM prepared_episodes WHERE radio_date = ? GROUP BY status`
+      ).all(radioDate) as Array<{ status: string; count: number }>;
+      const status = { ready: 0, consumed: 0, failed: 0, preparing: 0 };
+      for (const row of result) {
+        if (row.status === "ready") status.ready = row.count;
+        if (row.status === "consumed") status.consumed = row.count;
+        if (row.status === "failed") status.failed = row.count;
+        if (row.status === "preparing") status.preparing = row.count;
+      }
+      return Promise.resolve(status);
+    },
+
+    getBlockPrewarmStatus(radioDate: string, blockAt: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }> {
+      const result = db.prepare(
+        `SELECT status, COUNT(*) as count FROM prepared_episodes WHERE radio_date = ? AND block_at = ? GROUP BY status`
+      ).all(radioDate, blockAt) as Array<{ status: string; count: number }>;
+      const status = { ready: 0, consumed: 0, failed: 0, preparing: 0 };
+      for (const row of result) {
+        if (row.status === "ready") status.ready = row.count;
+        if (row.status === "consumed") status.consumed = row.count;
+        if (row.status === "failed") status.failed = row.count;
+        if (row.status === "preparing") status.preparing = row.count;
+      }
+      return Promise.resolve(status);
+    },
+
+    markPreparedEpisodeAudioDownloaded(id: string, downloaded: boolean): Promise<void> {
+      const updatedAt = new Date().toISOString();
+      db.prepare(`UPDATE prepared_episodes SET audio_downloaded = ?, updated_at = ? WHERE id = ?`).run(downloaded ? 1 : 0, updatedAt, id);
+      return Promise.resolve();
     }
   };
 }

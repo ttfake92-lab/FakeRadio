@@ -252,3 +252,91 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3301$(curl -s http://loc
 - `sources[].kind` 和 `sources[].confidence`
 - story audio 文件是否返回 HTTP 200（mock TTS 回退生成的静音 WAV 也必须可播放）
 - `fallbackReason` 是否记录了 TTS 或资料源回退原因
+
+## 每日节目预热（Prewarm）
+
+FakeRadio 支持在每天夜间自动生成次日完整节目，存储在本地 SQLite 中，播放时优先领取已准备好的 episode，减少实时生成延迟。
+
+### 环境变量
+
+| 变量名 | 说明 | 默认值 | 必需 |
+|---|---|---|---|
+| `FAKERADIO_PREWARM_ENABLED` | 是否启用夜间预热 | `false` | 否 |
+| `FAKERADIO_PREWARM_TIME` | 每日预热触发时间（HH:mm） | `02:00` | 否 |
+| `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` | 每个时段 block 准备的 episode 数量 | `3` | 否 |
+
+启用预热后，server 会在每天凌晨（默认 02:00）为明天的每个时段 block 生成指定数量的 episode，保存到 `prepared_episodes` 表。
+
+### 验证预热是否工作
+
+```bash
+# 查看今日预热状态
+curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRun, nextRunAt, blocks: .blocks[] | {at, label, ready, consumed, failed}}'
+```
+
+返回示例（已启用且有 episode 准备就绪）：
+
+```json
+{
+  "enabled": true,
+  "targetDate": "2026-05-10",
+  "lastRun": "2026-05-09T02:00:00.000Z",
+  "nextRunAt": "2026-05-10T02:00:00.000Z",
+  "blocks": [
+    { "at": "00:00", "label": "午夜静谧", "ready": 3, "consumed": 0, "failed": 0 },
+    { "at": "07:00", "label": "早晨轻启动", "ready": 3, "consumed": 0, "failed": 0 }
+  ]
+}
+```
+
+字段含义：
+- `enabled`：是否启用（`FAKERADIO_PREWARM_ENABLED`）
+- `targetDate`：预热目标日期（明天）
+- `lastRun`：上次运行时间
+- `nextRunAt`：下次计划运行时间
+- `blocks[].ready`：该时段已准备就绪的 episode 数量
+- `blocks[].consumed`：已被播放器领取的 episode 数量
+- `blocks[].failed`：生成失败的 episode 数量
+
+### 播放来源（Prepared vs Live）
+
+`/api/episode/next` 优先领取 prepared episode，命中时返回的 `source` 字段为 `"prepared"`；没有 ready episode 时走实时生成，`source` 为 `"live"`。前端根据 `source` 在播放器状态区显示"已就绪"（prepared）或当前播放状态（live）。
+
+### 本地歌曲音频预下载
+
+夜间预热生成 episode 后，server 会自动尝试预下载对应歌曲音频到 `user/audio/` 目录（`user/audio/<trackId>.mp3`）。播放时 `/api/audio/:trackId` 优先读取本地文件，本地缺失时自动代理远端音频。
+
+预下载状态记录在 `prepared_episodes.audio_downloaded` 字段，可通过 `/api/prewarm/status` 的各 block 统计间接观察。
+
+### 常见失败处理
+
+| 失败现象 | 可能原因 | 处理方式 |
+|---|---|---|
+| 所有 block ready = 0 | `FAKERADIO_PREWARM_ENABLED=false` 或预热未触发 | 检查环境变量，确认 server 重启后已加载 |
+| 部分 block failed > 0 | 单个 episode 生成失败（选歌/TTS/资料失败） | 查看 server 日志 `[prewarm]`，对应 block 的选歌种子或 provider 状态 |
+| 凌晨 02:00 未触发 | scheduler 未正确启动，或时间已过未到次日 | 重启 server，观察启动日志 `[prewarm] Starting prewarm` |
+| prepared episode 被跳过 | 时段 block 时间已过，领取条件不满足 | 确认当前时间在目标 block 的时间范围内 |
+
+### 全天计划准备页
+
+独立页面（`/schedule`）展示每个时段 block 的 episode 准备状态、歌曲、文稿和 TTS 结果，供人工审计。不展示模型隐藏推理逐字稿，只展示系统记录和生成结果摘要。
+
+## 故障排查
+
+### Server 无法启动
+
+1. 检查端口占用：`lsof -i :3301`
+2. 检查 `.env` 格式是否正确（无引号，无多余空格）
+3. 检查 `fakeradio.db` 是否可写
+
+### 播放器显示"无法连接本地服务"
+
+1. 确认 server 进程运行中
+2. 确认 Web 和 Server 端口与 `NEXT_PUBLIC_FAKERADIO_SERVER_URL` 配置一致
+
+### 音乐来源全部是 mock
+
+1. 检查网易云服务是否启动：`curl http://localhost:3300`
+2. 检查 cookie 是否有效：重新注入
+3. 检查 `FAKERADIO_PROVIDER_MODE=auto`（非 `mock`）
+

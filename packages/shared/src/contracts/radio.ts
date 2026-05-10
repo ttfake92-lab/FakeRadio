@@ -155,7 +155,36 @@ export const RadioEpisodeSchema = z.object({
 });
 
 export const EpisodeNextResponseSchema = z.object({
-  episode: RadioEpisodeSchema
+  episode: RadioEpisodeSchema,
+  source: z.enum(["prepared", "live"]).default("live")
+});
+
+export const PreparedEpisodeRecordSchema = z.object({
+  id: z.string().min(1),
+  radioDate: z.string().min(1),
+  blockAt: z.string().min(1),
+  status: z.enum(["ready", "consumed", "failed", "preparing"]),
+  episodeJson: z.string().optional(),
+  audioDownloaded: z.boolean().optional().default(false),
+  error: z.string().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const PrewarmStatusSchema = z.object({
+  enabled: z.boolean(),
+  targetDate: z.string().min(1),
+  lastRun: z.string().datetime().nullable(),
+  nextRunAt: z.string().datetime().nullable(),
+  blocks: z.array(
+    z.object({
+      at: z.string().min(1),
+      label: z.string().min(1),
+      ready: z.number().int().nonnegative(),
+      consumed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative()
+    })
+  )
 });
 
 export const FavoriteTrackSchema = z.object({
@@ -238,6 +267,8 @@ export type Story = z.infer<typeof StorySchema>;
 export type PlaybackPlan = z.infer<typeof PlaybackPlanSchema>;
 export type RadioEpisode = z.infer<typeof RadioEpisodeSchema>;
 export type EpisodeNextResponse = z.infer<typeof EpisodeNextResponseSchema>;
+export type PreparedEpisodeRecord = z.infer<typeof PreparedEpisodeRecordSchema>;
+export type PrewarmStatus = z.infer<typeof PrewarmStatusSchema>;
 export type FavoriteTrack = z.infer<typeof FavoriteTrackSchema>;
 export type FavoriteRequest = z.infer<typeof FavoriteRequestSchema>;
 export type FavoritesResponse = z.infer<typeof FavoritesResponseSchema>;

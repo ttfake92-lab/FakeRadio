@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
 import { createRadioServer } from "./create-server.js";
+import { createStateRepository } from "../state/state-repository.js";
 
 let app: FastifyInstance | undefined;
 let isolatedBaseDirs: string[] = [];
@@ -77,6 +78,29 @@ describe("createRadioServer", () => {
     });
     expect(chat.statusCode).toBe(200);
     expect(chat.json().decision.play.query).toBe("warm morning indie");
+  });
+
+  it("serves prewarm status with blocks from today's plan", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.enabled).toBeTypeOf("boolean");
+    expect(body.targetDate).toBeTypeOf("string");
+    expect(body.blocks).toBeInstanceOf(Array);
+    expect(body.blocks.length).toBeGreaterThan(0);
+    expect(body.blocks[0]).toMatchObject({
+      at: expect.any(String),
+      label: expect.any(String),
+      ready: expect.any(Number),
+      consumed: expect.any(Number),
+      failed: expect.any(Number)
+    });
   });
 
   it("keeps the latest DJ speech in now after computing next", async () => {
@@ -1028,6 +1052,289 @@ describe("createRadioServer", () => {
     expect(next.statusCode).toBe(200);
     expect(music.search).toHaveBeenCalledWith("warm morning indie");
     expect(next.json().track.title).toBe("Search Result");
+  });
+
+  it("returns a prepared episode from /api/episode/next when one exists for the current block", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prepared-episode-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const preparedEpisode = {
+      track: { id: "prepared-001", title: "Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-001.mp3" },
+      story: { text: "Prepared story.", audioUrl: "http://localhost/tts/prepared.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "07:00",
+      status: "ready",
+      episodeJson: JSON.stringify(preparedEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.track.id).toBe("prepared-001");
+    expect(body.episode.track.title).toBe("Prepared Track");
+    expect(body.episode.story.text).toBe("Prepared story.");
+    expect(body.source).toBe("prepared");
+  });
+
+  it("falls back to live generation when no prepared episode exists for the current block", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.track.id).toBe("mock-track-001");
+    expect(body.source).toBe("live");
+  });
+
+  it("does not reuse a consumed prepared episode on subsequent /api/episode/next calls", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prepared-episode-consumed-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const preparedEpisode = {
+      track: { id: "prepared-002", title: "Prepared Track 2", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-002.mp3" },
+      story: { text: "Prepared story 2.", audioUrl: "http://localhost/tts/prepared2.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "07:00",
+      status: "ready",
+      episodeJson: JSON.stringify(preparedEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    const first = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().episode.track.id).toBe("prepared-002");
+
+    const second = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().episode.track.id).toBe("mock-track-001");
+  });
+
+  it("chat next-track intent does not consume prepared episodes", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prewarm-chat-next-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const preparedEpisode = {
+      track: { id: "chat-prepared-001", title: "Chat Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/chat-prepared-001.mp3" },
+      story: { text: "Chat prepared story.", audioUrl: "http://localhost/tts/chat-prepared.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "07:00",
+      status: "ready",
+      episodeJson: JSON.stringify(preparedEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    // Verify initial prewarm status shows 1 ready
+    const statusBefore = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(statusBefore.json().blocks.find((b: { at: string }) => b.at === "07:00").ready).toBe(1);
+
+    // Send a next-track chat message
+    const chat = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "下一首" }
+    });
+    expect(chat.statusCode).toBe(200);
+
+    // Verify prewarm status still shows 1 ready — pool NOT consumed
+    const statusAfter = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(statusAfter.json().blocks.find((b: { at: string }) => b.at === "07:00").ready).toBe(1);
+
+    // Verify next /api/episode/next still returns the prepared episode
+    const nextEp = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(nextEp.statusCode).toBe(200);
+    expect(nextEp.json().episode.track.id).toBe("chat-prepared-001");
+  });
+
+  it("chat story-background intent does not consume prepared episodes", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prewarm-chat-story-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const preparedEpisode = {
+      track: { id: "story-prepared-001", title: "Story Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/story-prepared-001.mp3" },
+      story: { text: "Story prepared story.", audioUrl: "http://localhost/tts/story-prepared.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "07:00",
+      status: "ready",
+      episodeJson: JSON.stringify(preparedEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    // Trigger a track first so story intent has a current track
+    await app.inject({ method: "GET", url: "/api/episode/next" });
+
+    // Chat story intent
+    const chat = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "讲个故事" }
+    });
+    expect(chat.statusCode).toBe(200);
+
+    // Prepared pool unchanged
+    const statusAfter = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(statusAfter.json().blocks.find((b: { at: string }) => b.at === "07:00").ready).toBe(0); // consumed by the first /api/episode/next call
+    expect(statusAfter.json().blocks.find((b: { at: string }) => b.at === "07:00").consumed).toBe(1);
+
+    // next-track chat did not consume pool (it went through live path, not /api/episode/next)
+  });
+
+  it("default chat intent does not consume prepared episodes", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prewarm-chat-default-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const preparedEpisode = {
+      track: { id: "default-prepared-001", title: "Default Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/default-prepared-001.mp3" },
+      story: { text: "Default prepared story.", audioUrl: "http://localhost/tts/default-prepared.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "07:00",
+      status: "ready",
+      episodeJson: JSON.stringify(preparedEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    const statusBefore = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(statusBefore.json().blocks.find((b: { at: string }) => b.at === "07:00").ready).toBe(1);
+
+    // Default LLM chat
+    const chat = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "今天天气怎么样" }
+    });
+    expect(chat.statusCode).toBe(200);
+
+    // Prepared pool still 1
+    const statusAfter = await app.inject({ method: "GET", url: "/api/prewarm/status" });
+    expect(statusAfter.json().blocks.find((b: { at: string }) => b.at === "07:00").ready).toBe(1);
+
+    // But next /api/episode/next still returns prepared episode
+    const nextEp = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(nextEp.json().episode.track.id).toBe("default-prepared-001");
+  });
+
+  it("returns to prepared pool after a chat insertion (prepared pool survives live insertion)", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prewarm-chat-return-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    // Two prepared episodes for the block
+    for (let i = 1; i <= 2; i++) {
+      await repo.savePreparedEpisode({
+        radioDate: "2026-04-30",
+        blockAt: "07:00",
+        status: "ready",
+        episodeJson: JSON.stringify({
+          track: { id: `return-prepared-${i}`, title: `Return Prepared ${i}`, artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: `http://localhost/audio/return-prepared-${i}.mp3` },
+          story: { text: `Return story ${i}.`, audioUrl: `http://localhost/tts/return-${i}.wav`, type: "mood-reading" as const },
+          sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+          playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+        }),
+        audioDownloaded: true
+      });
+    }
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    // First /api/episode/next consumes first prepared
+    const first = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(first.json().episode.track.id).toBe("return-prepared-1");
+
+    // Chat insertion (live)
+    const chat = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "换一首" }
+    });
+    expect(chat.statusCode).toBe(200);
+
+    // Second /api/episode/next should still return prepared (not the second consumed one)
+    // After first consumed (1 left), chat didn't touch pool, so still 1 left
+    const second = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(second.json().episode.track.id).toBe("return-prepared-2");
   });
 });
 

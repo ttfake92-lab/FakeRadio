@@ -258,4 +258,245 @@ describe("createStateRepository", () => {
     const result = await repo.pruneOldData(new Date().toISOString());
     expect(result).toBe(0);
   });
+
+  // --- savePreparedEpisode ---
+
+  it("saves a prepared episode and returns it with id and timestamps", async () => {
+    const episode = {
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    const input = {
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready" as const,
+      episodeJson: JSON.stringify(episode),
+      audioDownloaded: true,
+      error: undefined
+    };
+
+    const record = await repo.savePreparedEpisode(input);
+
+    expect(record.id).toBeDefined();
+    expect(record.radioDate).toBe("2026-05-09");
+    expect(record.blockAt).toBe("08:00");
+    expect(record.status).toBe("ready");
+    expect(record.episodeJson).toBe(input.episodeJson);
+    expect(record.audioDownloaded).toBe(true);
+    expect(record.createdAt).toBeDefined();
+    expect(record.updatedAt).toBeDefined();
+  });
+
+  it("saves a prepared episode with minimal fields", async () => {
+    const input = {
+      radioDate: "2026-05-09",
+      blockAt: "2026-05-09T12:00:00Z",
+      status: "preparing" as const
+    };
+
+    const record = await repo.savePreparedEpisode(input);
+
+    expect(record.episodeJson).toBeUndefined();
+    expect(record.audioDownloaded).toBeUndefined();
+    expect(record.error).toBeUndefined();
+  });
+
+  // --- claimPreparedEpisode ---
+
+  it("claims a ready prepared episode and returns parsed RadioEpisode", async () => {
+    const episode = {
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(episode),
+      audioDownloaded: true
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+
+    expect(claimed).not.toBeNull();
+    expect(claimed!.record.status).toBe("consumed");
+    expect(claimed!.record.audioDownloaded).toBe(true);
+    expect(claimed!.episode.track.id).toBe("t1");
+    expect(claimed!.episode.story.text).toBe("Hello");
+  });
+
+  it("returns null when claiming and no ready record exists", async () => {
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(claimed).toBeNull();
+  });
+
+  it("returns null when claiming from wrong radioDate", async () => {
+    const episode = {
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(episode)
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-10", "08:00");
+    expect(claimed).toBeNull();
+  });
+
+  it("returns null when claiming from wrong blockAt", async () => {
+    const episode = {
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(episode)
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "12:00");
+    expect(claimed).toBeNull();
+  });
+
+  it("does not claim already consumed records", async () => {
+    const episode = {
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(episode)
+    });
+
+    const first = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(first).not.toBeNull();
+
+    const second = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(second).toBeNull();
+  });
+
+  it("rejects saving a prepared episode with invalid episode JSON", () => {
+    expect(() => repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify({ invalid: true })
+    })).toThrow();
+  });
+
+  it("returns null when claiming a record with missing episode JSON", async () => {
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready"
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(claimed).toBeNull();
+  });
+
+  // --- getPrewarmStatus ---
+
+  it("returns zero counts when no prepared episodes exist", async () => {
+    const status = await repo.getPrewarmStatus("2026-05-09");
+    expect(status).toEqual({ ready: 0, consumed: 0, failed: 0, preparing: 0 });
+  });
+
+  it("returns correct counts grouped by status", async () => {
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "08:00", status: "ready" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "08:00", status: "ready" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "12:00", status: "consumed" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "12:00", status: "failed" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "18:00", status: "preparing" });
+    // Different date — should not be counted
+    await repo.savePreparedEpisode({ radioDate: "2026-05-10", blockAt: "08:00", status: "ready" });
+
+    const status = await repo.getPrewarmStatus("2026-05-09");
+
+    expect(status).toEqual({ ready: 2, consumed: 1, failed: 1, preparing: 1 });
+  });
+
+  // --- getBlockPrewarmStatus ---
+
+  it("getBlockPrewarmStatus returns zero counts when no prepared episodes exist", async () => {
+    const status = await repo.getBlockPrewarmStatus("2026-05-09", "08:00");
+    expect(status).toEqual({ ready: 0, consumed: 0, failed: 0, preparing: 0 });
+  });
+
+  it("getBlockPrewarmStatus returns correct counts per block", async () => {
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "08:00", status: "ready" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "08:00", status: "ready" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "08:00", status: "consumed" });
+    await repo.savePreparedEpisode({ radioDate: "2026-05-09", blockAt: "12:00", status: "failed" });
+    // Different date — should not be counted
+    await repo.savePreparedEpisode({ radioDate: "2026-05-10", blockAt: "08:00", status: "ready" });
+
+    const block08 = await repo.getBlockPrewarmStatus("2026-05-09", "08:00");
+    expect(block08).toEqual({ ready: 2, consumed: 1, failed: 0, preparing: 0 });
+
+    const block12 = await repo.getBlockPrewarmStatus("2026-05-09", "12:00");
+    expect(block12).toEqual({ ready: 0, consumed: 0, failed: 1, preparing: 0 });
+
+    const blockOther = await repo.getBlockPrewarmStatus("2026-05-09", "21:00");
+    expect(blockOther).toEqual({ ready: 0, consumed: 0, failed: 0, preparing: 0 });
+  });
+
+  // --- markPreparedEpisodeAudioDownloaded ---
+
+  it("marks a prepared episode audio as downloaded", async () => {
+    const record = await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify({
+        track: { id: "t1", title: "Test", artist: "Artist", source: "mock" as const },
+        story: { text: "Hello", audioUrl: "http://localhost/tts/h.wav", type: "mood-reading" as const },
+        sources: [{ kind: "mock", title: "M", content: "C" }],
+        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+      })
+    });
+    expect(record.audioDownloaded).toBeUndefined();
+
+    await repo.markPreparedEpisodeAudioDownloaded(record.id, true);
+
+    // Re-read via claim to verify update
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(claimed).not.toBeNull();
+    expect(claimed!.record.audioDownloaded).toBe(true);
+  });
+
+  it("marks audio as not downloaded", async () => {
+    const record = await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      audioDownloaded: true,
+      episodeJson: JSON.stringify({
+        track: { id: "t2", title: "Test 2", artist: "Artist", source: "mock" as const },
+        story: { text: "Hello", audioUrl: "http://localhost/tts/h.wav", type: "mood-reading" as const },
+        sources: [{ kind: "mock", title: "M", content: "C" }],
+        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+      })
+    });
+
+    await repo.markPreparedEpisodeAudioDownloaded(record.id, false);
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
+    expect(claimed!.record.audioDownloaded).toBe(false);
+  });
 });

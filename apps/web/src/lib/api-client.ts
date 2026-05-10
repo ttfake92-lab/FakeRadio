@@ -9,6 +9,7 @@ import {
   NeteaseQrLoginCheckSchema,
   NextResponseSchema,
   NowResponseSchema,
+  PrewarmStatusSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema
 } from "@fakeradio/shared";
@@ -75,6 +76,11 @@ export async function getTaste() {
 export async function getTodayPlan() {
   const response = await fetch(buildApiUrl("/api/plan/today"));
   return TodayPlanResponseSchema.parse(await response.json());
+}
+
+export async function getPrewarmStatus() {
+  const response = await fetch(buildApiUrl("/api/prewarm/status"));
+  return PrewarmStatusSchema.parse(await response.json());
 }
 
 export async function getFavorites() {

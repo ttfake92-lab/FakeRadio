@@ -1,9 +1,9 @@
 "use client";
 
-import type { ChatResponse, FavoriteTrack, HealthResponse, NextResponse, NowResponse } from "@fakeradio/shared";
+import type { ChatResponse, FavoriteTrack, HealthResponse, NextResponse, NowResponse, PrewarmStatus } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNext, getNow, removeFavorite, sendChat } from "../../lib/api-client";
+import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNext, getNow, getPrewarmStatus, removeFavorite, sendChat } from "../../lib/api-client";
 import {
   buildOnAirClock,
   formatDuration,
@@ -38,6 +38,11 @@ function buildNowFromNext(result: NextResponse): NowResponse {
   };
 }
 
+function buildClaudioIntro(trackTitle: string, artist: string, hour: number) {
+  const daypart = hour >= 21 || hour < 7 ? "late tonight" : hour < 12 ? "this morning" : hour < 18 ? "this afternoon" : "this evening";
+  return `This is Claudio. ${daypart}, here is ${trackTitle} from ${artist}. Let the first line settle in, then let the song take the room. If the day has been loud, keep only the pulse you need.`;
+}
+
 export function PlayerShell() {
   const [now, setNow] = useState<NowResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -48,10 +53,17 @@ export function PlayerShell() {
   const [isActing, setIsActing] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [userChatHistory, setUserChatHistory] = useState<string[]>([]);
   const [nowDate, setNowDate] = useState(() => new Date());
   const [theme, setTheme] = useState<"terminal-fm" | "morning-console">("terminal-fm");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [volume, setVolume] = useState(() => {
+    if (typeof window === "undefined") return 1;
+    const saved = localStorage.getItem("fakeradio-volume");
+    return saved !== null ? Number(saved) : 1;
+  });
+  const [prewarmStatus, setPrewarmStatus] = useState<PrewarmStatus | null>(null);
 
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -81,26 +93,35 @@ export function PlayerShell() {
 
   const onAirClock = useMemo(() => buildOnAirClock(nowDate), [nowDate]);
   const onAirModeLabel = useMemo(() => getOnAirModeLabel(nowDate.getHours()), [nowDate]);
-  const onAirConnectionLabel = getConnectionLabel(
-    streamStatus.label === "已连接" ? "connected" : streamStatus.label === "连接中" ? "connecting" : "disconnected"
-  );
+  const connectionState: "connected" | "connecting" | "disconnected" =
+    health !== null ? "connected" : streamStatus.label === "连接中" ? "connecting" : "disconnected";
+  const onAirConnectionLabel = getConnectionLabel(connectionState);
+  const connectionDescription =
+    connectionState === "connected"
+      ? "Connected to Claudio server"
+      : connectionState === "connecting"
+        ? "Connecting to Claudio server..."
+        : "Disconnected from Claudio server";
   const currentTrackTitle = playback.episodeData?.track.title ?? track?.title ?? "Waiting for signal";
   const currentTrackArtist = playback.episodeData?.track.artist ?? track?.artist ?? "FakeRadio";
   const currentPlaybackLabel = playback.episodeState !== "idle" ? playback.episodeStateLabel : playbackLabel;
-  const djMessage = getDjMessageText(now?.dj.say ?? playback.episodeData?.story.text ?? chatReply?.message);
+  const djMessage = getDjMessageText(now?.dj.say ?? playback.episodeData?.story.text ?? chatReply?.message ?? buildClaudioIntro(currentTrackTitle, currentTrackArtist, nowDate.getHours()));
   const queueCountLabel = getQueueCountLabel(now?.queue?.length ?? 0);
   const nowPlayingLabel = `Now playing: ${currentTrackTitle} · ${currentTrackArtist}`;
+  const durationMs = playback.episodeData?.track.durationMs ?? track?.durationMs ?? 0;
+  const progress = durationMs > 0 ? currentTime / (durationMs / 1000) : 0;
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     playback.setError(null);
     try {
-      const [nowResponse, healthResponse, favoritesResponse] = await Promise.all([
-        getNow(), getHealth(), getFavorites()
+      const [nowResponse, healthResponse, favoritesResponse, prewarmStatusResponse] = await Promise.all([
+        getNow(), getHealth(), getFavorites(), getPrewarmStatus().catch(() => null)
       ]);
       setNow(nowResponse);
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
+      setPrewarmStatus(prewarmStatusResponse);
       // Sync theme with time of day on load
       const hour = new Date().getHours();
       setTheme(hour >= 7 && hour < 9 ? "morning-console" : "terminal-fm");
@@ -112,6 +133,14 @@ export function PlayerShell() {
   }, []);
 
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+
+  // Initialize audio volume from saved setting
+  useEffect(() => {
+    const musicAudio = audio.musicRef.current;
+    if (musicAudio) {
+      musicAudio.volume = volume;
+    }
+  }, [audio.musicRef, volume]);
 
   // Clock auto-update every second
   useEffect(() => {
@@ -175,19 +204,21 @@ export function PlayerShell() {
     };
   }, [isPlaying, audio.musicRef]);
 
-  const handleNext = async () => {
+  const handleNext = useCallback(async () => {
     setIsActing(true);
     playback.setError(null);
     try {
       const result = await getNext();
       setNextResult(result);
       setNow(buildNowFromNext(result));
+      playback.clearEpisodeState();
+      await playback.playEpisode();
     } catch (nextError) {
       playback.setError(`生成下一首失败：${getErrorMessage(nextError)}`);
     } finally {
       setIsActing(false);
     }
-  };
+  }, [playback]);
 
   const handleChat = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -196,9 +227,14 @@ export function PlayerShell() {
 
     setIsActing(true);
     playback.setError(null);
+    setChatReply(null);
+    setUserChatHistory((prev) => [...prev.slice(-4), message]);
     try {
       const reply = await sendChat(message);
       setChatReply(reply);
+      if (reply.message) {
+        setAgentMessages((prev) => [...prev.slice(-19), { role: "agent", text: reply.message, trackId: track?.id ?? "" }]);
+      }
       setChatMessage("");
 
       // Execute action if returned
@@ -243,9 +279,18 @@ export function PlayerShell() {
     }
   };
 
-  const handlePlayPause = useCallback(() => {
+  const handlePlayPause = useCallback(async () => {
+    if (playback.episodeState === "idle" || playback.episodeState === "error") {
+      try {
+        await playback.playEpisode();
+        setIsPlaying(true);
+      } catch {
+        // playEpisode 内部已处理错误
+      }
+      return;
+    }
     const musicAudio = audio.musicRef.current;
-    if (!musicAudio) return;
+    if (!musicAudio || musicAudio.readyState < 2) return;
     if (musicAudio.paused) {
       musicAudio.play().catch(() => {});
       setIsPlaying(true);
@@ -254,7 +299,7 @@ export function PlayerShell() {
       setIsPlaying(false);
     }
     setCurrentTime(musicAudio.currentTime);
-  }, [audio.musicRef]);
+  }, [playback.episodeState, playback.playEpisode, audio.musicRef]);
 
   const handleThemeChange = useCallback((newTheme: "terminal-fm" | "morning-console") => {
     setTheme(newTheme);
@@ -268,6 +313,15 @@ export function PlayerShell() {
     }
   }, [audio.speechRef]);
 
+  const handleVolumeChange = useCallback((newVolume: number) => {
+    setVolume(newVolume);
+    localStorage.setItem("fakeradio-volume", String(newVolume));
+    const musicAudio = audio.musicRef.current;
+    if (musicAudio) {
+      musicAudio.volume = newVolume;
+    }
+  }, [audio.musicRef]);
+
   return (
     <>
       <OnAirTerminal
@@ -279,19 +333,27 @@ export function PlayerShell() {
         currentTrackArtist={currentTrackArtist}
         playbackLabel={currentPlaybackLabel}
         progressLabel={`${Math.floor(currentTime / 60)}:${String(Math.floor(currentTime % 60)).padStart(2, "0")}`}
-        durationLabel={formatDuration(playback.episodeData?.track.durationMs ?? track?.durationMs)}
-        queueCountLabel={queueCountLabel}
-        djName="FakeRadio"
+        durationLabel={durationMs > 0 ? formatDuration(durationMs) : "--:--"}
+        djName="Claudio"
         djMessage={playback.error ?? (shouldWarn ? "当前音乐来源已回退到 mock，本地真实 provider 暂不可用。" : djMessage)}
-        messageTimeLabel={onAirClock.time}
+        connectionDescription={connectionDescription}
         nowPlayingLabel={nowPlayingLabel}
         chatMessage={chatMessage}
         isActing={isActing || isLoading}
         isFavorited={isFavorited}
         isPlaying={isPlaying}
+        progress={progress}
+        queueCountLabel={queueCountLabel}
+        prewarmStatus={prewarmStatus}
+        agentMessages={agentMessages}
+        userMessages={userChatHistory}
+        episodeSource={playback.episodeSource}
+        volume={volume}
         onPlay={playback.playEpisode}
         onPlayPause={handlePlayPause}
+        onPrevious={() => {}}
         onNext={handleNext}
+        onVolumeChange={handleVolumeChange}
         onToggleFavorite={handleToggleFavorite}
         onThemeChange={handleThemeChange}
         onReplay={handleReplay}

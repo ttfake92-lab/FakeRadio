@@ -1,0 +1,278 @@
+import type { RadioEpisode, Track } from "@fakeradio/shared";
+import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
+import type { StateRepository } from "../state/state-repository.js";
+import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
+import type { PlaybackState } from "../http/playback-state.js";
+import { gatherEpisodeSources, narrateStoryWithSources, synthesizeWithFallback } from "../http/episode-runner.js";
+import { buildMockEnvironment } from "../utils/mock-environment.js";
+import { computeDjDecision } from "../brain/dj-brain.js";
+import { env } from "../config/env.js";
+import { formatRadioDate } from "../utils/time.js";
+import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { pipeline } from "node:stream/promises";
+import type { Readable } from "node:stream";
+
+export type PrewarmDeps = {
+  llm: LlmAdapter;
+  music: MusicAdapter;
+  tts: TtsAdapter;
+  ttsCacheDir: string;
+  weather: WeatherAdapter;
+  calendar: CalendarAdapter;
+  devices: DeviceAdapter;
+  storySource: StorySourceAdapter;
+  publicMetadataAdapter?: StorySourceAdapter | undefined;
+  webResearchAdapter?: StorySourceAdapter | undefined;
+  likedSongs: LikedSongsRepository;
+  stateRepo: StateRepository;
+  nowProvider(): Date;
+  audioDir: string;
+};
+
+function buildPrewarmEpisodeState(): PlaybackState {
+  return {
+    getCurrentTrack: () => null,
+    getCurrentDj: () => ({ say: "Prewarm episode." }),
+    getQueue: () => [],
+    getRecentlySelectedTrackIds: () => [],
+    getLastPlanBlockAt: () => null,
+    setTrack: () => {},
+    setDj: () => {},
+    setQueue: () => {},
+    setLastPlanBlockAt: () => {},
+    rememberSelectedTrack: () => {},
+    selectCandidate: (tracks: Track[]) => tracks[0],
+    removeFromQueue: () => {},
+    queueSize: () => 0,
+    buildNowResponse: () => ({
+      playback: "idle" as const,
+      track: null,
+      dj: { say: "Prewarm episode." },
+      queue: [],
+      updatedAt: new Date().toISOString()
+    })
+  };
+}
+
+function getAudioFilePath(audioDir: string, trackId: string): string {
+  return resolve(audioDir, `${trackId}.mp3`);
+}
+
+async function prefetchTrackAudio(
+  audioDir: string,
+  track: Track
+): Promise<boolean> {
+  if (!track.audioUrl) return false;
+  const filePath = getAudioFilePath(audioDir, track.id);
+  if (existsSync(filePath)) return true;
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    const response = await fetch(track.audioUrl, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok || !response.body) return false;
+    const fileStream = createWriteStream(filePath);
+    await pipeline(response.body as unknown as Readable, fileStream);
+    return true;
+  } catch (err) {
+    console.warn(`[prewarm] Audio prefetch failed for ${track.id}:`, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+async function generatePrewarmEpisode(
+  deps: PrewarmDeps,
+  blockAt: string,
+  moodHint: string,
+  systemPrompt: string
+): Promise<{ episode: RadioEpisode; audioDownloaded: boolean } | { error: string }> {
+  const { llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource, publicMetadataAdapter, webResearchAdapter, likedSongs, stateRepo, nowProvider } = deps;
+  const now = nowProvider();
+
+  // Gather candidates
+  const favoritesTracks = await likedSongs.list();
+  const uniqueCandidates = favoritesTracks.slice(0, 20);
+
+  // Get weather/calendar/devices for context
+  const [weatherSnapshot, calendarItems, playbackDevices] = await Promise.all([
+    weather.current(),
+    calendar.upcoming(),
+    devices.list()
+  ]);
+
+  // Compute DJ decision
+  const draftDecision = await computeDjDecision({
+    llm,
+    now,
+    systemPrompt,
+    userTaste: "",
+    routines: "",
+    moodRules: "",
+    recentMemory: [],
+    toolResults: [],
+    executionState: "prewarm-episode",
+    environment: {
+      weather: weatherSnapshot,
+      calendar: calendarItems,
+      devices: playbackDevices
+    },
+    candidates: uniqueCandidates
+  });
+
+  // Select track
+  let track: Track | null = null;
+  if (draftDecision.play.trackId) {
+    const llmPicked = uniqueCandidates.find((t) => t.id === draftDecision.play.trackId);
+    if (llmPicked) {
+      try {
+        track = await music.resolve(llmPicked);
+      } catch { /* fall through */ }
+    }
+  }
+
+  if (!track) {
+    const candidates = await music.search(draftDecision.play.query ?? moodHint);
+    const first = candidates[0];
+    if (first) {
+      try {
+        track = await music.resolve(first);
+      } catch { /* fall through */ }
+    }
+  }
+
+  if (!track) {
+    const recommended = await music.recommend({ mood: moodHint, limit: 5 });
+    const first = recommended[0];
+    if (first) {
+      try {
+        track = await music.resolve(first);
+      } catch { /* fall through */ }
+    }
+  }
+
+  if (!track) {
+    return { error: "No track could be resolved" };
+  }
+
+  // Gather sources
+  const sources = await gatherEpisodeSources(
+    storySource,
+    publicMetadataAdapter,
+    webResearchAdapter,
+    env.FAKERADIO_BRAVE_API_KEY,
+    track
+  );
+
+  // Generate narration
+  const { narration, storyType } = await narrateStoryWithSources(
+    llm,
+    track,
+    sources,
+    systemPrompt,
+    [],
+    { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
+    "",
+    "",
+    ""
+  );
+
+  // Synthesize TTS
+  const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
+
+  const episode: RadioEpisode = {
+    track,
+    story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
+    sources,
+    playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
+    fallbackReason
+  };
+
+  return { episode, audioDownloaded: false };
+}
+
+export type PrewarmResult = {
+  blockAt: string;
+  prepared: number;
+  failed: number;
+  errors: string[];
+};
+
+export async function runPrewarmForDate(
+  deps: PrewarmDeps,
+  targetDate: string,
+  blocks: Array<{ at: string; label: string; moodHint: string }>,
+  episodesPerBlock: number,
+  systemPrompt: string
+): Promise<PrewarmResult[]> {
+  const { stateRepo, nowProvider } = deps;
+  const results: PrewarmResult[] = [];
+
+  for (const block of blocks) {
+    const errors: string[] = [];
+    let prepared = 0;
+    let failed = 0;
+
+    // Check existing ready count for this specific block
+    const blockStatus = await stateRepo.getBlockPrewarmStatus(targetDate, block.at);
+    const existingReady = blockStatus.ready;
+
+    // Only generate if we need more
+    const needed = Math.max(0, episodesPerBlock - existingReady);
+
+    for (let i = 0; i < needed; i++) {
+      try {
+        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt);
+        if ("error" in result) {
+          await stateRepo.savePreparedEpisode({
+            radioDate: targetDate,
+            blockAt: block.at,
+            status: "failed",
+            audioDownloaded: false,
+            error: result.error
+          });
+          errors.push(result.error);
+          failed++;
+        } else {
+          const record = await stateRepo.savePreparedEpisode({
+            radioDate: targetDate,
+            blockAt: block.at,
+            status: "ready",
+            episodeJson: JSON.stringify(result.episode),
+            audioDownloaded: false
+          });
+          // Trigger background audio prefetch (don't block the prewarm loop)
+          prefetchTrackAudio(deps.audioDir, result.episode.track).then((downloaded) => {
+            if (downloaded) {
+              stateRepo.markPreparedEpisodeAudioDownloaded(record.id, true).catch(() => {});
+            }
+          });
+          prepared++;
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        await stateRepo.savePreparedEpisode({
+          radioDate: targetDate,
+          blockAt: block.at,
+          status: "failed",
+          audioDownloaded: false,
+          error: errorMsg
+        });
+        errors.push(errorMsg);
+        failed++;
+      }
+    }
+
+    results.push({ blockAt: block.at, prepared, failed, errors });
+  }
+
+  return results;
+}
+
+export async function shouldRunPrewarm(deps: PrewarmDeps, targetDate: string): Promise<boolean> {
+  const lastRun = await deps.stateRepo.getPref<string>(`prewarm:lastRun:${targetDate}`);
+  return !lastRun;
+}
+
+export async function markPrewarmRunComplete(deps: PrewarmDeps, targetDate: string): Promise<void> {
+  await deps.stateRepo.upsertPref(`prewarm:lastRun:${targetDate}`, new Date().toISOString());
+  await deps.stateRepo.upsertPref("prewarm:lastRun", new Date().toISOString());
+}
