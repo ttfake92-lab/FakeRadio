@@ -184,6 +184,33 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.post("/api/chat", async (request) => handleChat(request.body, deps));
 
+  app.post("/api/chat/stream", async (request, reply) => {
+    const { buildChatSSEHandler } = await import("./chat-sse-handler.js");
+    const handler = buildChatSSEHandler(deps);
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const emitter = {
+      emit(event: "chunk" | "done", data: unknown) {
+        const payload = typeof data === "string" ? data : JSON.stringify(data);
+        reply.raw.write(`event: ${event}\ndata: ${payload}\n\n`);
+      },
+    };
+
+    try {
+      await handler((request.body as { message: string }).message, emitter);
+    } catch (err) {
+      emitter.emit("done", { text: "信号断了。再说一次？" });
+    }
+
+    reply.raw.end();
+  });
+
   app.get("/api/taste", async () =>
     TasteResponseSchema.parse({
       taste: userPreferences.taste,
