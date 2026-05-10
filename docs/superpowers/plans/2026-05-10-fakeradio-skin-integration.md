@@ -1,5 +1,9 @@
 # FakeRadio 前端皮肤集成实现计划
 
+> **状态：已完成**（2026-05-10 合并到 main，commit `487a0cf`）
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 把 FakeRadio-frontend 的 5 套皮肤（amber/pixel/terminal/bento/y2k）集成到现有 FakeRadio 项目，替换现有的 terminal-fm/morning-console 主题，新增 SSE 流式聊天和主题切换面板。

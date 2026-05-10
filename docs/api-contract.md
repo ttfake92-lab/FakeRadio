@@ -6,6 +6,7 @@
 - `GET /api/now`：返回当前播放、DJ 口播和队列。`track.source` 与 `queue[].source` 会直接告诉前端当前曲目来自 `netease` 还是 `mock`。
 - `GET /api/next`：计算下一首歌，返回 DJ 决策、歌曲、TTS 结果和诊断信息。`diagnostics` 字段包含：`candidateSource`（favorites/search/queue/mock）、`rerankSource`（llm-pick/fallback）、`favoritesAvailable`（收藏曲目数）、`candidatesCount`（候选总数）、`isFallback`（是否使用 mock 兜底）、`musicProvider`（当前音乐来源）。LLM 可从候选曲目列表中选择曲目，选中时 `rerankSource` 为 `llm-pick`，否则走确定性兜底。TTS provider 失败时会回退到 mock TTS，避免主流程返回未处理的 500。
 - `POST /api/chat`：向 DJ 发送自然语言消息。
+- `POST /api/chat/stream`：SSE 流式聊天端点。请求体同 `/api/chat`（`{ message: string }`），返回 `text/event-stream`。事件类型：`event: chunk`（句子片段，data 为 string）、`event: done`（最终结果，data 为 `{ text: string, action?: { type: "next-track" | "add-favorite", trackId?: string, title?: string, artist?: string } }`）。前端通过 `useChatSSE` hook 消费该流。
 - `GET /api/taste`：返回规范化用户品味。
 - `POST /api/taste/infer`：根据今日对话和收藏记录，自动推断并更新用户品味文件。需要今日至少有 3 条互动记录，否则返回 400。
 - `GET /api/plan/today`：返回当天电台计划。`blocks[]` 当前包含 `at`、`label` 和 `moodHint`，供 scheduler 和前端共同消费。

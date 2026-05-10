@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useState, useRef } from "react";
-import { useChatSSE, type ChatMessage } from "./use-chat-sse";
+import { useCallback, useState, useRef, useEffect } from "react";
+import { sendChat } from "../../lib/api-client";
+import type { ChatMessage } from "./use-chat-sse";
 import type { Persona, VisualTrack } from "./skin-config";
 
 export type RadioBridgeParams = {
@@ -9,6 +10,7 @@ export type RadioBridgeParams = {
   track: VisualTrack | null;
   next: VisualTrack | null;
   playing: boolean;
+  loading: boolean;
   pos: number;
   vol: number;
   liked: Record<string, boolean>;
@@ -30,6 +32,7 @@ export type RadioState = {
   track: VisualTrack;
   next: VisualTrack;
   playing: boolean;
+  loading: boolean;
   pos: number;
   vol: number;
   liked: Record<string, boolean>;
@@ -56,6 +59,7 @@ export function useRadioBridge(params: RadioBridgeParams) {
     track,
     next,
     playing,
+    loading,
     pos,
     vol,
     liked,
@@ -63,8 +67,6 @@ export function useRadioBridge(params: RadioBridgeParams) {
     messages: externalMessages,
     input: externalInput,
     busy: externalBusy,
-    onSend,
-    onChip,
     onToggleLike,
     onSeek,
     onSkip,
@@ -77,8 +79,29 @@ export function useRadioBridge(params: RadioBridgeParams) {
   const [chatInput, setChatInput] = useState(externalInput);
   const [isBusy, setIsBusy] = useState(externalBusy);
   const [likedState, setLikedState] = useState(liked);
+  useEffect(() => { setLikedState(liked); }, [liked]);
   const seededFor = useRef<string | null>(null);
-  const chatSSE = useChatSSE();
+
+  useEffect(() => {
+    if (!track) return;
+    const seedKey = `${persona.name}:${track.id}`;
+    if (seededFor.current === seedKey) return;
+    seededFor.current = seedKey;
+
+    const greetings: Record<string, string> = {
+      深夜电台: `夜里好。这首《${track.title}》是 ${track.artist}，先把灯调暗一点。`,
+      清晨陪伴: `早。给你放《${track.title}》，慢慢醒。`,
+      话痨好友: `嘿，你也在啊。我先放着《${track.title}》，你随便聊。`,
+      极简冷淡: `在。播《${track.title}》。`,
+    };
+
+    setChatMessages([{
+      id: `seed-${track.id}`,
+      role: "assistant",
+      text: greetings[persona.name] ?? `正在播《${track.title}》。`,
+      trackChip: { title: track.title, artist: track.artist },
+    }]);
+  }, [persona.name, track]);
 
   const ask = useCallback(
     async (userText: string, opts?: { silentUser?: boolean }) => {
@@ -104,37 +127,31 @@ export function useRadioBridge(params: RadioBridgeParams) {
 
       let fullText = "";
 
-      chatSSE.sendMessage(userText, {
-        onChunk: (text) => {
-          fullText += text;
-          setChatMessages((m) =>
-            m.map((x) =>
-              x.id === aId ? { ...x, text: fullText, streaming: true } : x
-            )
-          );
-        },
-        onDone: (data) => {
-          fullText = data.text;
-          setChatMessages((m) =>
-            m.map((x) =>
-              x.id === aId ? { ...x, text: data.text, streaming: false } : x
-            )
-          );
-          setIsBusy(false);
+      try {
+        const data = await sendChat(userText);
+        fullText = data.message;
+        setChatMessages((m) =>
+          m.map((x) =>
+            x.id === aId ? { ...x, text: fullText, streaming: false } : x
+          )
+        );
 
-          // Execute action if present
-          if (data.action?.type === "next-track") {
-            onNext();
-          } else if (
-            data.action?.type === "add-favorite" &&
-            track
-          ) {
-            onToggleLike();
-          }
-        },
-      });
+        if (data.action?.type === "next-track") {
+          onNext();
+        } else if (data.action?.type === "add-favorite" && track) {
+          onToggleLike();
+        }
+      } catch {
+        setChatMessages((m) =>
+          m.map((x) =>
+            x.id === aId ? { ...x, text: "信号断了。再说一次？", streaming: false } : x
+          )
+        );
+      } finally {
+        setIsBusy(false);
+      }
     },
-    [isBusy, chatSSE, onNext, onToggleLike, track]
+    [isBusy, onNext, onToggleLike, track]
   );
 
   const send = useCallback(
@@ -164,10 +181,15 @@ export function useRadioBridge(params: RadioBridgeParams) {
     [ask]
   );
 
+  if (!track || !next) {
+    throw new Error("useRadioBridge requires track and next to be non-null");
+  }
+
   const r: RadioState = {
-    track: track!,
-    next: next!,
+    track,
+    next,
     playing,
+    loading,
     pos,
     vol,
     liked: likedState,
@@ -188,7 +210,7 @@ export function useRadioBridge(params: RadioBridgeParams) {
     busy: isBusy,
     setInput: setChatInput,
     send,
-    onChip,
+    onChip: ask,
     ask,
     onBubbleAction,
     seedReset: () => {
@@ -196,5 +218,5 @@ export function useRadioBridge(params: RadioBridgeParams) {
     },
   };
 
-  return { r, chatMessages, chatInput, isBusy, setChatInput, chatSSE };
+  return { r, chatMessages, chatInput, isBusy, setChatInput };
 }

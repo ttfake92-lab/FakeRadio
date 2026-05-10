@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import type { NowResponse, Track } from "@fakeradio/shared";
 import type { OnAirThemeId } from "./player-view-model";
 import type { FavoriteTrack } from "@fakeradio/shared";
+import type { AgentMessage } from "./use-stream-connection";
 import { useRadioBridge } from "./use-radio-bridge";
 import { SkinAmber } from "./skin-amber";
 import { SkinPixel } from "./skin-pixel";
@@ -19,6 +20,7 @@ export type SkinStageProps = {
   currentTrackTitle: string;
   currentTrackArtist: string;
   isPlaying: boolean;
+  isLoadingEpisode: boolean;
   currentTime: number;
   durationMs: number;
   volume: number;
@@ -27,6 +29,10 @@ export type SkinStageProps = {
   selectedPersona: Persona;
   avatarSrc: string | null;
   showSettings: boolean;
+  error?: string | null;
+  agentMessages: AgentMessage[];
+  onAgentMessage: (msg: AgentMessage) => void;
+  onChatSubmit: (text: string) => void;
   onThemeChange: (theme: OnAirThemeId) => void;
   onAvatarClick: () => void;
   onAvatarUpload: (file: File) => void;
@@ -34,6 +40,7 @@ export type SkinStageProps = {
   onPersonaChange: (persona: Persona) => void;
   onPlayPause: () => void;
   onVolumeChange: (vol: number) => void;
+  onSeek: (pos01: number) => void;
   onToggleFavorite: () => void;
   onNext: () => void;
 };
@@ -49,6 +56,11 @@ function generateTone(id: string): [string, string, string] {
   ];
 }
 
+function toVisualDuration(durationMs: number | undefined, currentTime: number) {
+  if (durationMs === undefined || durationMs <= 0) return 0;
+  return Math.max(1, Math.ceil(durationMs / 1000), Math.ceil(currentTime) + 1);
+}
+
 export function SkinStage({
   theme,
   now,
@@ -56,6 +68,7 @@ export function SkinStage({
   currentTrackTitle,
   currentTrackArtist,
   isPlaying,
+  isLoadingEpisode,
   currentTime,
   durationMs,
   volume,
@@ -64,6 +77,10 @@ export function SkinStage({
   selectedPersona,
   avatarSrc,
   showSettings,
+  error,
+  agentMessages,
+  onAgentMessage,
+  onChatSubmit,
   onThemeChange,
   onAvatarClick,
   onAvatarUpload,
@@ -71,6 +88,7 @@ export function SkinStage({
   onPersonaChange,
   onPlayPause,
   onVolumeChange,
+  onSeek,
   onToggleFavorite,
   onNext,
 }: SkinStageProps) {
@@ -81,48 +99,66 @@ export function SkinStage({
   }, [favorites]);
 
   const visualTrack = useMemo(() => {
-    if (!track) return null;
+    if (!track) {
+      return {
+        id: "idle",
+        title: currentTrackTitle,
+        artist: currentTrackArtist,
+        album: "FakeRadio",
+        dur: toVisualDuration(durationMs, currentTime),
+        source: "local" as const,
+        tone: generateTone("idle"),
+      };
+    }
     return {
       id: track.id,
       title: track.title,
       artist: track.artist,
       album: track.album ?? "",
-      dur: (track.durationMs ?? 0) / 1000,
+      dur: toVisualDuration(track.durationMs ?? durationMs, currentTime),
       source: track.source as "netease" | "mock" | "local",
       tone: generateTone(track.id),
     };
-  }, [track]);
+  }, [currentTime, currentTrackArtist, currentTrackTitle, durationMs, track]);
 
   const visualNext = useMemo(() => {
     const nextTrack = now?.queue?.[0];
-    if (!nextTrack) return null;
+    if (!nextTrack) return visualTrack;
     return {
       id: nextTrack.id,
       title: nextTrack.title,
       artist: nextTrack.artist,
       album: nextTrack.album ?? "",
-      dur: (nextTrack.durationMs ?? 0) / 1000,
+      dur: toVisualDuration(nextTrack.durationMs, 0),
       source: nextTrack.source as "netease" | "mock" | "local",
       tone: generateTone(nextTrack.id),
     };
-  }, [now]);
+  }, [now, visualTrack]);
+
+  const chatMessages: import("./use-chat-sse").ChatMessage[] = agentMessages.map((m, i) => ({
+    id: `agent-${i}`,
+    role: "assistant" as const,
+    text: m.text,
+    fav: false,
+  }));
 
   const bridge = useRadioBridge({
     persona: selectedPersona,
     track: visualTrack,
     next: visualNext,
     playing: isPlaying,
+    loading: isLoadingEpisode,
     pos: currentTime,
     vol: volume,
     liked,
     mood,
-    messages: [],
+    messages: chatMessages,
     input: "",
     busy: false,
-    onSend: () => {},
-    onChip: () => {},
+    onSend: (text: string) => { onChatSubmit(text); },
+    onChip: (prompt: string) => { onChatSubmit(prompt); },
     onToggleLike: onToggleFavorite,
-    onSeek: () => {},
+    onSeek,
     onSkip: (dir: number) => { if (dir > 0) onNext(); },
     onTogglePlay: onPlayPause,
     onVolumeChange: onVolumeChange,
@@ -152,6 +188,28 @@ export function SkinStage({
   return (
     <>
       {renderSkin()}
+      {error && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 100,
+            padding: "10px 16px",
+            background: "rgba(200, 0, 0, 0.92)",
+            color: "#fff",
+            borderRadius: 8,
+            fontSize: 13,
+            maxWidth: "80vw",
+            textAlign: "center",
+            pointerEvents: "none",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+          }}
+        >
+          {error}
+        </div>
+      )}
       {showSettings && (
         <SettingsPanel
           theme={theme}
@@ -187,8 +245,6 @@ function SettingsPanel({
   onAvatarRemove: () => void;
   onClose: () => void;
 }) {
-  const fileInputRef = { current: null as HTMLInputElement | null };
-
   return (
     <div
       style={{
@@ -261,7 +317,7 @@ function SettingsPanel({
                   }}
                 >
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11 }}>{p.short} · {p.tag.split(" · ")[1]}</div>
+                  <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11 }}>{p.short} · {p.tag.split(" · ")[1] ?? p.tag}</div>
                 </button>
               ))}
           </div>

@@ -101,3 +101,38 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 `/api/health` 暴露 `storySource` 和 `webResearch` provider 状态。前端展示故事类型标签、资料来源说明和非创作背景免责提示。
 
 这条链路遵循现有边界：前端不直接访问资料 provider，所有外部资料源通过 server adapter 接入。
+
+## 播放器皮肤系统
+
+FakeRadio 前端播放器支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 根据当前主题选择渲染。
+
+### 皮肤组件架构
+
+5 套新版皮肤各自独立（`.tsx` 文件），通过 `.fr-*` CSS 前缀实现样式隔离：
+
+| 皮肤 | 文件 | 风格 |
+|------|------|------|
+| 暖橙胶片 (amber) | `skin-amber.tsx` | 胶片质感、渐变封面、wave avatar |
+| 像素 Game Boy (pixel) | `skin-pixel.tsx` | 4 色调色板、ASCII 条、Canvas 封面 |
+| 终端 TUI (terminal) | `skin-terminal.tsx` | 终端风格、ASCII 封面、Spectrum 频谱 |
+| Bento 玻璃 (bento) | `skin-bento.tsx` | 毛玻璃卡片、Bento 网格布局 |
+| Y2K / Win98 (y2k) | `skin-y2k.tsx` | Windows 98 风格、可拖拽窗口、VU 表 |
+
+### useRadioBridge 桥接层
+
+`useRadioBridge` hook 位于 `player-shell.tsx` 与皮肤组件之间，将外部状态（播放状态、曲目、音频控制）转换为皮肤组件所需的 `RadioState` 对象，并管理聊天消息状态（greeting seed、流式 SSE 响应、bubble action）。
+
+关键接口：`ask(userText, opts?)`（聊天）、`send(override?)`（发送）、`onBubbleAction(kind, msg)`（气泡操作：fav/more/less/copy）。
+
+### DJ Persona
+
+4 套人格通过 `skin-config.ts` 的 `PERSONAS` 配置：
+
+| ID | 名称 | 短名 | 风格 |
+|----|------|------|------|
+| `midnight` | 深夜电台 | 阿夜 | 低声、慢、留白多 |
+| `morning` | 清晨陪伴 | 晓 | 温柔、明亮、轻快 |
+| `buddy` | 话痨好友 | 搭子 | 松、口语、可自嘲 |
+| `cool` | 极简冷淡 | STATIC | 冷淡、克制、一两句 |
+
+人格选择通过 Settings 面板（皮肤组件内）持久化到 `localStorage("fakeradio-persona")`。

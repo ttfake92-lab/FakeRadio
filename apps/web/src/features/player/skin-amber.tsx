@@ -1,10 +1,10 @@
 "use client";
 
-import type { FormEvent } from "react";
 import { useRef, useEffect, useState } from "react";
 import { PERSONAS, QUICK_PROMPTS, fmt, type Persona } from "./skin-config";
 import type { RadioState } from "./use-radio-bridge";
 import type { ChatMessage } from "./use-chat-sse";
+import { getPlaybackControlText } from "./player-view-model";
 
 export type SkinAmberProps = {
   r: RadioState;
@@ -50,12 +50,12 @@ function CoverArt({
           </filter>
         </defs>
         <rect width="200" height="200" fill={`url(#g-${track.id})`} />
-        {[88, 76, 64, 52, 40, 28].map((radius, i) => (
+        {[88, 76, 64, 52, 40, 28].map((r, i) => (
           <circle
             key={i}
             cx="100"
             cy="108"
-            r={radius}
+            r={r}
             fill="none"
             stroke="rgba(0,0,0,0.18)"
             strokeWidth="0.6"
@@ -225,6 +225,7 @@ export function SkinAmber({
   const {
     track,
     playing,
+    loading,
     pos,
     vol,
     liked,
@@ -251,7 +252,99 @@ export function SkinAmber({
   if (!track) {
     return (
       <div className="fr-stage">
-        <div className="fr-frame fr-frame-amber">Loading...</div>
+        <div className="fr-frame fr-frame-amber" data-screen-label="01 Amber">
+          <section className="fr-player">
+            <div className="fr-player-bg" aria-hidden>
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  background: "linear-gradient(135deg, #1a1210 0%, #2d1f1a 50%, #1a1210 100%)",
+                }}
+              />
+              <div className="fr-player-veil" />
+            </div>
+            <div className="fr-player-fg">
+              <div className="fr-player-top">
+                <div className="fr-badge">
+                  <span className="fr-led" /> FAKERADIO
+                </div>
+                <button
+                  type="button"
+                  onClick={onAvatarClick}
+                  title="设置"
+                  style={{
+                    appearance: "none",
+                    border: 0,
+                    background: "transparent",
+                    color: "rgba(243,227,199,0.6)",
+                    fontSize: 16,
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                  }}
+                >
+                  ⚙
+                </button>
+              </div>
+              <div
+                className="fr-player-mid"
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 16,
+                }}
+              >
+                <div style={{ fontSize: 48 }}>📻</div>
+                <div
+                  style={{
+                    color: "rgba(243,227,199,0.6)",
+                    fontSize: 14,
+                    textAlign: "center",
+                  }}
+                >
+                  FakeRadio 已连接
+                </div>
+                <div style={{ color: "rgba(243,227,199,0.4)", fontSize: 12 }}>
+                  点击播放开始
+                </div>
+              </div>
+              <div className="fr-controls" style={{ justifyContent: "center" }}>
+                <button
+                  className="fr-ctl big"
+                  onClick={togglePlay}
+                  disabled={loading}
+                  style={{ color: "#e8a04a" }}
+                >
+                  {getPlaybackControlText(loading, playing, "▶", "❚❚", "…")}
+                </button>
+              </div>
+            </div>
+          </section>
+          <section className="fr-chat">
+            <div className="fr-chat-tape">
+              <span className="fr-tape-led" />
+              <span className="fr-tape-mood">{mood}</span>
+              <span className="fr-tape-status">待机</span>
+            </div>
+            <div
+              className="fr-chat-body"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <div style={{ color: "rgba(243,227,199,0.3)", fontSize: 12 }}>
+                等待信号…
+              </div>
+            </div>
+          </section>
+          <div className="fr-frame-grain" aria-hidden />
+          <div className="fr-frame-vignette" aria-hidden />
+        </div>
       </div>
     );
   }
@@ -292,12 +385,12 @@ export function SkinAmber({
               <div className="fr-bar">
                 <div
                   className="fr-fill"
-                  style={{ width: `${(pos / track.dur) * 100}%` }}
+                  style={{ width: `${track.dur > 0 ? (pos / track.dur) * 100 : 0}%` }}
                 />
               </div>
               <div className="fr-times">
                 <span>{fmt(pos)}</span>
-                <span>{fmt(track.dur)}</span>
+                <span>{track.dur > 0 ? fmt(track.dur) : "--:--"}</span>
               </div>
             </div>
             <div className="fr-controls">
@@ -307,13 +400,13 @@ export function SkinAmber({
               >
                 {liked[track.id] ? "♥" : "♡"}
               </button>
-              <button className="fr-ctl" onClick={() => skip(-1)}>
+              <button className="fr-ctl" onClick={() => skip(-1)} disabled={loading}>
                 ⏮
               </button>
-              <button className="fr-ctl big" onClick={togglePlay}>
-                {playing ? "❚❚" : "▶"}
+              <button className="fr-ctl big" onClick={togglePlay} disabled={loading}>
+                {getPlaybackControlText(loading, playing, "▶", "❚❚", "…")}
               </button>
-              <button className="fr-ctl" onClick={() => skip(1)}>
+              <button className="fr-ctl" onClick={() => skip(1)} disabled={loading}>
                 ⏭
               </button>
               <div className="fr-vol">
@@ -338,7 +431,7 @@ export function SkinAmber({
               {mood} · {persona.tag.split(" · ")[1]}
             </span>
             <span className="fr-tape-status">
-              {busy ? "SYNTHESIZING…" : "ON AIR"}
+              {loading ? "PREPARING…" : busy ? "SYNTHESIZING…" : "ON AIR"}
             </span>
           </div>
           <div className="fr-chat-body" ref={scrollRef}>
