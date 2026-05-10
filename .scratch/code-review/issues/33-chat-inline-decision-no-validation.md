@@ -1,6 +1,6 @@
 # 33 /api/chat intent 分支手动构造 decision 对象未经校验
 
-Status: ready-for-agent
+Status: completed
 Type: bug
 
 ## Parent

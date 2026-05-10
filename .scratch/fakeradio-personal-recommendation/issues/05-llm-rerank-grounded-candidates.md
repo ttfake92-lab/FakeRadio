@@ -1,6 +1,6 @@
 # 让 LLM 对候选集 rerank 并输出可解释选择
 
-Status: needs-triage
+Status: completed
 Type: AFK
 
 ## What to build

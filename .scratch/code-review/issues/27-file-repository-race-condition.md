@@ -1,6 +1,6 @@
 # 27 favorites 和 session 文件仓库的并发读写竞态
 
-Status: ready-for-agent
+Status: completed
 Type: bug
 
 ## Parent

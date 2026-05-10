@@ -1,6 +1,6 @@
 # 30 export-pipeline 在请求中执行重型 FFmpeg 操作
 
-Status: ready-for-agent
+Status: completed
 Type: performance
 
 ## Parent

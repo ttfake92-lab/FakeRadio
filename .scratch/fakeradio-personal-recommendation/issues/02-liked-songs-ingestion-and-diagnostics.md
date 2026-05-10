@@ -1,6 +1,6 @@
 # 读取原始歌单并暴露品味数据诊断
 
-Status: needs-triage
+Status: completed
 Type: AFK
 
 ## What to build

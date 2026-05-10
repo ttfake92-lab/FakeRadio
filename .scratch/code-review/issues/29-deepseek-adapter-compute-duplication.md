@@ -1,6 +1,6 @@
 # 29 DeepSeek adapter compute 和 computeRaw 代码重复
 
-Status: ready-for-agent
+Status: completed
 Type: refactor
 
 ## Parent

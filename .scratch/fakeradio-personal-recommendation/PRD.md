@@ -1,3 +1,5 @@
+Status: completed（Issue 02-06 于 2026-05-08 完成，commit `75a47e6`）
+
 # FakeRadio 个人收藏推荐改造
 
 ## 背景

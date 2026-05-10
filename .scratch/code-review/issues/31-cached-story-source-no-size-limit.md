@@ -1,6 +1,6 @@
 # 31 cached-web-research-adapter 缓存无大小限制
 
-Status: ready-for-agent
+Status: completed
 Type: bug
 
 ## Parent

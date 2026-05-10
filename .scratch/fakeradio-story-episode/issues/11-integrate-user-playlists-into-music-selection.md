@@ -1,3 +1,5 @@
+Status: completed
+
 ## Parent
 
 - `.scratch/fakeradio-story-episode/PRD.md`

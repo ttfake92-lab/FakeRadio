@@ -1,6 +1,6 @@
 # 28 /cache/tts/* 路由仍使用同步 existsSync
 
-Status: ready-for-agent
+Status: completed
 Type: bug
 
 ## Parent

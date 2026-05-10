@@ -1,6 +1,6 @@
 # 在播放器诊断面板展示推荐链路
 
-Status: needs-triage
+Status: completed
 Type: AFK
 
 ## What to build

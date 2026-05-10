@@ -1,6 +1,6 @@
 # 26 拆分 register-routes.ts 和 /api/chat intent 路由
 
-Status: ready-for-agent
+Status: completed
 Type: refactor
 
 ## Parent

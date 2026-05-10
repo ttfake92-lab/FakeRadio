@@ -1,6 +1,6 @@
 # 32 DeepSeek adapter 硬编码 JSON schema 指令
 
-Status: ready-for-agent
+Status: completed
 Type: bug
 
 ## Parent

@@ -1,3 +1,5 @@
+Status: completed（第三批 Issue 08-11 于 2026-05-01 完成，commit `1267eb7`）
+
 # 真实资料驱动的 DJ 故事 Episode 播放闭环 PRD
 
 ## Problem Statement

@@ -1,6 +1,6 @@
 # 修复网易云音乐请求登录态传递
 
-Status: needs-triage
+Status: completed
 Type: AFK
 
 ## What to build

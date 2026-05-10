@@ -1,6 +1,6 @@
 # 用收藏库生成候选曲目
 
-Status: needs-triage
+Status: completed
 Type: AFK
 
 ## What to build
