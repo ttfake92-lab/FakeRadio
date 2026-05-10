@@ -8,6 +8,15 @@ export type ChatSSEOptions = {
   onDone(data: { text: string; action?: { type: string; trackId?: string; title?: string; artist?: string } | null }): void;
 };
 
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  streaming?: boolean;
+  fav?: boolean;
+  trackChip?: { title: string; artist: string };
+};
+
 export function useChatSSE() {
   const [isConnected, setIsConnected] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
