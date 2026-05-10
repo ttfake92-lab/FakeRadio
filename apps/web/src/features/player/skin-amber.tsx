@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useRef, useEffect, useState } from "react";
 import { PERSONAS, QUICK_PROMPTS, fmt, type Persona } from "./skin-config";
 import type { RadioState } from "./use-radio-bridge";
+import type { ChatMessage } from "./use-chat-sse";
 
 export type SkinAmberProps = {
   r: RadioState;
@@ -112,15 +113,8 @@ function Bubble({
   avatarSrc,
   onAvatarClick,
 }: {
-  msg: {
-    id: string;
-    role: string;
-    text: string;
-    streaming?: boolean;
-    fav?: boolean;
-    trackChip?: { title: string; artist: string };
-  };
-  onAction: (kind: string, msg: typeof Bubble extends (arg: infer A) => unknown ? A extends { msg: infer M } ? M : never : never) => void;
+  msg: ChatMessage;
+  onAction: (kind: string, msg: ChatMessage) => void;
   avatarSrc: string | null;
   onAvatarClick: () => void;
 }) {
@@ -154,7 +148,7 @@ function Bubble({
           {avatarSrc ? (
             <img className="fr-dj-avatar" src={avatarSrc} alt="dj" />
           ) : (
-            <WaveAvatar active={msg.streaming} size={28} />
+            <WaveAvatar active={!!msg.streaming} size={28} />
           )}
         </button>
       )}
@@ -244,7 +238,6 @@ export function SkinAmber({
     busy,
     setInput,
     send,
-    onChip,
     onBubbleAction,
   } = r;
 
@@ -371,7 +364,7 @@ export function SkinAmber({
               <button
                 key={i}
                 className="fr-chip"
-                onClick={() => onChip(q.prompt)}
+                onClick={() => r.ask(q.prompt)}
                 disabled={busy}
               >
                 {q.label}

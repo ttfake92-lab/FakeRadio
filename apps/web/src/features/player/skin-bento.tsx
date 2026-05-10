@@ -36,7 +36,6 @@ export function SkinBento({
     busy,
     setInput,
     send,
-    onChip,
     onBubbleAction,
   } = r;
 
@@ -374,7 +373,7 @@ export function SkinBento({
             </div>
             <div className="bn-chips">
               {QUICK_PROMPTS.map((q, i) => (
-                <button key={i} className="bn-chip" onClick={() => onChip(q.prompt)} disabled={busy}>
+                <button key={i} className="bn-chip" onClick={() => r.ask(q.prompt)} disabled={busy}>
                   {q.label}
                 </button>
               ))}

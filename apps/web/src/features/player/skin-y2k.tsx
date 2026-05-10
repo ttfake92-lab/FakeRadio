@@ -96,7 +96,6 @@ export function SkinY2K({
     busy,
     setInput,
     send,
-    onChip,
     onBubbleAction,
   } = r;
 
@@ -346,7 +345,7 @@ export function SkinY2K({
             </div>
             <div className="y2k-chips">
               {QUICK_PROMPTS.map((q, i) => (
-                <button key={i} className="y2k-chip" onClick={() => onChip(q.prompt)} disabled={busy}>{q.label}</button>
+                <button key={i} className="y2k-chip" onClick={() => r.ask(q.prompt)} disabled={busy}>{q.label}</button>
               ))}
             </div>
             <form className="y2k-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>

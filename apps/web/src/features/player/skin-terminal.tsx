@@ -35,7 +35,6 @@ export function SkinTerminal({
     busy,
     setInput,
     send,
-    onChip,
   } = r;
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -250,7 +249,7 @@ export function SkinTerminal({
               <button
                 key={i}
                 className="term-chip"
-                onClick={() => onChip(q.prompt)}
+                onClick={() => r.ask(q.prompt)}
                 disabled={busy}
               >
                 {q.label}

@@ -234,10 +234,23 @@ describe("getNextEpisodeLabel", () => {
 });
 
 describe("on air terminal view model", () => {
-  it("defines terminal and morning theme labels", () => {
-    expect(ON_AIR_THEMES).toEqual(["terminal-fm", "morning-console"]);
+  it("defines all theme labels", () => {
+    expect(ON_AIR_THEMES).toEqual([
+      "terminal-fm",
+      "morning-console",
+      "amber",
+      "pixel",
+      "terminal",
+      "bento",
+      "y2k",
+    ]);
     expect(getThemeLabel("terminal-fm")).toBe("Terminal FM");
     expect(getThemeLabel("morning-console")).toBe("Morning Console");
+    expect(getThemeLabel("amber")).toBe("Amber");
+    expect(getThemeLabel("pixel")).toBe("Pixel");
+    expect(getThemeLabel("terminal")).toBe("Terminal");
+    expect(getThemeLabel("bento")).toBe("Bento");
+    expect(getThemeLabel("y2k")).toBe("Y2K");
   });
 
   it("formats on air clock for the terminal header", () => {

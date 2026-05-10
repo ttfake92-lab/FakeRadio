@@ -18,6 +18,16 @@ import { useAudioEngine } from "./use-audio-engine";
 import { usePlaybackState } from "./use-playback-state";
 import { useStreamConnection } from "./use-stream-connection";
 import { OnAirTerminal } from "./on-air-terminal";
+import { useRadioBridge } from "./use-radio-bridge";
+import { SkinAmber } from "./skin-amber";
+import { SkinPixel } from "./skin-pixel";
+import { SkinTerminal } from "./skin-terminal";
+import { SkinBento } from "./skin-bento";
+import { SkinY2K } from "./skin-y2k";
+import { SkinStage } from "./skin-stage";
+import type { OnAirThemeId } from "./player-view-model";
+import { PERSONAS, SKINS, type Persona } from "./skin-config";
+import "./skins.css";
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知错误";
@@ -55,7 +65,7 @@ export function PlayerShell() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [userChatHistory, setUserChatHistory] = useState<string[]>([]);
   const [nowDate, setNowDate] = useState(() => new Date());
-  const [theme, setTheme] = useState<"terminal-fm" | "morning-console">("terminal-fm");
+  const [theme, setTheme] = useState<OnAirThemeId>("terminal-fm");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(() => {
@@ -64,6 +74,9 @@ export function PlayerShell() {
     return saved !== null ? Number(saved) : 1;
   });
   const [prewarmStatus, setPrewarmStatus] = useState<PrewarmStatus | null>(null);
+  const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const [selectedPersona, setSelectedPersona] = useState<Persona>(Object.values(PERSONAS)[0]!);
+  const [showSettings, setShowSettings] = useState(false);
 
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -111,6 +124,11 @@ export function PlayerShell() {
   const durationMs = playback.episodeData?.track.durationMs ?? track?.durationMs ?? 0;
   const progress = durationMs > 0 ? currentTime / (durationMs / 1000) : 0;
 
+  const isNewSkin = (t: OnAirThemeId): boolean =>
+    t === "amber" || t === "pixel" || t === "terminal" || t === "bento" || t === "y2k";
+
+  const mood = onAirModeLabel;
+
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     playback.setError(null);
@@ -122,9 +140,23 @@ export function PlayerShell() {
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
       setPrewarmStatus(prewarmStatusResponse);
-      // Sync theme with time of day on load
+      // Sync theme with time of day on load (only for old themes)
       const hour = new Date().getHours();
-      setTheme(hour >= 7 && hour < 9 ? "morning-console" : "terminal-fm");
+      const savedTheme = localStorage.getItem("fakeradio-theme") as OnAirThemeId | null;
+      if (savedTheme && (savedTheme === "terminal-fm" || savedTheme === "morning-console")) {
+        setTheme(savedTheme);
+      } else if (!savedTheme) {
+        setTheme(hour >= 7 && hour < 9 ? "morning-console" : "terminal-fm");
+      }
+      // Load saved persona
+      const savedPersonaId = localStorage.getItem("fakeradio-persona");
+      if (savedPersonaId) {
+        const found = Object.values(PERSONAS).find((p) => p.short === savedPersonaId);
+        if (found) setSelectedPersona(found);
+      }
+      // Load saved avatar
+      const savedAvatar = localStorage.getItem("fakeradio-avatar");
+      if (savedAvatar) setAvatarSrc(savedAvatar);
     } catch (loadError) {
       playback.setError(`无法连接本地服务：${getErrorMessage(loadError)}`);
     } finally {
@@ -301,8 +333,9 @@ export function PlayerShell() {
     setCurrentTime(musicAudio.currentTime);
   }, [playback.episodeState, playback.playEpisode, audio.musicRef]);
 
-  const handleThemeChange = useCallback((newTheme: "terminal-fm" | "morning-console") => {
+  const handleThemeChange = useCallback((newTheme: OnAirThemeId) => {
     setTheme(newTheme);
+    localStorage.setItem("fakeradio-theme", newTheme);
   }, []);
 
   const handleReplay = useCallback(() => {
@@ -322,8 +355,59 @@ export function PlayerShell() {
     }
   }, [audio.musicRef]);
 
+  const handleAvatarClick = useCallback(() => {
+    setShowSettings((s) => !s);
+  }, []);
+
+  const handleAvatarUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setAvatarSrc(dataUrl);
+      localStorage.setItem("fakeradio-avatar", dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleAvatarRemove = useCallback(() => {
+    setAvatarSrc(null);
+    localStorage.removeItem("fakeradio-avatar");
+  }, []);
+
+  const handlePersonaChange = useCallback((persona: Persona) => {
+    setSelectedPersona(persona);
+    localStorage.setItem("fakeradio-persona", persona.short);
+  }, []);
+
   return (
     <>
+      {isNewSkin(theme) ? (
+        <SkinStage
+          theme={theme}
+          now={now}
+          track={track}
+          currentTrackTitle={currentTrackTitle}
+          currentTrackArtist={currentTrackArtist}
+          isPlaying={isPlaying}
+          currentTime={currentTime}
+          durationMs={durationMs}
+          volume={volume}
+          favorites={favorites}
+          mood={mood}
+          selectedPersona={selectedPersona}
+          avatarSrc={avatarSrc}
+          showSettings={showSettings}
+          onThemeChange={handleThemeChange}
+          onAvatarClick={handleAvatarClick}
+          onAvatarUpload={handleAvatarUpload}
+          onAvatarRemove={handleAvatarRemove}
+          onPersonaChange={handlePersonaChange}
+          onPlayPause={handlePlayPause}
+          onVolumeChange={handleVolumeChange}
+          onToggleFavorite={handleToggleFavorite}
+          onNext={handleNext}
+        />
+      ) : (
       <OnAirTerminal
         theme={theme}
         clock={onAirClock}
@@ -360,6 +444,7 @@ export function PlayerShell() {
         onChatMessageChange={setChatMessage}
         onSubmitChat={handleChat}
       />
+      )}
       <audio
         ref={audio.musicRef}
         className="audio-control-hidden"

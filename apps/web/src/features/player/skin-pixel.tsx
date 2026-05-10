@@ -35,7 +35,6 @@ export function SkinPixel({
     busy,
     setInput,
     send,
-    onChip,
   } = r;
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -195,7 +194,7 @@ export function SkinPixel({
           </div>
           <div className="px-chips">
             {QUICK_PROMPTS.map((q, i) => (
-              <button key={i} className="px-chip" onClick={() => onChip(q.prompt)} disabled={busy}>{q.label}</button>
+              <button key={i} className="px-chip" onClick={() => r.ask(q.prompt)} disabled={busy}>{q.label}</button>
             ))}
           </div>
           <form className="px-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>

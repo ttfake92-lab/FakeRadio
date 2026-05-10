@@ -1,5 +1,17 @@
 export type SkinId = "amber" | "pixel" | "terminal" | "bento" | "y2k";
 
+// Visual track type used by skin components for cover art gradients
+// The backend Track type (from @fakeradio/shared) doesn't include tone
+export type VisualTrack = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  dur: number; // duration in seconds (backend uses durationMs)
+  source: "netease" | "mock" | "local";
+  tone: [string, string, string]; // [dark, mid, light] colors for gradient
+};
+
 export type PersonaId = "midnight" | "morning" | "buddy" | "cool";
 
 export type Persona = {
