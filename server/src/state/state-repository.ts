@@ -52,7 +52,7 @@ export type StateRepository = {
   }>;
   pruneOldData(beforeIso: string): Promise<number>;
   savePreparedEpisode(record: Omit<PreparedEpisodeRecord, "id" | "createdAt" | "updatedAt">): Promise<PreparedEpisodeRecord>;
-  claimPreparedEpisode(radioDate: string, blockAt: string): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null>;
+  claimPreparedEpisode(radioDate: string, blockAt: string, excludedTrackIds?: string[]): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null>;
   getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
   getBlockPrewarmStatus(radioDate: string, blockAt: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
   markPreparedEpisodeAudioDownloaded(id: string, downloaded: boolean): Promise<void>;
@@ -262,27 +262,42 @@ export function createStateRepository(dbPath: string): StateRepository {
       return Promise.resolve({ id, ...record, createdAt: now, updatedAt: now });
     },
 
-    claimPreparedEpisode(radioDate: string, blockAt: string): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null> {
+    claimPreparedEpisode(radioDate: string, blockAt: string, excludedTrackIds: string[] = []): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null> {
+      const excluded = new Set(excludedTrackIds);
+      const parseRow = (row: Record<string, unknown>) => {
+        const episodeJson = row.episode_json as string | null;
+        if (!episodeJson) return null;
+        const parsed = JSON.parse(episodeJson);
+        const validation = RadioEpisodeSchema.safeParse(parsed);
+        if (!validation.success) return null;
+        return { episodeJson, episode: validation.data };
+      };
+
       const transaction = db.transaction((rDate: string, bAt: string) => {
-        const row = db.prepare(
-          `SELECT * FROM prepared_episodes WHERE radio_date = ? AND block_at = ? AND status = 'ready' ORDER BY created_at ASC LIMIT 1`
-        ).get(rDate, bAt) as Record<string, unknown> | undefined;
-        if (!row) return null;
+        const rows = db.prepare(
+          `SELECT * FROM prepared_episodes WHERE radio_date = ? AND block_at = ? AND status = 'ready' ORDER BY created_at ASC`
+        ).all(rDate, bAt) as Array<Record<string, unknown>>;
+        if (rows.length === 0) return null;
+
+        const validRows = rows
+          .map((row) => {
+            const parsed = parseRow(row);
+            return parsed ? { row, ...parsed } : null;
+          })
+          .filter((entry): entry is { row: Record<string, unknown>; episodeJson: string; episode: RadioEpisode } => entry !== null);
+        if (validRows.length === 0) return null;
+
+        const selected = validRows.find(({ episode }) => !excluded.has(episode.track.id));
+        if (!selected) return null;
         const updatedAt = new Date().toISOString();
-        db.prepare(`UPDATE prepared_episodes SET status = 'consumed', updated_at = ? WHERE id = ?`).run(updatedAt, row.id);
-        return { row, updatedAt };
+        db.prepare(`UPDATE prepared_episodes SET status = 'consumed', updated_at = ? WHERE id = ?`).run(updatedAt, selected.row.id);
+        return { ...selected, updatedAt };
       });
 
       const result = transaction(radioDate, blockAt);
       if (!result) return Promise.resolve(null);
 
-      const { row, updatedAt } = result;
-      const episodeJson = row.episode_json as string | null;
-      if (!episodeJson) return Promise.resolve(null);
-
-      const parsed = JSON.parse(episodeJson);
-      const validation = RadioEpisodeSchema.safeParse(parsed);
-      if (!validation.success) return Promise.resolve(null);
+      const { row, updatedAt, episodeJson, episode } = result;
 
       const record: PreparedEpisodeRecord = {
         id: row.id as string,
@@ -296,7 +311,7 @@ export function createStateRepository(dbPath: string): StateRepository {
         updatedAt
       };
 
-      return Promise.resolve({ record, episode: validation.data });
+      return Promise.resolve({ record, episode });
     },
 
     getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }> {

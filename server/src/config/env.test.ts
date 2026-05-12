@@ -40,4 +40,12 @@ describe("parseEnv", () => {
     expect(env.FAKERADIO_TTS_VOICE).toBe("en-US-JennyNeural");
     expect(env.FAKERADIO_TTS_CACHE_DIR).toBe("/tmp/tts");
   });
+
+  it("enables nightly prewarm by default for always-on local server usage", () => {
+    const env = parseEnv({});
+
+    expect(env.FAKERADIO_PREWARM_ENABLED).toBe(true);
+    expect(env.FAKERADIO_PREWARM_TIME).toBe("23:30");
+    expect(env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK).toBe(3);
+  });
 });

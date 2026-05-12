@@ -329,6 +329,57 @@ describe("createStateRepository", () => {
     expect(claimed!.episode.story.text).toBe("Hello");
   });
 
+  it("prefers a non-recent prepared episode when claiming", async () => {
+    const recentEpisode = {
+      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
+      story: { text: "Recent", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    const freshEpisode = {
+      track: { id: "fresh-track", title: "Fresh Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/fresh-track.mp3" },
+      story: { text: "Fresh", audioUrl: "http://localhost/tts/fresh.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(recentEpisode)
+    });
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(freshEpisode)
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00", ["recent-track"]);
+
+    expect(claimed).not.toBeNull();
+    expect(claimed!.episode.track.id).toBe("fresh-track");
+  });
+
+  it("returns null instead of replaying prepared episodes when all ready tracks are recent", async () => {
+    const recentEpisode = {
+      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
+      story: { text: "Recent", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.savePreparedEpisode({
+      radioDate: "2026-05-09",
+      blockAt: "08:00",
+      status: "ready",
+      episodeJson: JSON.stringify(recentEpisode)
+    });
+
+    const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00", ["recent-track"]);
+
+    expect(claimed).toBeNull();
+  });
+
   it("returns null when claiming and no ready record exists", async () => {
     const claimed = await repo.claimPreparedEpisode("2026-05-09", "08:00");
     expect(claimed).toBeNull();

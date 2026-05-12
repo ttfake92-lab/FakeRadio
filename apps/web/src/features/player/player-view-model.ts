@@ -170,6 +170,17 @@ export function getNextEpisodeLabel(
   return "";
 }
 
+export function getPlaybackControlText(
+  isLoading: boolean,
+  isPlaying: boolean,
+  playText: string,
+  pauseText: string,
+  loadingText: string
+): string {
+  if (isLoading) return loadingText;
+  return isPlaying ? pauseText : playText;
+}
+
 export function shouldStartCrossfade(
   currentTimeSec: number,
   durationSec: number,

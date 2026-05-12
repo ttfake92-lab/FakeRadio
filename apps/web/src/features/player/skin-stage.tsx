@@ -30,6 +30,7 @@ export type SkinStageProps = {
   avatarSrc: string | null;
   showSettings: boolean;
   error?: string | null;
+  djMessage?: string | null;
   agentMessages: AgentMessage[];
   onAgentMessage: (msg: AgentMessage) => void;
   onChatSubmit: (text: string) => void;
@@ -78,6 +79,7 @@ export function SkinStage({
   avatarSrc,
   showSettings,
   error,
+  djMessage,
   agentMessages,
   onAgentMessage,
   onChatSubmit,
@@ -110,10 +112,12 @@ export function SkinStage({
         tone: generateTone("idle"),
       };
     }
+    // Use currentTrackTitle/currentTrackArtist for display to respect episodeData.track
+    // when an episode is playing. track.id is still used for tone generation.
     return {
       id: track.id,
-      title: track.title,
-      artist: track.artist,
+      title: currentTrackTitle,
+      artist: currentTrackArtist,
       album: track.album ?? "",
       dur: toVisualDuration(track.durationMs ?? durationMs, currentTime),
       source: track.source as "netease" | "mock" | "local",
@@ -135,17 +139,27 @@ export function SkinStage({
     };
   }, [now, visualTrack]);
 
-  const chatMessages: import("./use-chat-sse").ChatMessage[] = agentMessages.map((m, i) => ({
-    id: `agent-${i}`,
-    role: "assistant" as const,
-    text: m.text,
-    fav: false,
-  }));
+  const chatMessages: import("./use-chat-sse").ChatMessage[] = useMemo(
+    () => agentMessages.map((m, i) => ({
+      id: `agent-${i}`,
+      role: "assistant" as const,
+      text: m.text,
+      fav: false,
+    })),
+    [agentMessages]
+  );
+
+  const seedTrackChip = useMemo(
+    () => ({ title: visualTrack.title, artist: visualTrack.artist }),
+    [visualTrack.artist, visualTrack.title]
+  );
 
   const bridge = useRadioBridge({
     persona: selectedPersona,
     track: visualTrack,
     next: visualNext,
+    seedMessage: djMessage,
+    seedTrackChip,
     playing: isPlaying,
     loading: isLoadingEpisode,
     pos: currentTime,

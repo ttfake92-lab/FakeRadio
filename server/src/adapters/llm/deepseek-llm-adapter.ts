@@ -7,7 +7,18 @@ export type CreateDeepSeekAdapterOptions = {
   baseUrl?: string;
 };
 
-// WARNING: Keep in sync with packages/shared/src/contracts/radio.ts DjDecisionSchema
+function stripNulls(value: unknown): unknown {
+  if (value === null) return undefined;
+  if (Array.isArray(value)) return value.map(stripNulls);
+  if (typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== null) result[k] = stripNulls(v);
+    }
+    return result;
+  }
+  return value;
+}
 const JSON_SCHEMA_INSTRUCTION = `
 
 You must respond with valid JSON matching this exact schema:
@@ -31,21 +42,29 @@ export function createDeepSeekAdapter(options: CreateDeepSeekAdapterOptions): Ll
     messages: { role: "system" | "user"; content: string }[],
     responseFormat?: "json_object"
   ): Promise<string> {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${options.apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        ...(responseFormat ? { response_format: { type: responseFormat } } : {}),
-        temperature: 0.7,
-        max_tokens: 4096
-      }),
-      signal: AbortSignal.timeout(30_000)
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${options.apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          ...(responseFormat ? { response_format: { type: responseFormat } } : {}),
+          temperature: 0.7,
+          max_tokens: 4096
+        }),
+        signal: AbortSignal.timeout(60_000)
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw new Error("LLM 生成超时（60s），请重试");
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -76,7 +95,10 @@ export function createDeepSeekAdapter(options: CreateDeepSeekAdapterOptions): Ll
         throw new Error(`DeepSeek API returned invalid JSON: ${content.slice(0, 200)}`);
       }
 
-      return DjDecisionSchema.parse(parsed);
+      // DeepSeek sometimes returns null instead of omitting a field — strip nulls
+      const sanitized = stripNulls(parsed);
+
+      return DjDecisionSchema.parse(sanitized);
     },
 
     async computeRaw(fragments: ContextFragment[]): Promise<string> {

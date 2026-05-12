@@ -110,14 +110,21 @@ export function SkinY2K({
   } = r;
 
   const [zPlayer, setZPlayer] = useState(2);
-  const [zChat, setZChat] = useState(1);
+  const [zChat, setZChat] = useState(3);
   const focusPlayer = () => { setZPlayer(2); setZChat(1); };
   const focusChat = () => { setZPlayer(1); setZChat(2); };
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const handle = persona.short || "DJ";
@@ -219,7 +226,7 @@ export function SkinY2K({
           x={18}
           y={20}
           w={290}
-          h={300}
+          h={268}
           z={zPlayer}
           onFocus={focusPlayer}
           accent="#000080"
@@ -287,9 +294,9 @@ export function SkinY2K({
         <Win
           title={`💬 ${handle} - Conversation`}
           x={48}
-          y={195}
-          w={300}
-          h={360}
+          y={312}
+          w={340}
+          h={350}
           z={zChat}
           onFocus={focusChat}
           accent="#5b3ea0"
@@ -308,7 +315,7 @@ export function SkinY2K({
                 <div className="y2k-chat-status">{loading ? "准备节目中..." : busy ? "正在输入..." : "在线"}</div>
               </div>
             </div>
-            <div className="y2k-chat-body" ref={scrollRef}>
+            <div className="y2k-chat-body" ref={scrollRef} onScroll={handleScroll}>
               {messages.map((m) => {
                 const isUser = m.role === "user";
                 return (

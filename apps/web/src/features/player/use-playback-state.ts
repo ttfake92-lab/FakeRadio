@@ -22,6 +22,7 @@ export type PlaybackState = {
   nextEpisode: RadioEpisode | null;
   nextEpisodeError: string | null;
   isPrefetching: boolean;
+  isLoadingEpisode: boolean;
   error: string | null;
   episodeStateLabel: string;
   nextEpisodeLabel: string;
@@ -38,6 +39,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   const [nextEpisode, setNextEpisode] = useState<RadioEpisode | null>(null);
   const [nextEpisodeError, setNextEpisodeError] = useState<string | null>(null);
   const [isPrefetching, setIsPrefetching] = useState(false);
+  const [isLoadingEpisode, setIsLoadingEpisode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [episodeSource, setEpisodeSource] = useState<"prepared" | "live" | null>(null);
 
@@ -165,6 +167,9 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   const playEpisode = useCallback(async () => {
     if (episodeStateRef.current !== "idle" && episodeStateRef.current !== "error" && episodeStateRef.current !== "music") return;
 
+    episodeStateRef.current = "preparing";
+    setEpisodeState("preparing");
+    setIsLoadingEpisode(true);
     isPrefetchingRef.current = false;
     setIsPrefetching(false);
     nextEpisodeRef.current = null;
@@ -185,6 +190,8 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
       setEpisodeState("error");
       setEpisodeData(null);
       setError(`播放失败：${getErrorMessage(err)}`);
+    } finally {
+      setIsLoadingEpisode(false);
     }
   }, [episodeState]);
 
@@ -231,10 +238,12 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   }, []);
 
   const clearEpisodeState = useCallback(() => {
+    episodeStateRef.current = "idle";
     setEpisodeState("idle");
     setEpisodeData(null);
     setNextEpisode(null);
     setNextEpisodeError(null);
+    setIsLoadingEpisode(false);
     setError(null);
     setEpisodeSource(null);
   }, []);
@@ -245,6 +254,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     nextEpisode,
     nextEpisodeError,
     isPrefetching,
+    isLoadingEpisode,
     error,
     episodeStateLabel,
     nextEpisodeLabel,

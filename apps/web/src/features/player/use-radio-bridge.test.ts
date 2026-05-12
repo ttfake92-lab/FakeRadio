@@ -40,6 +40,11 @@ describe("skin-config", () => {
     expect(fmt(218)).toBe("3:38");
     expect(fmt(3600)).toBe("60:00");
   });
+
+  it("fmt floors fractional seconds for media currentTime", () => {
+    expect(fmt(6.347532)).toBe("0:06");
+    expect(fmt(65.9)).toBe("1:05");
+  });
 });
 
 describe("useRadioBridge types", () => {

@@ -34,22 +34,30 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
         return { text, audioUrl: `/cache/tts/${cacheKey}.${ext}`, cacheKey };
       }
 
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": options.apiKey
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "user", content: `Speak in a warm, natural ${voice} voice.` },
-            { role: "assistant", content: text }
-          ],
-          audio: { format, voice }
-        }),
-        signal: AbortSignal.timeout(15_000)
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": options.apiKey
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "user", content: `Speak in a warm, natural ${voice} voice.` },
+              { role: "assistant", content: text }
+            ],
+            audio: { format, voice }
+          }),
+          signal: AbortSignal.timeout(15_000)
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === "TimeoutError") {
+          throw new Error("TTS 生成超时（15s），请重试");
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");

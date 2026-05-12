@@ -214,10 +214,55 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       expect(result.track.title).toBe("Next Favorite");
     });
 
-    // Note: selectCandidate's ?? tracks[0] fallback means we cannot test "all favorites
-    // excluded" scenario - it will always return a track from the list. The existing
-    // deduplication tests above verify that excluded tracks are properly filtered when
-    // alternatives exist. The "empty favorites" path is covered by the test above.
+    it("does not accept an LLM-picked favorite when it was recently played", async () => {
+      const favTrack1 = makeTrack("fav-001", "Recently Picked Favorite");
+      const favTrack2 = makeTrack("fav-002", "Available Favorite");
+      const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
+      const music = createMockMusicAdapter();
+      const state = createPlaybackState([]);
+      state.rememberSelectedTrack(favTrack1);
+      const llm = {
+        compute: vi.fn()
+          .mockResolvedValueOnce({
+            say: "Try the recent one again.",
+            play: { trackId: "fav-001", query: "warm morning indie", reason: "draft" },
+            segue: "draft",
+            reason: "draft"
+          })
+          .mockResolvedValueOnce({
+            say: "Now playing Available Favorite by Test Artist.",
+            play: { trackId: "fav-002", reason: "grounded" },
+            segue: "grounded",
+            reason: "grounded"
+          })
+      };
+      const deps = buildDeps({ likedSongs, music, state, llm: llm as EpisodeRunnerDeps["llm"] });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("favorites");
+      expect(result.rerankSource).toBe("fallback");
+      expect(result.track.id).toBe("fav-002");
+      expect(music.resolve).not.toHaveBeenCalledWith(favTrack1);
+    });
+
+    it("falls through to search when all favorites were recently played", async () => {
+      const favTrack1 = makeTrack("fav-001", "Recent Favorite One");
+      const favTrack2 = makeTrack("fav-002", "Recent Favorite Two");
+      const searchTrack = makeTrack("search-001", "Fresh Search Result");
+      const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
+      const music = createMockMusicAdapter();
+      music.search = vi.fn().mockResolvedValue([searchTrack]);
+      const state = createPlaybackState([]);
+      state.rememberSelectedTrack(favTrack1);
+      state.rememberSelectedTrack(favTrack2);
+      const deps = buildDeps({ likedSongs, music, state });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("search");
+      expect(result.track.id).toBe("search-001");
+    });
   });
 
   describe("DJ decision toolResults include favorites info", () => {

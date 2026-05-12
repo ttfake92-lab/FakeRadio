@@ -243,10 +243,17 @@ export function SkinAmber({
   } = r;
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   if (!track) {
@@ -434,7 +441,7 @@ export function SkinAmber({
               {loading ? "PREPARING…" : busy ? "SYNTHESIZING…" : "ON AIR"}
             </span>
           </div>
-          <div className="fr-chat-body" ref={scrollRef}>
+          <div className="fr-chat-body" ref={scrollRef} onScroll={handleScroll}>
             {messages.map((m) => (
               <Bubble
                 key={m.id}

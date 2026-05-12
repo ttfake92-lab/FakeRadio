@@ -77,7 +77,14 @@ export function SkinTerminal({
   } = r;
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
   const [, rerender] = useState(0);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
     const id = setInterval(() => rerender((n) => n + 1), 110);
@@ -86,7 +93,7 @@ export function SkinTerminal({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const pct = track.dur > 0 ? (pos / track.dur) * 100 : 0;
@@ -222,7 +229,7 @@ export function SkinTerminal({
           <div className="term-chat-hdr">
             ── #{handle} ── {loading ? "preparing ..." : busy ? "buffering ..." : "idle"} ──
           </div>
-          <div className="term-chat-body" ref={scrollRef}>
+          <div className="term-chat-body" ref={scrollRef} onScroll={handleScroll}>
             {messages.map((m) => {
               const isUser = m.role === "user";
               const speaker = isUser ? "you" : handle;

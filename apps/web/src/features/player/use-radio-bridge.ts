@@ -9,6 +9,8 @@ export type RadioBridgeParams = {
   persona: Persona;
   track: VisualTrack | null;
   next: VisualTrack | null;
+  seedMessage?: string | null | undefined;
+  seedTrackChip?: ChatMessage["trackChip"] | undefined;
   playing: boolean;
   loading: boolean;
   pos: number;
@@ -55,9 +57,10 @@ export type RadioState = {
 
 export function useRadioBridge(params: RadioBridgeParams) {
   const {
-    persona,
     track,
     next,
+    seedMessage,
+    seedTrackChip,
     playing,
     loading,
     pos,
@@ -81,27 +84,76 @@ export function useRadioBridge(params: RadioBridgeParams) {
   const [likedState, setLikedState] = useState(liked);
   useEffect(() => { setLikedState(liked); }, [liked]);
   const seededFor = useRef<string | null>(null);
+  const seedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearSeedTimer = useCallback(() => {
+    if (seedTimerRef.current) {
+      clearInterval(seedTimerRef.current);
+      seedTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => { clearSeedTimer(); }, [clearSeedTimer]);
 
   useEffect(() => {
-    if (!track) return;
-    const seedKey = `${persona.name}:${track.id}`;
+    if (externalMessages.length > 0) {
+      clearSeedTimer();
+      seededFor.current = null;
+      setChatMessages(externalMessages);
+      return;
+    }
+
+    const fullText = seedMessage?.trim();
+    if (!track || !fullText) {
+      clearSeedTimer();
+      seededFor.current = null;
+      setChatMessages((items) =>
+        items.some((item) => item.id.startsWith("seed-"))
+          ? items.filter((item) => !item.id.startsWith("seed-"))
+          : items
+      );
+      return;
+    }
+
+    const seedKey = `${track.id}:${fullText}`;
     if (seededFor.current === seedKey) return;
     seededFor.current = seedKey;
+    clearSeedTimer();
 
-    const greetings: Record<string, string> = {
-      深夜电台: `夜里好。这首《${track.title}》是 ${track.artist}，先把灯调暗一点。`,
-      清晨陪伴: `早。给你放《${track.title}》，慢慢醒。`,
-      话痨好友: `嘿，你也在啊。我先放着《${track.title}》，你随便聊。`,
-      极简冷淡: `在。播《${track.title}》。`,
-    };
+    const id = `seed-${track.id}`;
+    const chip = seedTrackChip ?? { title: track.title, artist: track.artist };
+    const step = Math.max(1, Math.ceil(fullText.length / 90));
+    let visibleCount = 0;
 
     setChatMessages([{
-      id: `seed-${track.id}`,
+      id,
       role: "assistant",
-      text: greetings[persona.name] ?? `正在播《${track.title}》。`,
-      trackChip: { title: track.title, artist: track.artist },
+      text: "",
+      streaming: true,
+      trackChip: chip,
     }]);
-  }, [persona.name, track]);
+
+    seedTimerRef.current = setInterval(() => {
+      visibleCount = Math.min(fullText.length, visibleCount + step);
+      const nextMessage: ChatMessage = {
+        id,
+        role: "assistant",
+        text: fullText.slice(0, visibleCount),
+        streaming: visibleCount < fullText.length,
+        trackChip: chip,
+      };
+
+      setChatMessages((items) =>
+        items.some((item) => item.id === id)
+          ? items.map((item) => item.id === id ? nextMessage : item)
+          : [nextMessage, ...items]
+      );
+
+      if (visibleCount >= fullText.length) {
+        clearSeedTimer();
+      }
+    }, 24);
+  }, [clearSeedTimer, externalMessages, seedMessage, seedTrackChip, track]);
 
   const ask = useCallback(
     async (userText: string, opts?: { silentUser?: boolean }) => {

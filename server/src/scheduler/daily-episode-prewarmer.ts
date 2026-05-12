@@ -59,6 +59,10 @@ function getAudioFilePath(audioDir: string, trackId: string): string {
   return resolve(audioDir, `${trackId}.mp3`);
 }
 
+function selectFirstAvailableTrack(tracks: Track[], excludedTrackIds: Set<string>): Track | undefined {
+  return tracks.find((track) => !excludedTrackIds.has(track.id));
+}
+
 async function prefetchTrackAudio(
   audioDir: string,
   track: Track
@@ -83,7 +87,8 @@ async function generatePrewarmEpisode(
   deps: PrewarmDeps,
   blockAt: string,
   moodHint: string,
-  systemPrompt: string
+  systemPrompt: string,
+  excludedTrackIds: Set<string>
 ): Promise<{ episode: RadioEpisode; audioDownloaded: boolean } | { error: string }> {
   const { llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource, publicMetadataAdapter, webResearchAdapter, likedSongs, stateRepo, nowProvider } = deps;
   const now = nowProvider();
@@ -121,7 +126,7 @@ async function generatePrewarmEpisode(
   // Select track
   let track: Track | null = null;
   if (draftDecision.play.trackId) {
-    const llmPicked = uniqueCandidates.find((t) => t.id === draftDecision.play.trackId);
+    const llmPicked = uniqueCandidates.find((t) => t.id === draftDecision.play.trackId && !excludedTrackIds.has(t.id));
     if (llmPicked) {
       try {
         track = await music.resolve(llmPicked);
@@ -131,7 +136,7 @@ async function generatePrewarmEpisode(
 
   if (!track) {
     const candidates = await music.search(draftDecision.play.query ?? moodHint);
-    const first = candidates[0];
+    const first = selectFirstAvailableTrack(candidates, excludedTrackIds);
     if (first) {
       try {
         track = await music.resolve(first);
@@ -141,7 +146,7 @@ async function generatePrewarmEpisode(
 
   if (!track) {
     const recommended = await music.recommend({ mood: moodHint, limit: 5 });
-    const first = recommended[0];
+    const first = selectFirstAvailableTrack(recommended, excludedTrackIds);
     if (first) {
       try {
         track = await music.resolve(first);
@@ -205,6 +210,7 @@ export async function runPrewarmForDate(
 ): Promise<PrewarmResult[]> {
   const { stateRepo, nowProvider } = deps;
   const results: PrewarmResult[] = [];
+  const dateSelectedTrackIds = new Set<string>();
 
   for (const block of blocks) {
     const errors: string[] = [];
@@ -220,7 +226,7 @@ export async function runPrewarmForDate(
 
     for (let i = 0; i < needed; i++) {
       try {
-        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt);
+        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt, dateSelectedTrackIds);
         if ("error" in result) {
           await stateRepo.savePreparedEpisode({
             radioDate: targetDate,
@@ -245,6 +251,7 @@ export async function runPrewarmForDate(
               stateRepo.markPreparedEpisodeAudioDownloaded(record.id, true).catch(() => {});
             }
           });
+          dateSelectedTrackIds.add(result.episode.track.id);
           prepared++;
         }
       } catch (err) {

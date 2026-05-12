@@ -74,5 +74,6 @@ export const QUICK_PROMPTS = [
 ];
 
 export function fmt(s: number): string {
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const totalSeconds = Math.max(0, Math.floor(s));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }

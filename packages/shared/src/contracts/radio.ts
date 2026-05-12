@@ -251,6 +251,35 @@ export const LikedSongsDiagnosticsSchema = z.object({
   ).max(3)
 });
 
+export const ProgramBriefTypeSchema = z.enum(["theme-show", "block-theme", "daily-show"]);
+export const ProgramBriefScopeSchema = z.enum(["full-show", "block"]);
+export const ProgramBriefPrioritySchema = z.enum(["user-requested", "daily-default"]);
+export const ProgramBriefStatusSchema = z.enum(["draft", "confirmed", "scheduled", "generating", "completed", "cancelled"]);
+
+export const ProgramBriefConstraintsSchema = z.object({
+  durationMinutes: z.number().int().positive().optional(),
+  avoidExplicit: z.boolean().optional(),
+  includeEra: z.string().optional(),
+  excludeTracks: z.array(z.string()).optional(),
+  includeTracks: z.array(z.string()).optional(),
+  moodHint: z.string().optional()
+});
+
+export const ProgramBriefSchema = z.object({
+  id: z.string().min(1),
+  type: ProgramBriefTypeSchema,
+  topic: z.string().min(1).optional(),
+  scope: ProgramBriefScopeSchema.optional(),
+  targetDate: z.string().min(1),
+  targetBlockAt: z.string().datetime().optional(),
+  priority: ProgramBriefPrioritySchema,
+  constraints: ProgramBriefConstraintsSchema.optional(),
+  status: ProgramBriefStatusSchema,
+  createdFromMessageId: z.string().min(1).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
 export type Track = z.infer<typeof TrackSchema>;
 export type ContextFragment = z.infer<typeof ContextFragmentSchema>;
 export type TtsResult = z.infer<typeof TtsResultSchema>;
@@ -279,3 +308,9 @@ export type NeteaseCookieSubmitRequest = z.infer<typeof NeteaseCookieSubmitReque
 export type NeteaseCookieSubmitResponse = z.infer<typeof NeteaseCookieSubmitResponseSchema>;
 export type LikedSongsDiagnostics = z.infer<typeof LikedSongsDiagnosticsSchema>;
 export type RecommendationDiagnostics = z.infer<typeof RecommendationDiagnosticsSchema>;
+export type ProgramBriefType = z.infer<typeof ProgramBriefTypeSchema>;
+export type ProgramBriefScope = z.infer<typeof ProgramBriefScopeSchema>;
+export type ProgramBriefPriority = z.infer<typeof ProgramBriefPrioritySchema>;
+export type ProgramBriefStatus = z.infer<typeof ProgramBriefStatusSchema>;
+export type ProgramBriefConstraints = z.infer<typeof ProgramBriefConstraintsSchema>;
+export type ProgramBrief = z.infer<typeof ProgramBriefSchema>;

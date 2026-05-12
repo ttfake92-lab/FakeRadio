@@ -17,3 +17,10 @@ user/netease-liked-songs*.json
 user/网易云歌单.md
 .worktrees/
 .superpowers/
+fakeradio.db
+user/audio/
+inspect-player.js
+test-playback.mjs
+apps/web/inspect-player.mjs
+apps/web/test-playback.mjs
+player-screenshot.png

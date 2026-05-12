@@ -175,12 +175,19 @@ export function SkinBento({
     onBubbleAction,
   } = r;
 
-  const [sheet, setSheet] = useState(false);
+  const [sheet, setSheet] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, sheet]);
 
   const pct = track.dur > 0 ? pos / track.dur : 0;
@@ -383,7 +390,7 @@ export function SkinBento({
               <div className="bn-sheet-title">{persona.name} · {persona.short}</div>
               <div className="bn-sheet-sub">{loading ? "准备节目中…" : busy ? "正在合成…" : "在线"}</div>
             </div>
-            <div className="bn-sheet-body" ref={scrollRef}>
+            <div className="bn-sheet-body" ref={scrollRef} onScroll={handleScroll}>
               {messages.map((m) => (
                 <GlassBubble
                   key={m.id}

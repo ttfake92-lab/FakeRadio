@@ -32,11 +32,20 @@ export async function proxyAndRecord(
     signal: AbortSignal.timeout(30_000)
   });
 
-  if (!upstream.ok || !upstream.body) {
-    throw new Error(`Upstream audio fetch failed: ${upstream.status}`);
+  if (!upstream.ok) {
+    throw new Error(`Upstream audio fetch failed: ${upstream.status} ${upstream.statusText}`);
+  }
+
+  if (!upstream.body) {
+    throw new Error("Upstream audio response has no body");
   }
 
   const contentType = upstream.headers.get("content-type") ?? "audio/mpeg";
+  // Reject known non-audio content-types (e.g., netease returns HTML error pages)
+  const isLikelyAudio = contentType.startsWith("audio/") || contentType.includes("mpeg") || contentType.includes("mp3");
+  if (!isLikelyAudio) {
+    throw new Error(`Upstream returned non-audio content-type: ${contentType}`);
+  }
 
   if (alreadyRecorded) {
     return {

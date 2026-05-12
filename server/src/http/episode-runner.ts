@@ -88,10 +88,16 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   const playbackDevices = await devices.list();
   const recentMemoryEntries = await memory.recent(5);
   const currentTrack = state.getCurrentTrack();
+  const excludedTrackIds = new Set([
+    ...state.getRecentlySelectedTrackIds(),
+    ...(currentTrack ? [currentTrack.id] : [])
+  ]);
 
   // Collect candidates: favorites + search results, deduplicated, up to 20
   const favoritesTracks = await likedSongs.list();
-  const uniqueCandidates = favoritesTracks.slice(0, 20);
+  const uniqueCandidates = favoritesTracks
+    .filter((track) => !excludedTrackIds.has(track.id))
+    .slice(0, 20);
 
   const draftDecision = await computeDjDecision({
     llm,
@@ -161,7 +167,11 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       } else {
         const mockMusic = createMockMusicAdapter();
         const fallbackTracks = await mockMusic.search(currentMoodHint);
-        track = await mockMusic.resolve(fallbackTracks[0]!);
+        const fallbackTrack = state.selectCandidate(fallbackTracks) ?? fallbackTracks[0];
+        if (!fallbackTrack) {
+          throw new Error("No track available");
+        }
+        track = await mockMusic.resolve(fallbackTrack);
         candidateSource = "mock";
       }
     }
@@ -181,6 +191,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       `music.provider: ${musicStatus}`,
       `favorites.available: ${favoritesTracks.length}`,
       `candidates.count: ${uniqueCandidates.length}`,
+      `recentlySelected.count: ${excludedTrackIds.size}`,
       `candidates.source: ${candidateSource}`,
       `candidates.rerankSource: ${rerankSource}`,
       ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),

@@ -220,6 +220,36 @@ export async function handleChat(
     ...buildChatDecisionInput(deps, currentTrack, systemPrompt, msg)
   });
 
+  // If the LLM decision includes a music query, actually play that track
+  const playQuery = decision.play?.query;
+  const isMusicRequest = playQuery && playQuery !== "keep current";
+
+  if (isMusicRequest) {
+    // User wants music — resolve and play the suggested track
+    const { track, decision: resolvedDecision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+    const { result: ttsResult } = await synthesizeWithFallback(tts, ttsCacheDir, resolvedDecision.say);
+    trackRegistry.register(track);
+    state.setTrack(track);
+    state.rememberSelectedTrack(track);
+    state.removeFromQueue(track.id);
+    state.setDj({ say: resolvedDecision.say, audioUrl: ttsResult.audioUrl, segue: resolvedDecision.segue });
+    stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
+    stream.broadcast({ type: "dj-speech", payload: { text: resolvedDecision.say, audioUrl: ttsResult.audioUrl } });
+    const chatHookText = resolvedDecision.say.split(/[。！？.!?]/)[0]?.trim();
+    if (chatHookText && chatHookText.length > 0) {
+      stream.broadcast({
+        type: "agent-message",
+        payload: { role: "agent", text: chatHookText, trackId: track.id }
+      });
+    }
+    await sessionRepo.appendMessage({ timestamp: new Date().toISOString(), role: "agent", text: resolvedDecision.say, trackId: track.id });
+    return ChatResponseSchema.parse({
+      message: resolvedDecision.say,
+      decision: resolvedDecision,
+      action: { type: "next-track" }
+    });
+  }
+
   const agentEntry: { timestamp: string; role: "agent"; text: string; trackId?: string } = { timestamp: new Date().toISOString(), role: "agent", text: decision.say };
   if (currentTrack) agentEntry.trackId = currentTrack.id;
   await sessionRepo.appendMessage(agentEntry);

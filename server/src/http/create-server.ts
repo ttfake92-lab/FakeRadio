@@ -138,7 +138,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
   const initialQueue = await music.recommend({ mood: currentMoodHint, limit: 3 });
   const queueToRestore = (lastQueueSnapshot?.trackIds && lastQueueSnapshot.trackIds.length > 0) ? lastQueueSnapshot.trackIds : initialQueue;
-  const state = createPlaybackState(queueToRestore);
+  const state = createPlaybackState(queueToRestore, lastPlayedTracks.map((track) => track.trackId));
 
   const effectiveTtsStatus = options.ttsAdapter ? "mock" : ttsStatus;
   const effectiveStorySourceStatus = options.storySourceAdapter ? "ready" : "mock";

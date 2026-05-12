@@ -8,6 +8,7 @@ import {
   getEpisodeStateLabel,
   getNextEpisodeLabel,
   getOnAirModeLabel,
+  getPlaybackControlText,
   getPlaybackLabel,
   getProviderStatusLabel,
   getQueueCountLabel,
@@ -230,6 +231,18 @@ describe("getNextEpisodeLabel", () => {
 
   it("returns error label when error exists even if episode is available (error wins)", () => {
     expect(getNextEpisodeLabel(true, true, false)).toBe("下一集预备失败");
+  });
+});
+
+describe("getPlaybackControlText", () => {
+  it("shows loading text before play or pause labels", () => {
+    expect(getPlaybackControlText(true, false, "▶", "❚❚", "…")).toBe("…");
+    expect(getPlaybackControlText(true, true, "play", "pause", "preparing")).toBe("preparing");
+  });
+
+  it("switches between play and pause when not loading", () => {
+    expect(getPlaybackControlText(false, false, "▶", "❚❚", "…")).toBe("▶");
+    expect(getPlaybackControlText(false, true, "▶", "❚❚", "…")).toBe("❚❚");
   });
 });
 

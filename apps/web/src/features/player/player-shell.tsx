@@ -1,9 +1,9 @@
 "use client";
 
-import type { ChatResponse, FavoriteTrack, HealthResponse, NextResponse, NowResponse, PrewarmStatus } from "@fakeradio/shared";
+import type { ChatResponse, FavoriteTrack, HealthResponse, NowResponse, PrewarmStatus } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNext, getNow, getPrewarmStatus, removeFavorite, sendChat } from "../../lib/api-client";
+import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNow, getPrewarmStatus, removeFavorite, sendChat } from "../../lib/api-client";
 import {
   buildOnAirClock,
   formatDuration,
@@ -25,7 +25,7 @@ import { SkinTerminal } from "./skin-terminal";
 import { SkinBento } from "./skin-bento";
 import { SkinY2K } from "./skin-y2k";
 import { SkinStage } from "./skin-stage";
-import type { OnAirThemeId } from "./player-view-model";
+import { ON_AIR_THEMES, type OnAirThemeId } from "./player-view-model";
 import { PERSONAS, SKINS, type Persona } from "./skin-config";
 import "./skins.css";
 
@@ -38,16 +38,6 @@ function getMusicStatus(health: HealthResponse | null) {
   return typeof status === "string" ? status : "mock";
 }
 
-function buildNowFromNext(result: NextResponse): NowResponse {
-  return {
-    playback: "playing",
-    track: result.track,
-    dj: { say: result.decision.say, audioUrl: result.tts.audioUrl, segue: result.decision.segue },
-    queue: result.queue,
-    updatedAt: new Date().toISOString()
-  };
-}
-
 function buildClaudioIntro(trackTitle: string, artist: string, hour: number) {
   const daypart = hour >= 21 || hour < 7 ? "late tonight" : hour < 12 ? "this morning" : hour < 18 ? "this afternoon" : "this evening";
   return `This is Claudio. ${daypart}, here is ${trackTitle} from ${artist}. Let the first line settle in, then let the song take the room. If the day has been loud, keep only the pulse you need.`;
@@ -56,7 +46,6 @@ function buildClaudioIntro(trackTitle: string, artist: string, hour: number) {
 export function PlayerShell() {
   const [now, setNow] = useState<NowResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [nextResult, setNextResult] = useState<NextResponse | null>(null);
   const [chatMessage, setChatMessage] = useState("");
   const [chatReply, setChatReply] = useState<ChatResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,7 +54,7 @@ export function PlayerShell() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [userChatHistory, setUserChatHistory] = useState<string[]>([]);
   const [nowDate, setNowDate] = useState(() => new Date());
-  const [theme, setTheme] = useState<OnAirThemeId>("terminal-fm");
+  const [theme, setTheme] = useState<OnAirThemeId>("amber");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(() => {
@@ -98,7 +87,7 @@ export function PlayerShell() {
     }, [])
   );
 
-  const track = now?.track ?? null;
+  const track = now?.track ?? playback.episodeData?.track ?? null;
   const playbackLabel = useMemo(() => getPlaybackLabel(now?.playback ?? "idle"), [now?.playback]);
   const musicStatus = getMusicStatus(health);
   const shouldWarn = shouldWarnOnMockMusic(musicStatus);
@@ -118,7 +107,9 @@ export function PlayerShell() {
   const currentTrackTitle = playback.episodeData?.track.title ?? track?.title ?? "Waiting for signal";
   const currentTrackArtist = playback.episodeData?.track.artist ?? track?.artist ?? "FakeRadio";
   const currentPlaybackLabel = playback.episodeState !== "idle" ? playback.episodeStateLabel : playbackLabel;
-  const djMessage = getDjMessageText(now?.dj.say ?? playback.episodeData?.story.text ?? chatReply?.message ?? buildClaudioIntro(currentTrackTitle, currentTrackArtist, nowDate.getHours()));
+  const realDjMessageSource = playback.episodeData?.story.text ?? now?.dj.say ?? chatReply?.message ?? null;
+  const skinDjMessage = realDjMessageSource ? getDjMessageText(realDjMessageSource) : null;
+  const djMessage = getDjMessageText(realDjMessageSource ?? buildClaudioIntro(currentTrackTitle, currentTrackArtist, nowDate.getHours()));
   const queueCountLabel = getQueueCountLabel(now?.queue?.length ?? 0);
   const nowPlayingLabel = `Now playing: ${currentTrackTitle} · ${currentTrackArtist}`;
   const durationMs = playback.episodeData?.track.durationMs ?? track?.durationMs ?? 0;
@@ -140,13 +131,13 @@ export function PlayerShell() {
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
       setPrewarmStatus(prewarmStatusResponse);
-      // Sync theme with time of day on load (only for old themes)
+      // Sync theme with time of day on load, while preserving any explicit skin choice.
       const hour = new Date().getHours();
       const savedTheme = localStorage.getItem("fakeradio-theme") as OnAirThemeId | null;
-      if (savedTheme && (savedTheme === "terminal-fm" || savedTheme === "morning-console")) {
+      if (savedTheme && ON_AIR_THEMES.includes(savedTheme)) {
         setTheme(savedTheme);
-      } else if (!savedTheme) {
-        setTheme(hour >= 7 && hour < 9 ? "morning-console" : "terminal-fm");
+      } else {
+        setTheme(hour >= 7 && hour < 9 ? "morning-console" : "amber");
       }
       // Load saved persona
       const savedPersonaId = localStorage.getItem("fakeradio-persona");
@@ -240,21 +231,21 @@ export function PlayerShell() {
     setIsActing(true);
     playback.setError(null);
     try {
-      const result = await getNext();
-      setNextResult(result);
-      setNow(buildNowFromNext(result));
+      audio.musicRef.current?.pause();
+      audio.speechRef.current?.pause();
       playback.clearEpisodeState();
       await playback.playEpisode();
+      setIsPlaying(true);
     } catch (nextError) {
       playback.setError(`生成下一首失败：${getErrorMessage(nextError)}`);
+      setIsPlaying(false);
     } finally {
       setIsActing(false);
     }
-  }, [playback]);
+  }, [audio.musicRef, audio.speechRef, playback]);
 
-  const handleChat = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const message = chatMessage.trim();
+  const submitChatMessage = useCallback(async (rawMessage: string) => {
+    const message = rawMessage.trim();
     if (message.length === 0) return;
 
     setIsActing(true);
@@ -289,6 +280,11 @@ export function PlayerShell() {
     } finally {
       setIsActing(false);
     }
+  }, [track]);
+
+  const handleChat = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitChatMessage(chatMessage);
   };
 
   const handleToggleFavorite = async () => {
@@ -313,11 +309,12 @@ export function PlayerShell() {
 
   const handlePlayPause = useCallback(async () => {
     if (playback.episodeState === "idle" || playback.episodeState === "error") {
+      playback.setError(null);
       try {
         await playback.playEpisode();
         setIsPlaying(true);
       } catch {
-        // playEpisode 内部已处理错误
+        setIsPlaying(false);
       }
       return;
     }
@@ -331,7 +328,7 @@ export function PlayerShell() {
       setIsPlaying(false);
     }
     setCurrentTime(musicAudio.currentTime);
-  }, [playback.episodeState, playback.playEpisode, audio.musicRef]);
+  }, [playback.episodeState, playback.playEpisode, playback.error, audio.musicRef]);
 
   const handleThemeChange = useCallback((newTheme: OnAirThemeId) => {
     setTheme(newTheme);
@@ -352,6 +349,14 @@ export function PlayerShell() {
     const musicAudio = audio.musicRef.current;
     if (musicAudio) {
       musicAudio.volume = newVolume;
+    }
+  }, [audio.musicRef]);
+
+  const handleSeek = useCallback((pos01: number) => {
+    const musicAudio = audio.musicRef.current;
+    if (musicAudio && musicAudio.duration) {
+      musicAudio.currentTime = pos01 * musicAudio.duration;
+      setCurrentTime(musicAudio.currentTime);
     }
   }, [audio.musicRef]);
 
@@ -389,6 +394,7 @@ export function PlayerShell() {
           currentTrackTitle={currentTrackTitle}
           currentTrackArtist={currentTrackArtist}
           isPlaying={isPlaying}
+          isLoadingEpisode={playback.isLoadingEpisode}
           currentTime={currentTime}
           durationMs={durationMs}
           volume={volume}
@@ -397,6 +403,11 @@ export function PlayerShell() {
           selectedPersona={selectedPersona}
           avatarSrc={avatarSrc}
           showSettings={showSettings}
+          error={playback.error}
+          djMessage={skinDjMessage}
+          agentMessages={agentMessages}
+          onAgentMessage={(msg) => setAgentMessages((prev) => [...prev.slice(-19), msg])}
+          onChatSubmit={(text) => { void submitChatMessage(text); }}
           onThemeChange={handleThemeChange}
           onAvatarClick={handleAvatarClick}
           onAvatarUpload={handleAvatarUpload}
@@ -404,6 +415,7 @@ export function PlayerShell() {
           onPersonaChange={handlePersonaChange}
           onPlayPause={handlePlayPause}
           onVolumeChange={handleVolumeChange}
+          onSeek={handleSeek}
           onToggleFavorite={handleToggleFavorite}
           onNext={handleNext}
         />

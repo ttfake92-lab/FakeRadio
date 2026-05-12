@@ -81,9 +81,16 @@ describe("createRadioServer", () => {
   });
 
   it("serves prewarm status with blocks from today's plan", async () => {
+    const baseDir = createEmptyLikedSongsBaseDir();
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    await repo.savePreparedEpisode({ radioDate: "2026-04-30", blockAt: "07:00", status: "ready" });
+    await repo.savePreparedEpisode({ radioDate: "2026-04-30", blockAt: "09:00", status: "failed", error: "no track" });
+
     app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
 
     const response = await app.inject({ method: "GET", url: "/api/prewarm/status" });
@@ -101,6 +108,36 @@ describe("createRadioServer", () => {
       consumed: expect.any(Number),
       failed: expect.any(Number)
     });
+    expect(body.blocks.find((block: { at: string }) => block.at === "07:00")).toMatchObject({ ready: 1, consumed: 0, failed: 0 });
+    expect(body.blocks.find((block: { at: string }) => block.at === "09:00")).toMatchObject({ ready: 0, consumed: 0, failed: 1 });
+  });
+
+  it("avoids recently persisted played tracks after a server restart", async () => {
+    const baseDir = createEmptyLikedSongsBaseDir();
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    await repo.recordPlayedTrack({
+      id: "played-track-1",
+      trackId: "mock-track-001",
+      title: "Morning Signal",
+      artist: "FakeRadio Session",
+      album: "Local First Radio",
+      source: "mock",
+      playedAt: new Date("2026-04-30T00:00:00.000Z").toISOString()
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: createMockStorySourceAdapter(),
+      publicMetadataAdapter: createMockStorySourceAdapter(),
+      webResearchAdapter: createMockStorySourceAdapter(),
+      baseDir
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().episode.track.id).toBe("mock-track-002");
   });
 
   it("keeps the latest DJ speech in now after computing next", async () => {
@@ -1092,10 +1129,71 @@ describe("createRadioServer", () => {
     expect(body.source).toBe("prepared");
   });
 
+  it("skips a prepared episode when its track was recently played", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "prepared-episode-recent-test-"));
+    isolatedBaseDirs.push(baseDir);
+    mkdirSync(join(baseDir, "user"), { recursive: true });
+    writeFileSync(join(baseDir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    const recentEpisode = {
+      track: { id: "prepared-recent", title: "Prepared Recent", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-recent.mp3" },
+      story: { text: "Recent prepared story.", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    const freshEpisode = {
+      track: { id: "prepared-fresh", title: "Prepared Fresh", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-fresh.mp3" },
+      story: { text: "Fresh prepared story.", audioUrl: "http://localhost/tts/fresh.wav", type: "mood-reading" as const },
+      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+    };
+    await repo.recordPlayedTrack({
+      id: "played-prepared-recent",
+      trackId: "prepared-recent",
+      title: "Prepared Recent",
+      artist: "Prepared Artist",
+      album: null,
+      source: "mock",
+      playedAt: "2026-04-30T03:30:00.000Z"
+    });
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "12:00",
+      status: "ready",
+      episodeJson: JSON.stringify(recentEpisode),
+      audioDownloaded: true
+    });
+    await repo.savePreparedEpisode({
+      radioDate: "2026-04-30",
+      blockAt: "12:00",
+      status: "ready",
+      episodeJson: JSON.stringify(freshEpisode),
+      audioDownloaded: true
+    });
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 3, 30, 12, 30, 0)
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.episode.track.id).toBe("prepared-fresh");
+    expect(body.source).toBe("prepared");
+  });
+
   it("falls back to live generation when no prepared episode exists for the current block", async () => {
     app = await createTestRadioServer({
       musicAdapterResult: createMockMusicAdapterResult(),
       ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: createMockStorySourceAdapter(),
+      publicMetadataAdapter: createMockStorySourceAdapter(),
+      webResearchAdapter: createMockStorySourceAdapter(),
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
 

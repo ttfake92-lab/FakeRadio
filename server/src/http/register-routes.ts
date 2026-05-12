@@ -47,6 +47,27 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (snapshotTimer) clearTimeout(snapshotTimer);
   });
 
+  async function refreshRecentPlaybackMemory(): Promise<string[]> {
+    const persistedRecent = await stateRepo.getRecentlyPlayed(30);
+    for (const played of persistedRecent.slice().reverse()) {
+      state.rememberSelectedTrack({
+        id: played.trackId,
+        title: played.title,
+        artist: played.artist,
+        album: played.album ?? undefined,
+        source: played.source
+      });
+    }
+    const currentTrack = state.getCurrentTrack();
+    return [
+      ...new Set([
+        ...state.getRecentlySelectedTrackIds(),
+        ...(currentTrack ? [currentTrack.id] : []),
+        ...persistedRecent.map((track) => track.trackId)
+      ])
+    ];
+  }
+
   app.get("/api/health", async () =>
     HealthResponseSchema.parse({
       ok: true,
@@ -70,7 +91,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
     const blockStatus = await Promise.all(
       currentPlan.blocks.map(async (block) => {
-        const counts = await stateRepo.getPrewarmStatus(today);
+        const counts = await stateRepo.getBlockPrewarmStatus(today, block.at);
         return {
           at: block.at,
           label: block.label,
@@ -128,6 +149,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       }, 500);
     }
 
+    await refreshRecentPlaybackMemory();
     const { track, decision, isFallback, candidates, candidateSource, rerankSource } = await resolveNextTrackAndDecision(episodeRunnerDeps);
     const { result: ttsResult } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
@@ -262,11 +284,14 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       const blockAt = currentBlock?.at ?? null;
 
       if (blockAt !== null) {
-        const claimed = await stateRepo.claimPreparedEpisode(today, blockAt);
+        const excludedTrackIds = await refreshRecentPlaybackMemory();
+        const claimed = await stateRepo.claimPreparedEpisode(today, blockAt, excludedTrackIds);
         if (claimed !== null) {
           const { episode } = claimed;
           trackRegistry.register(episode.track);
+          state.setTrack(episode.track);
           state.rememberSelectedTrack(episode.track);
+          stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
           await stateRepo.recordPlayedTrack({
             id: randomUUID(),
             trackId: episode.track.id,
@@ -286,12 +311,15 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       }
 
       // Fall back to live generation
+      await refreshRecentPlaybackMemory();
       const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
         throw new Error("No track available");
       }
       trackRegistry.register(track);
+      state.setTrack(track);
       state.rememberSelectedTrack(track);
+      stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
       await stateRepo.recordPlayedTrack({
         id: randomUUID(),
         trackId: track.id,

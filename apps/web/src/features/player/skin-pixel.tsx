@@ -199,10 +199,17 @@ export function SkinPixel({
   } = r;
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   if (!track) {
@@ -324,7 +331,7 @@ export function SkinPixel({
             <span>━━ DIALOG ━━</span>
             <span>{loading ? "LOADING.." : busy ? "SYNTHESIZING.." : "READY"}</span>
           </div>
-          <div className="px-chat-body" ref={scrollRef}>
+          <div className="px-chat-body" ref={scrollRef} onScroll={handleScroll}>
             {messages.map((m) => (
               <PxBubble
                 key={m.id}

@@ -108,7 +108,14 @@ export function OnAirTerminal({
         {/* ── Topbar ── */}
         <header className="on-air-topbar">
           <div className="on-air-brand-lockup">
-            <span className="on-air-avatar on-air-photo-avatar" aria-hidden="true" />
+            <button
+              type="button"
+              className="on-air-avatar on-air-photo-avatar"
+              onClick={() => onThemeChange("amber")}
+              title="切换到 Amber 皮肤"
+              aria-label="切换到 Amber 皮肤"
+              style={{ appearance: "none", background: "none", border: "none", cursor: "pointer", display: "inline-block" }}
+            />
             <a id="on-air-title" className="on-air-brand" href="/">Claudio</a>
           </div>
           <nav className="on-air-top-actions" aria-label="Claudio status actions">

@@ -5,6 +5,7 @@ import {
   EpisodeNextResponseSchema,
   HealthResponseSchema,
   NowResponseSchema,
+  ProgramBriefSchema,
   RadioEpisodeSchema,
   StorySchema,
   StorySourceNoteSchema,
@@ -211,5 +212,96 @@ describe("FakeRadio shared contracts", () => {
         }
       })
     ).toThrow();
+  });
+
+  describe("ProgramBrief", () => {
+    it("validates a theme-show brief", () => {
+      const brief = ProgramBriefSchema.parse({
+        id: "brief-001",
+        type: "theme-show",
+        topic: "Bee Gees",
+        scope: "full-show",
+        targetDate: "2026-05-12",
+        priority: "user-requested",
+        status: "draft",
+        createdAt: "2026-05-12T10:00:00.000Z",
+        updatedAt: "2026-05-12T10:00:00.000Z"
+      });
+      expect(brief.type).toBe("theme-show");
+      expect(brief.topic).toBe("Bee Gees");
+    });
+
+    it("validates a block-theme brief", () => {
+      const brief = ProgramBriefSchema.parse({
+        id: "brief-002",
+        type: "block-theme",
+        topic: "Bee Gees",
+        scope: "block",
+        targetDate: "2026-05-12",
+        targetBlockAt: "2026-05-12T20:00:00.000Z",
+        priority: "user-requested",
+        status: "draft",
+        createdAt: "2026-05-12T10:00:00.000Z",
+        updatedAt: "2026-05-12T10:00:00.000Z"
+      });
+      expect(brief.type).toBe("block-theme");
+      expect(brief.scope).toBe("block");
+    });
+
+    it("validates a daily-show brief", () => {
+      const brief = ProgramBriefSchema.parse({
+        id: "brief-003",
+        type: "daily-show",
+        targetDate: "2026-05-12",
+        priority: "daily-default",
+        status: "scheduled",
+        createdAt: "2026-05-12T06:00:00.000Z",
+        updatedAt: "2026-05-12T06:00:00.000Z"
+      });
+      expect(brief.type).toBe("daily-show");
+      expect(brief.priority).toBe("daily-default");
+    });
+
+    it("rejects invalid brief type", () => {
+      expect(() =>
+        ProgramBriefSchema.parse({
+          id: "brief-001",
+          type: "invalid-type",
+          topic: "Test",
+          status: "draft"
+        })
+      ).toThrow();
+    });
+
+    it("rejects invalid status", () => {
+      expect(() =>
+        ProgramBriefSchema.parse({
+          id: "brief-001",
+          type: "theme-show",
+          topic: "Test",
+          status: "invalid-status"
+        })
+      ).toThrow();
+    });
+
+    it("accepts optional constraints", () => {
+      const brief = ProgramBriefSchema.parse({
+        id: "brief-001",
+        type: "theme-show",
+        topic: "Bee Gees",
+        scope: "full-show",
+        targetDate: "2026-05-12",
+        priority: "user-requested",
+        status: "draft",
+        constraints: {
+          durationMinutes: 60,
+          avoidExplicit: true,
+          includeEra: "1970s"
+        },
+        createdAt: "2026-05-12T10:00:00.000Z",
+        updatedAt: "2026-05-12T10:00:00.000Z"
+      });
+      expect(brief.constraints?.durationMinutes).toBe(60);
+    });
   });
 });
