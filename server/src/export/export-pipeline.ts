@@ -1,4 +1,5 @@
 import { formatRadioDate } from "../utils/time.js";
+export { exportShowProject } from "./export-show-project.js";
 import { writeFile, readFile, mkdir, access } from "node:fs/promises";
 import { resolve, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";

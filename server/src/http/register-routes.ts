@@ -30,13 +30,13 @@ import {
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { formatRadioDate } from "../utils/time.js";
 import { proxyAndRecord } from "../audio/audio-recorder.js";
-import { startExportTask, getExportTask, getExportFilePath } from "../export/export-pipeline.js";
+import { startExportTask, getExportTask, getExportFilePath, exportShowProject } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import type { PlaybackState } from "./playback-state.js";
 import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
@@ -452,6 +452,85 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       .header("content-type", "application/zip")
       .header("content-disposition", `attachment; filename="fakeradio-${date}.zip"`)
       .send(createReadStream(filePath));
+  });
+
+  app.post("/api/projects/:id/export", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { includeTrace?: boolean } | undefined;
+
+    const project = await showProjectRepo.get(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project not found" });
+    }
+
+    const plan = await showProjectRepo.getShowPlan(id);
+    if (!plan) {
+      return reply.status(400).send({ error: "no show plan found for this project" });
+    }
+
+    const jobs = await jobRegistry.list({ briefId: project.briefId });
+    const completedJob = jobs.find((j) => j.status === "completed");
+    if (!completedJob) {
+      return reply.status(400).send({ error: "节目尚未完成生成，无法导出" });
+    }
+
+    try {
+      const result = await exportShowProject({
+        project,
+        plan,
+        job: completedJob,
+        includeTrace: body?.includeTrace ?? true,
+      });
+
+      await showProjectRepo.update(id, { status: "exported" });
+
+      return reply.send(result);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "export failed";
+      return reply.status(500).send({ error });
+    }
+  });
+
+  app.get("/api/export/project/:id/download", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { file } = request.query as { file?: string };
+    const project = await showProjectRepo.get(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project not found" });
+    }
+
+    const allowedFiles: Record<string, string> = {
+      "show-plan.json": "show-plan.json",
+      "show-notes.md": "show-notes.md",
+      "production-trace.jsonl": "production-trace.jsonl",
+    };
+
+    if (file && allowedFiles[file]) {
+      const filePath = join(project.directoryPath, allowedFiles[file]);
+      const { access } = await import("node:fs/promises");
+      try {
+        await access(filePath);
+      } catch {
+        return reply.status(404).send({ error: "file not found" });
+      }
+      const contentType = file.endsWith(".json") ? "application/json" : file.endsWith(".md") ? "text/markdown" : "application/jsonl";
+      return reply
+        .header("content-type", contentType)
+        .header("content-disposition", `attachment; filename="${file}"`)
+        .send(createReadStream(filePath));
+    }
+
+    const { readdir } = await import("node:fs/promises");
+    let files: string[] = [];
+    try {
+      files = await readdir(project.directoryPath);
+    } catch {
+    }
+    const available = files.filter((f) => allowedFiles[f]);
+    if (available.length === 0) {
+      return reply.status(404).send({ error: "no export files found" });
+    }
+    return reply.send({ projectId: id, files: available });
   });
 
   app.get("/api/briefs", async (_request, reply) => {

@@ -6,33 +6,38 @@ Phase 1 - Theme Story Show MVP
 
 ## Current Active Task
 
-Task 7 - Collapsible Production Board 与生成控制台 UI (waiting for HITL confirmation)
+Task 8 - Export Package (in progress)
 
 ## Current Active Issue
 
-`.scratch/fakeradio-show-production/issues/07-collapsible-production-board-and-console-ui.md` (needs-triage, HITL)
+`.scratch/fakeradio-show-production/issues/08-export-package-with-plan-and-trace.md` (in-progress)
 
 ## Last Known Verification
 
-- `pnpm test`: 504 tests passed (2026-05-12)
+- `pnpm test`: 526 tests passed (2026-05-12)
 - `pnpm typecheck`: passed (2026-05-12)
-- Git status: worktree has pending changes from Task 6 completion (see git diff for details)
+- Task 7 completed slices:
+  - **Committed Task 6 changes**: 2 commits (13 files + 13 new files, 2267 lines total)
+  - **Added useProductionPanels hook**: panel state management with open/close/expand/collapse
+  - **Added ProductionBoard component**: displays show -> block -> episode hierarchy, default collapsed
+  - **Added GenerationConsole component**: log stream with trace toggle, pause/cancel/constraint controls
+  - **Added ExportQueue component**: export task list with progress, retry, download actions
+  - **Added 10 tests for panel state types**
+  - **Step 6 集成完成**: 面板已集成到 SkinStage，添加浮动工具栏按钮（📻⚡📦）
+  - **新增 API client 函数**: getBriefs, getShowPlans, getShowJobs, getShowProjects
+  - All 514 tests pass, typecheck clean
+- Task 8 completed slices (this run):
+  - **Cycle 1**: 扩展 `show-notes-generator.ts` 支持 `showPlan` 和 `externalTrack` 字段，新增 4 个测试
+  - **Cycle 2**: 新增 `export-show-project.ts`（`exportShowProject` 函数）和 5 个单元测试
+  - **Cycle 3**: 新增 `POST /api/projects/:id/export` 和 `GET /api/export/project/:id/download` 路由，3 个集成测试
+  - **Cycle 4**: 前端 API client 新增 `exportProject`, `getProjectExportFiles`, `downloadProjectFile` 函数
+  - All 526 tests pass, typecheck clean
 
 ## Next Action
 
-**需要人工确认**：
-
-1. 是否要先提交 Task 6 的改动？（当前有大量未提交的代码和测试文件）
-2. 确认默认主界面的克制原则后，再开始 Task 7 的 UI 实现
-
-Task 7 需要在确认后开始：
-- Step 1: Add view-model tests for panel open/close state
-- Step 2: Implement shared panel contract
-- Step 3: Add Production Board component
-- Step 4: Add Generation Console component with log stream first
-- Step 5: Add Export Queue placeholder bound to real API status
-- Step 6: Adapt all five skins to the same semantic slots
-- Step 7: Browser verify small window, mobile portrait, wider desktop
+Task 8 核心逻辑完成。下一步需要：
+- Task 8 Step 5: 添加"是否包含 trace"选项到 ExportQueue UI
+- 完成后可标记 Task 8 complete，进入 Phase 1 完结总结
 
 ## Done Log
 
@@ -52,13 +57,17 @@ Task 7 需要在确认后开始：
 - 2026-05-12: **Task 5 complete** — implemented ShowProjectRepository with filesystem + SQLite registry (14 tests). All 498 tests pass and typecheck is clean.
 - 2026-05-12: **Task 6 complete** — implemented Generate now and Schedule tonight API endpoints, plus show projects listing and retrieval. All 502 tests pass and typecheck is clean.
 - 2026-05-12: **Task 6 trace integration** — generate-now writes `job-started` trace entry; schedule-tonight writes `scheduled` trace entry to ShowProject trace file. Both return `productionTracePath` in API response. All 504 tests pass and typecheck is clean.
-- 2026-05-12: **Verification complete** — re-run `pnpm test` and `pnpm typecheck`, both pass. Worktree has pending Task 6 changes waiting for commit decision.
+- 2026-05-12: **Task 7 partial complete** — committed Task 6 changes (2 commits), implemented panel state management hook (useProductionPanels), ProductionBoard, GenerationConsole, and ExportQueue components. All 514 tests pass and typecheck is clean. Default view remains listening desk + chat.
+- 2026-05-12: **Task 7 Step 6 complete** — integrated panels into SkinStage with floating toolbar buttons (📻⚡📦). Added ProductionToolbar, connected panel toggle to SkinStage state. Added API client functions: getBriefs, getShowPlans, getShowJobs, getShowProjects. All 514 tests pass, typecheck clean.
+- 2026-05-12: **Task 8 partial complete** — extended show-notes-generator with showPlan and externalTrack support (4 new tests), implemented exportShowProject pipeline (5 tests), added POST /api/projects/:id/export and GET /api/export/project/:id/download routes (3 integration tests), added frontend API client functions (exportProject, getProjectExportFiles, downloadProjectFile). All 526 tests pass, typecheck clean. Task 7 browser verification (Step 7) remains HITL.
 
 ## Blockers
 
-Task 7 is HITL. Need user confirmation:
-1. 是否先提交 Task 6 的改动？
-2. 确认默认主界面的克制原则后再开始 UI 实现。
+Task 7 Step 7 需要浏览器验证（已标记为 HITL）：
+- Small window (320px)
+- Mobile portrait (375px)
+- Wider desktop (1440px)
+建议用户在本地启动 `pnpm dev` 后手动验证。
 
 ## Rules For Automation Runs
 

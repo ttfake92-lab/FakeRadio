@@ -1,4 +1,5 @@
 import {
+  BriefsListResponseSchema,
   ChatResponseSchema,
   EpisodeNextResponseSchema,
   FavoritesResponseSchema,
@@ -10,6 +11,9 @@ import {
   NextResponseSchema,
   NowResponseSchema,
   PrewarmStatusSchema,
+  ShowJobsListResponseSchema,
+  ShowPlansListResponseSchema,
+  ShowProjectsListResponseSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema
 } from "@fakeradio/shared";
@@ -128,4 +132,68 @@ export async function removeFavorite(trackId: string) {
     method: "DELETE"
   });
   return response.json() as Promise<{ removed: boolean }>;
+}
+
+export async function getBriefs() {
+  const response = await fetch(buildApiUrl("/api/briefs"));
+  if (!response.ok) {
+    return { briefs: [] };
+  }
+  return BriefsListResponseSchema.parse(await response.json());
+}
+
+export async function getShowPlans(briefId?: string) {
+  const url = briefId ? buildApiUrl(`/api/plans?briefId=${briefId}`) : buildApiUrl("/api/plans");
+  const response = await fetch(url);
+  if (!response.ok) {
+    return { plans: [] };
+  }
+  return ShowPlansListResponseSchema.parse(await response.json());
+}
+
+export async function getShowJobs(briefId?: string) {
+  const url = briefId ? buildApiUrl(`/api/jobs?briefId=${briefId}`) : buildApiUrl("/api/jobs");
+  const response = await fetch(url);
+  if (!response.ok) {
+    return { jobs: [] };
+  }
+  return ShowJobsListResponseSchema.parse(await response.json());
+}
+
+export async function getShowProjects() {
+  const response = await fetch(buildApiUrl("/api/projects"));
+  if (!response.ok) {
+    return { projects: [] };
+  }
+  return ShowProjectsListResponseSchema.parse(await response.json());
+}
+
+export async function exportProject(projectId: string, options?: { includeTrace?: boolean }) {
+  const response = await fetch(buildApiUrl(`/api/projects/${projectId}/export`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ includeTrace: options?.includeTrace ?? true })
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Export failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getProjectExportFiles(projectId: string) {
+  const response = await fetch(buildApiUrl(`/api/export/project/${projectId}/download`));
+  if (!response.ok) {
+    throw new Error(`Failed to get export files: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function downloadProjectFile(projectId: string, file: string) {
+  const url = buildApiUrl(`/api/export/project/${projectId}/download?file=${encodeURIComponent(file)}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download ${file}: ${response.status}`);
+  }
+  return response.blob();
 }

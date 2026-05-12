@@ -1979,5 +1979,80 @@ describe("ProgramBrief intent parsing", () => {
       const lastEntry = JSON.parse(lines[lines.length - 1]);
       expect(lastEntry.type).toBe("scheduled");
     });
+
+    it("POST /api/projects/:id/export returns 404 for non-existent project", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter(),
+        storySourceAdapter: { async gather() { return []; } },
+        publicMetadataAdapter: createMockStorySourceAdapter()
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/projects/nonexistent-id/export",
+        payload: { includeTrace: true }
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it("POST /api/projects/:id/export returns 400 for incomplete job", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter(),
+        storySourceAdapter: { async gather() { return []; } },
+        publicMetadataAdapter: createMockStorySourceAdapter()
+      });
+
+      const briefResp = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Export Test 主题节目" }
+      });
+      expect(briefResp.statusCode).toBe(200);
+      const briefId = briefResp.json().brief?.id;
+      expect(briefId).toBeDefined();
+
+      const plan = await app.inject({
+        method: "GET",
+        url: `/api/plans/${briefId}/active`
+      });
+      expect(plan.json().plan).toBeDefined();
+      const planId = plan.json().plan?.id;
+
+      const generateResp = await app.inject({
+        method: "POST",
+        url: "/api/shows/generate-now",
+        payload: { briefId }
+      });
+      expect(generateResp.statusCode).toBe(201);
+      const projectId = generateResp.json().project.id;
+
+      const exportResp = await app.inject({
+        method: "POST",
+        url: `/api/projects/${projectId}/export`,
+        payload: { includeTrace: true }
+      });
+
+      expect(exportResp.statusCode).toBe(400);
+      expect(exportResp.json().error).toContain("尚未完成生成");
+    });
+
+    it("GET /api/export/project/:id/download returns 404 for non-existent", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter(),
+        storySourceAdapter: { async gather() { return []; } },
+        publicMetadataAdapter: createMockStorySourceAdapter()
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/export/project/nonexistent-id/download"
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
   });
 });
