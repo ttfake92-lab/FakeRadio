@@ -9,6 +9,7 @@ export type ProgramBriefRepository = {
   get(id: string): Promise<ProgramBrief | null>;
   list(filter?: { status?: ProgramBriefStatus; type?: ProgramBriefType; targetDate?: string }): Promise<ProgramBrief[]>;
   updateStatus(id: string, status: ProgramBriefStatus): Promise<void>;
+  update(id: string, updates: Partial<Omit<ProgramBrief, "id" | "createdAt">>): Promise<ProgramBrief | null>;
   delete(id: string): Promise<void>;
 };
 
@@ -87,6 +88,60 @@ export function createProgramBriefRepository(baseDir: string): ProgramBriefRepos
     };
   }
 
+  function updateBrief(id: string, updates: Partial<Omit<ProgramBrief, "id" | "createdAt">>): ProgramBrief | null {
+    const row = stmtGet.get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    const brief = mapRowToBrief(row);
+    
+    // Build update statement
+    const setClauses: string[] = ["updated_at = ?"];
+    const values: unknown[] = [new Date().toISOString()];
+    
+    if (updates.type !== undefined) {
+      setClauses.push("type = ?");
+      values.push(updates.type);
+    }
+    if (updates.topic !== undefined) {
+      setClauses.push("topic = ?");
+      values.push(updates.topic ?? null);
+    }
+    if (updates.scope !== undefined) {
+      setClauses.push("scope = ?");
+      values.push(updates.scope ?? null);
+    }
+    if (updates.targetDate !== undefined) {
+      setClauses.push("target_date = ?");
+      values.push(updates.targetDate);
+    }
+    if (updates.targetBlockAt !== undefined) {
+      setClauses.push("target_block_at = ?");
+      values.push(updates.targetBlockAt ?? null);
+    }
+    if (updates.priority !== undefined) {
+      setClauses.push("priority = ?");
+      values.push(updates.priority);
+    }
+    if (updates.constraints !== undefined) {
+      setClauses.push("constraints_json = ?");
+      values.push(updates.constraints ? JSON.stringify(updates.constraints) : null);
+    }
+    if (updates.status !== undefined) {
+      setClauses.push("status = ?");
+      values.push(updates.status);
+    }
+    if (updates.createdFromMessageId !== undefined) {
+      setClauses.push("created_from_message_id = ?");
+      values.push(updates.createdFromMessageId ?? null);
+    }
+    
+    values.push(id);
+    db.prepare(`UPDATE program_briefs SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+    
+    // Get and return updated brief
+    const updatedRow = stmtGet.get(id) as Record<string, unknown> | undefined;
+    return updatedRow ? mapRowToBrief(updatedRow) : null;
+  }
+  
   return {
     save(brief: ProgramBrief): Promise<ProgramBrief> {
       ProgramBriefSchema.parse(brief);
@@ -149,6 +204,10 @@ export function createProgramBriefRepository(baseDir: string): ProgramBriefRepos
     delete(id: string): Promise<void> {
       stmtDelete.run(id);
       return Promise.resolve();
+    },
+
+    update(id: string, updates: Partial<Omit<ProgramBrief, "id" | "createdAt">>): Promise<ProgramBrief | null> {
+      return Promise.resolve(updateBrief(id, updates));
     }
   };
 }

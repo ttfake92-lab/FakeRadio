@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import type { Track, PreparedEpisodeRecord, RadioEpisode } from "@fakeradio/shared";
+import type { Track, PreparedEpisodeRecord, RadioEpisode, ShowProject } from "@fakeradio/shared";
 import { formatRadioDate } from "../utils/time.js";
-import { TrackSchema, RadioEpisodeSchema } from "@fakeradio/shared";
+import { TrackSchema, RadioEpisodeSchema, ShowProjectSchema } from "@fakeradio/shared";
 
 export type PlayedTrack = {
   id: string;
@@ -56,6 +56,12 @@ export type StateRepository = {
   getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
   getBlockPrewarmStatus(radioDate: string, blockAt: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
   markPreparedEpisodeAudioDownloaded(id: string, downloaded: boolean): Promise<void>;
+  saveShowProject(project: Omit<ShowProject, "id" | "createdAt" | "updatedAt">): Promise<ShowProject>;
+  getShowProject(id: string): Promise<ShowProject | null>;
+  getShowProjectByBriefId(briefId: string): Promise<ShowProject | null>;
+  listShowProjects(limit?: number): Promise<ShowProject[]>;
+  updateShowProject(id: string, updates: Partial<Omit<ShowProject, "id" | "createdAt">>): Promise<ShowProject | null>;
+  deleteShowProject(id: string): Promise<boolean>;
 };
 
 export function createStateRepository(dbPath: string): StateRepository {
@@ -87,12 +93,31 @@ export function createStateRepository(dbPath: string): StateRepository {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS show_projects (
+      id TEXT PRIMARY KEY,
+      brief_id TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      active_plan_id TEXT,
+      active_job_id TEXT,
+      directory_path TEXT NOT NULL,
+      show_plan_path TEXT,
+      production_trace_path TEXT,
+      show_notes_path TEXT,
+      show_audio_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_played_tracks_played_at ON played_tracks(played_at);
     CREATE INDEX IF NOT EXISTS idx_dj_messages_created_at ON dj_messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_dj_messages_radio_date ON dj_messages(radio_date);
     CREATE INDEX IF NOT EXISTS idx_queue_snapshots_created_at ON queue_snapshots(created_at);
     CREATE INDEX IF NOT EXISTS idx_prepared_episodes_radio_date_block ON prepared_episodes(radio_date, block_at);
     CREATE INDEX IF NOT EXISTS idx_prepared_episodes_status ON prepared_episodes(status);
+    CREATE INDEX IF NOT EXISTS idx_show_projects_brief_id ON show_projects(brief_id);
+    CREATE INDEX IF NOT EXISTS idx_show_projects_status ON show_projects(status);
+    CREATE INDEX IF NOT EXISTS idx_show_projects_created_at ON show_projects(created_at);
   `);
 
   // Prepared statements for inserts
@@ -101,6 +126,7 @@ export function createStateRepository(dbPath: string): StateRepository {
   const stmtSnapshotQueue = db.prepare(`INSERT INTO queue_snapshots (id, track_ids, block_at, created_at) VALUES (@id, @trackIds, @blockAt, @createdAt)`);
   const stmtUpsertPref = db.prepare(`INSERT INTO prefs_updates (id, key, value_json, updated_at) VALUES (@id, @key, @valueJson, @updatedAt) ON CONFLICT(key) DO UPDATE SET value_json = @valueJson, updated_at = @updatedAt`);
   const stmtInsertPrepared = db.prepare(`INSERT INTO prepared_episodes (id, radio_date, block_at, status, episode_json, audio_downloaded, error, created_at, updated_at) VALUES (@id, @radioDate, @blockAt, @status, @episodeJson, @audioDownloaded, @error, @createdAt, @updatedAt)`);
+  const stmtInsertShowProject = db.prepare(`INSERT INTO show_projects (id, brief_id, slug, status, active_plan_id, active_job_id, directory_path, show_plan_path, production_trace_path, show_notes_path, show_audio_path, created_at, updated_at, completed_at) VALUES (@id, @briefId, @slug, @status, @activePlanId, @activeJobId, @directoryPath, @showPlanPath, @productionTracePath, @showNotesPath, @showAudioPath, @createdAt, @updatedAt, @completedAt)`);
 
   function mapRowToPlayedTrack(row: unknown): PlayedTrack {
     const r = row as Record<string, unknown>;
@@ -133,6 +159,26 @@ export function createStateRepository(dbPath: string): StateRepository {
       key: r.key as string,
       valueJson: r.value_json as string,
       updatedAt: r.updated_at as string
+    };
+  }
+
+  function mapRowToShowProject(row: unknown): ShowProject {
+    const r = row as Record<string, unknown>;
+    return {
+      id: r.id as string,
+      briefId: r.brief_id as string,
+      slug: r.slug as string,
+      status: r.status as ShowProject["status"],
+      activePlanId: r.active_plan_id as string | undefined,
+      activeJobId: r.active_job_id as string | undefined,
+      directoryPath: r.directory_path as string,
+      showPlanPath: r.show_plan_path as string | undefined,
+      productionTracePath: r.production_trace_path as string | undefined,
+      showNotesPath: r.show_notes_path as string | undefined,
+      showAudioPath: r.show_audio_path as string | undefined,
+      createdAt: r.created_at as string,
+      updatedAt: r.updated_at as string,
+      completedAt: r.completed_at as string | undefined
     };
   }
 
@@ -346,6 +392,86 @@ export function createStateRepository(dbPath: string): StateRepository {
       const updatedAt = new Date().toISOString();
       db.prepare(`UPDATE prepared_episodes SET audio_downloaded = ?, updated_at = ? WHERE id = ?`).run(downloaded ? 1 : 0, updatedAt, id);
       return Promise.resolve();
+    },
+
+    saveShowProject(project: Omit<ShowProject, "id" | "createdAt" | "updatedAt">): Promise<ShowProject> {
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const toInsert = {
+        id,
+        briefId: project.briefId,
+        slug: project.slug,
+        status: project.status,
+        activePlanId: project.activePlanId ?? null,
+        activeJobId: project.activeJobId ?? null,
+        directoryPath: project.directoryPath,
+        showPlanPath: project.showPlanPath ?? null,
+        productionTracePath: project.productionTracePath ?? null,
+        showNotesPath: project.showNotesPath ?? null,
+        showAudioPath: project.showAudioPath ?? null,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: project.completedAt ?? null
+      };
+      stmtInsertShowProject.run(toInsert);
+      return Promise.resolve({
+        ...project,
+        id,
+        createdAt: now,
+        updatedAt: now
+      });
+    },
+
+    getShowProject(id: string): Promise<ShowProject | null> {
+      const row = db.prepare(`SELECT * FROM show_projects WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+      return Promise.resolve(row ? mapRowToShowProject(row) : null);
+    },
+
+    getShowProjectByBriefId(briefId: string): Promise<ShowProject | null> {
+      const row = db.prepare(`SELECT * FROM show_projects WHERE brief_id = ?`).get(briefId) as Record<string, unknown> | undefined;
+      return Promise.resolve(row ? mapRowToShowProject(row) : null);
+    },
+
+    listShowProjects(limit?: number): Promise<ShowProject[]> {
+      let query = `SELECT * FROM show_projects ORDER BY created_at DESC`;
+      const rows = limit
+        ? (db.prepare(query + ` LIMIT ?`).all(limit) as unknown[])
+        : (db.prepare(query).all() as unknown[]);
+      return Promise.resolve(rows.map(mapRowToShowProject));
+    },
+
+    updateShowProject(id: string, updates: Partial<Omit<ShowProject, "id" | "createdAt">>): Promise<ShowProject | null> {
+      const updatedAt = new Date().toISOString();
+      const setClauses: string[] = [`updated_at = ?`];
+      const values: unknown[] = [updatedAt];
+      let paramIndex = 2;
+
+      if (updates.briefId !== undefined) { setClauses.push(`brief_id = ?`); values.push(updates.briefId); }
+      if (updates.slug !== undefined) { setClauses.push(`slug = ?`); values.push(updates.slug); }
+      if (updates.status !== undefined) { setClauses.push(`status = ?`); values.push(updates.status); }
+      if (updates.activePlanId !== undefined) { setClauses.push(`active_plan_id = ?`); values.push(updates.activePlanId ?? null); }
+      if (updates.activeJobId !== undefined) { setClauses.push(`active_job_id = ?`); values.push(updates.activeJobId ?? null); }
+      if (updates.directoryPath !== undefined) { setClauses.push(`directory_path = ?`); values.push(updates.directoryPath); }
+      if (updates.showPlanPath !== undefined) { setClauses.push(`show_plan_path = ?`); values.push(updates.showPlanPath ?? null); }
+      if (updates.productionTracePath !== undefined) { setClauses.push(`production_trace_path = ?`); values.push(updates.productionTracePath ?? null); }
+      if (updates.showNotesPath !== undefined) { setClauses.push(`show_notes_path = ?`); values.push(updates.showNotesPath ?? null); }
+      if (updates.showAudioPath !== undefined) { setClauses.push(`show_audio_path = ?`); values.push(updates.showAudioPath ?? null); }
+      if (updates.completedAt !== undefined) { setClauses.push(`completed_at = ?`); values.push(updates.completedAt ?? null); }
+
+      values.push(id);
+      const query = `UPDATE show_projects SET ${setClauses.join(', ')} WHERE id = ?`;
+      const result = db.prepare(query).run(...values);
+
+      if (result.changes === 0) {
+        return Promise.resolve(null);
+      }
+
+      return this.getShowProject(id);
+    },
+
+    deleteShowProject(id: string): Promise<boolean> {
+      const result = db.prepare(`DELETE FROM show_projects WHERE id = ?`).run(id);
+      return Promise.resolve(result.changes > 0);
     }
   };
 }

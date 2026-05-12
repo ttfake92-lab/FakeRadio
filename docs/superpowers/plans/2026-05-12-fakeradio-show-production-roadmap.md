@@ -27,6 +27,7 @@
 - 新总 PRD：`.scratch/fakeradio-show-production/PRD.md`
 - 第一批 issue：`.scratch/fakeradio-show-production/issues/01-*.md` 至 `08-*.md`
 - 本计划：`docs/superpowers/plans/2026-05-12-fakeradio-show-production-roadmap.md`
+- 自动推进状态：`.scratch/fakeradio-show-production/AUTOMATION_STATE.md`
 
 ## 当前门禁
 
@@ -362,9 +363,11 @@ pnpm typecheck
 
 ```text
 在 /Users/tt/projects/FakeRadio 按 docs/superpowers/plans/2026-05-12-fakeradio-show-production-roadmap.md 推进项目。
-先读取 AGENTS.md、.scratch/fakeradio-show-production/PRD.md、对应 issue 和当前 git status。
+先读取 AGENTS.md、.scratch/fakeradio-show-production/AUTOMATION_STATE.md、.scratch/fakeradio-show-production/PRD.md、当前 active issue 和当前 git status。
+必须以 AUTOMATION_STATE.md 里的 Current Active Task / Current Active Issue / Next Action 作为续跑锚点，不要每次从计划开头重新开始。
 严格遵守顺序：先处理当前测试失败和 dirty worktree，再进入 Phase 1 实现。
 每次只推进一个可验证小 slice；优先写测试，运行相关测试和 typecheck。
+每次结束前必须更新 .scratch/fakeradio-show-production/AUTOMATION_STATE.md：写明完成了什么、当前 active task 是否完成、下一次从哪里继续、验证结果和 blocker。
 不要 revert 用户未明确要求回退的改动。
 结束时用中文汇报：完成了什么、改了哪些文件、验证结果、下一次应该从哪里继续。
 ```
@@ -380,18 +383,42 @@ pnpm typecheck
 每次定时任务开始：
 
 - [ ] 读取 `AGENTS.md`。
+- [ ] 读取 `.scratch/fakeradio-show-production/AUTOMATION_STATE.md`，并把 `Next Action` 作为本轮第一优先级。
 - [ ] 读取本计划。
-- [ ] 读取当前 active issue。
+- [ ] 读取 `AUTOMATION_STATE.md` 中记录的当前 active issue；如果是 `None`，先完成 Phase 0 gate。
 - [ ] 运行 `git status --short --branch`。
 - [ ] 如果上次有失败测试，先复现失败。
 
 每次定时任务结束：
 
+- [ ] 更新 `.scratch/fakeradio-show-production/AUTOMATION_STATE.md`。
 - [ ] 更新对应 issue 的 Comments。
 - [ ] 记录运行过的测试命令和结果。
 - [ ] 明确下一次 active issue / task。
 - [ ] 如果创建 commit，确保不包含个人数据、缓存、DB 或临时截图。
 - [ ] 如果无法继续，写清楚 blocker 和需要用户确认的问题。
+
+## 自动推进状态文件协议
+
+`.scratch/fakeradio-show-production/AUTOMATION_STATE.md` 是定时任务续跑的唯一进度锚点。roadmap 负责说明全局路线，issue 负责说明单个 slice，state 文件负责说明“下一次从哪里继续”。
+
+每次自动任务必须维护这些字段：
+
+- `Current Phase`
+- `Current Active Task`
+- `Current Active Issue`
+- `Last Known Verification`
+- `Next Action`
+- `Done Log`
+- `Blockers`
+
+推进规则：
+
+- 如果当前任务未完成，只更新 `Next Action`，不要跳到下一个 issue。
+- 如果当前任务完成，更新 `Done Log`，再把 `Current Active Task` 指向下一个最小任务。
+- 如果进入 Phase 1，把 `Current Active Issue` 更新为对应 issue 路径。
+- 如果测试失败，把失败命令、失败点和最小下一步写进 `Last Known Verification` 与 `Next Action`。
+- 如果遇到需要用户确认的范围问题，把它写进 `Blockers`，不要猜测并继续扩大修改范围。
 
 ## 暂不进入的工作
 
@@ -401,4 +428,3 @@ pnpm typecheck
 - 不把完整 chain-of-thought 暴露给 UI。
 - 不把 provider 逻辑放进前端。
 - 不为了新目标重写五套皮肤，只做 contract 统一适配。
-

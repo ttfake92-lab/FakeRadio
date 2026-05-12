@@ -7,6 +7,8 @@ import {
   NowResponseSchema,
   ProgramBriefSchema,
   RadioEpisodeSchema,
+  ShowPlanSchema,
+  ShowPlanBlockSchema,
   StorySchema,
   StorySourceNoteSchema,
   StoryTypeSchema,
@@ -302,6 +304,165 @@ describe("FakeRadio shared contracts", () => {
         updatedAt: "2026-05-12T10:00:00.000Z"
       });
       expect(brief.constraints?.durationMinutes).toBe(60);
+    });
+  });
+
+  describe("ShowPlan", () => {
+    it("validates a show plan with 4 blocks", () => {
+      const plan = ShowPlanSchema.parse({
+        id: "plan-001",
+        briefId: "brief-001",
+        version: 1,
+        active: true,
+        briefSnapshot: {
+          id: "brief-001",
+          type: "theme-show",
+          topic: "Bee Gees",
+          targetDate: "2026-05-12",
+          priority: "user-requested",
+          status: "draft",
+          createdAt: "2026-05-12T10:00:00.000Z",
+          updatedAt: "2026-05-12T10:00:00.000Z"
+        },
+        blocks: [
+          {
+            role: "opening",
+            title: "Stayin' Alive 的心跳",
+            storyGoal: "用标志性的迪斯科节拍开场，建立氛围",
+            selectionGoal: "选择最能代表 Bee Gees 黄金时代开场感的曲目",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          },
+          {
+            role: "origin",
+            title: "从澳大利亚到英伦",
+            storyGoal: "讲述乐队早期在澳大利亚的成长经历",
+            selectionGoal: "选取早期录音室作品",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          },
+          {
+            role: "signature-era",
+            title: "迪斯科黄金期",
+            storyGoal: "聚焦 1977-1979 年迪斯科时代",
+            selectionGoal: "精选迪斯科时期代表作品",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          },
+          {
+            role: "closing",
+            title: "留给时代的回响",
+            storyGoal: "以情感收尾，留下余韵",
+            selectionGoal: "选择 Ballad 类作品",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }
+        ],
+        totalDurationMinutes: 60,
+        createdAt: "2026-05-12T10:00:00.000Z",
+        updatedAt: "2026-05-12T10:00:00.000Z"
+      });
+      expect(plan.blocks).toHaveLength(4);
+      expect(plan.active).toBe(true);
+    });
+
+    it("rejects invalid block role", () => {
+      expect(() =>
+        ShowPlanSchema.parse({
+          id: "plan-001",
+          briefId: "brief-001",
+          version: 1,
+          active: true,
+          briefSnapshot: {
+            id: "brief-001",
+            type: "theme-show",
+            topic: "Test",
+            targetDate: "2026-05-12",
+            priority: "user-requested",
+            status: "draft",
+            createdAt: "2026-05-12T10:00:00.000Z",
+            updatedAt: "2026-05-12T10:00:00.000Z"
+          },
+          blocks: [
+            {
+              role: "invalid-role",
+              title: "Test",
+              storyGoal: "Test",
+              selectionGoal: "Test",
+              sourceNeeds: [],
+              constraints: {},
+              episodeTargets: []
+            }
+          ],
+          createdAt: "2026-05-12T10:00:00.000Z",
+          updatedAt: "2026-05-12T10:00:00.000Z"
+        })
+      ).toThrow();
+    });
+
+    it("accepts all nine valid block roles", () => {
+      const validRoles = [
+        "opening",
+        "origin",
+        "turning-point",
+        "signature-era",
+        "relationship",
+        "influence",
+        "contrast",
+        "personal-anchor",
+        "closing"
+      ];
+      for (const role of validRoles) {
+        expect(() =>
+          ShowPlanBlockSchema.parse({
+            role,
+            title: `Test ${role}`,
+            storyGoal: "Test",
+            selectionGoal: "Test",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          })
+        ).not.toThrow();
+      }
+    });
+
+    it("validates ShowPlanVersion enum", () => {
+      const plan = ShowPlanSchema.parse({
+        id: "plan-002",
+        briefId: "brief-002",
+        version: 2,
+        active: true,
+        briefSnapshot: {
+          id: "brief-002",
+          type: "theme-show",
+          topic: "ABBA",
+          targetDate: "2026-05-12",
+          priority: "user-requested",
+          status: "confirmed",
+          createdAt: "2026-05-12T10:00:00.000Z",
+          updatedAt: "2026-05-12T10:30:00.000Z"
+        },
+        blocks: [
+          {
+            role: "opening",
+            title: "Dancing Queen 开场",
+            storyGoal: "用最知名作品开场",
+            selectionGoal: "Dancing Queen",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }
+        ],
+        totalDurationMinutes: 20,
+        createdAt: "2026-05-12T10:30:00.000Z",
+        updatedAt: "2026-05-12T10:30:00.000Z"
+      });
+      expect(plan.version).toBe(2);
     });
   });
 });

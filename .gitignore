@@ -19,6 +19,7 @@ user/网易云歌单.md
 .superpowers/
 fakeradio.db
 briefs.db
+user/shows/
 user/audio/
 inspect-player.js
 test-playback.mjs

@@ -1711,4 +1711,273 @@ describe("ProgramBrief intent parsing", () => {
     expect(body.brief).toBeDefined();
     expect(body.brief.topic).toBe("Queen");
   });
+
+  describe("ShowPlan API", () => {
+    it("lists all plans via GET /api/plans", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const response = await app.inject({ method: "GET", url: "/api/plans" });
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json();
+      expect(body.plans).toBeInstanceOf(Array);
+    });
+
+    it("gets plans by briefId via GET /api/plans/:briefId", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Beatles 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+
+      const briefId = createResponse.json().brief.id;
+
+      const response = await app.inject({ method: "GET", url: `/api/plans/${briefId}` });
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json();
+      expect(body.plans).toBeInstanceOf(Array);
+      expect(body.plans.length).toBeGreaterThan(0);
+      expect(body.plans[0].briefId).toBe(briefId);
+    });
+
+    it("gets active plan by briefId via GET /api/plans/:briefId/active", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Rolling Stones 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+
+      const briefId = createResponse.json().brief.id;
+
+      const response = await app.inject({ method: "GET", url: `/api/plans/${briefId}/active` });
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json();
+      expect(body.plan).toBeDefined();
+      expect(body.plan.briefId).toBe(briefId);
+      expect(body.plan.active).toBe(true);
+      expect(body.plan.blocks.length).toBeGreaterThanOrEqual(4);
+      expect(body.plan.blocks.length).toBeLessThanOrEqual(8);
+    });
+
+    it("returns 404 when no active plan exists for briefId", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const response = await app.inject({ method: "GET", url: "/api/plans/non-existent-brief-id/active" });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it("integration: brief creation → plan generation → plan retrieval", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Pink Floyd 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+
+      const brief = createResponse.json().brief;
+      expect(brief).toBeDefined();
+      expect(brief.topic).toBe("Pink Floyd");
+
+      const plansResponse = await app.inject({ method: "GET", url: `/api/plans/${brief.id}` });
+      expect(plansResponse.statusCode).toBe(200);
+
+      const plans = plansResponse.json().plans;
+      expect(plans.length).toBeGreaterThan(0);
+      expect(plans[0].briefId).toBe(brief.id);
+      expect(plans[0].active).toBe(true);
+      expect(plans[0].blocks[0].role).toBe("opening");
+      expect(plans[0].blocks[plans[0].blocks.length - 1].role).toBe("closing");
+
+      const activeResponse = await app.inject({ method: "GET", url: `/api/plans/${brief.id}/active` });
+      expect(activeResponse.statusCode).toBe(200);
+      expect(activeResponse.json().plan.id).toBe(plans[0].id);
+    });
+  });
+
+  describe("Theme Story Show: Generate Now & Schedule Tonight", () => {
+    it("generates a project and job for generate-now", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      // First create a brief
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Pink Floyd 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const brief = createResponse.json().brief;
+      expect(brief).toBeDefined();
+
+      // Test generate-now
+      const generateResponse = await app.inject({
+        method: "POST",
+        url: "/api/shows/generate-now",
+        payload: { briefId: brief.id }
+      });
+      expect(generateResponse.statusCode).toBe(201);
+      const { project, job } = generateResponse.json();
+      expect(project).toBeDefined();
+      expect(job).toBeDefined();
+      expect(project.briefId).toBe(brief.id);
+      expect(project.status).toBe("generating");
+      expect(job.briefId).toBe(brief.id);
+      expect(job.status).toBe("running");
+
+      // Test we can retrieve the project
+      const projectResponse = await app.inject({ method: "GET", url: `/api/shows/${project.id}` });
+      expect(projectResponse.statusCode).toBe(200);
+      expect(projectResponse.json().project.id).toBe(project.id);
+
+      // Test we can list all projects
+      const listResponse = await app.inject({ method: "GET", url: "/api/shows" });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().projects.length).toBeGreaterThan(0);
+    });
+
+    it("schedules a show for tonight", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      // First create a brief
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Queen 主题节目" }
+      });
+      const brief = createResponse.json().brief;
+
+      // Test schedule-tonight
+      const scheduleResponse = await app.inject({
+        method: "POST",
+        url: "/api/shows/schedule-tonight",
+        payload: { briefId: brief.id }
+      });
+      expect(scheduleResponse.statusCode).toBe(201);
+      const { project, brief: updatedBrief, scheduledAt } = scheduleResponse.json();
+      expect(project).toBeDefined();
+      expect(updatedBrief).toBeDefined();
+      expect(scheduledAt).toBeDefined();
+      expect(project.briefId).toBe(brief.id);
+      expect(updatedBrief.status).toBe("scheduled");
+    });
+
+    it("returns 404 for generate-now with invalid briefId", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/shows/generate-now",
+        payload: { briefId: "non-existent-brief-id" }
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it("returns 404 for schedule-tonight with invalid briefId", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/shows/schedule-tonight",
+        payload: { briefId: "non-existent-brief-id" }
+      });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it("writes prepared episode trace entries to show project on generate-now", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Bee Gees 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const brief = createResponse.json().brief;
+      expect(brief).toBeDefined();
+
+      const generateResponse = await app.inject({
+        method: "POST",
+        url: "/api/shows/generate-now",
+        payload: { briefId: brief.id }
+      });
+      expect(generateResponse.statusCode).toBe(201);
+      const { project } = generateResponse.json();
+      expect(project).toBeDefined();
+      expect(project.productionTracePath).toBeDefined();
+
+      const fs = await import("node:fs");
+      const traceContent = fs.readFileSync(project.productionTracePath, "utf-8");
+      const lines = traceContent.trim().split("\n").filter(Boolean);
+      expect(lines.length).toBeGreaterThan(0);
+    });
+
+    it("writes trace for scheduled show status changes", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Queen 主题节目" }
+      });
+      const brief = createResponse.json().brief;
+
+      const scheduleResponse = await app.inject({
+        method: "POST",
+        url: "/api/shows/schedule-tonight",
+        payload: { briefId: brief.id }
+      });
+      expect(scheduleResponse.statusCode).toBe(201);
+      const { project: scheduledProject } = scheduleResponse.json();
+      expect(scheduledProject.productionTracePath).toBeDefined();
+
+      const fs = await import("node:fs");
+      const traceContent = fs.readFileSync(scheduledProject.productionTracePath, "utf-8");
+      const lines = traceContent.trim().split("\n").filter(Boolean);
+      expect(lines.length).toBeGreaterThan(0);
+      const lastEntry = JSON.parse(lines[lines.length - 1]);
+      expect(lastEntry.type).toBe("scheduled");
+    });
+  });
 });

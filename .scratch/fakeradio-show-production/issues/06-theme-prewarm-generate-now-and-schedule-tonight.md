@@ -1,6 +1,7 @@
 # 06 Theme Prewarm：Generate now 与 Schedule tonight
 
-Status: needs-triage
+Status: resolved
+Closed: 2026-05-12 (all criteria met)
 
 ## Parent
 

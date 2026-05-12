@@ -326,3 +326,199 @@ export const BriefResponseSchema = z.object({
 
 export type BriefsListResponse = z.infer<typeof BriefsListResponseSchema>;
 export type BriefResponse = z.infer<typeof BriefResponseSchema>;
+
+export const ShowPlanBlockRoleSchema = z.enum([
+  "opening",
+  "origin",
+  "turning-point",
+  "signature-era",
+  "relationship",
+  "influence",
+  "contrast",
+  "personal-anchor",
+  "closing"
+]);
+export type ShowPlanBlockRole = z.infer<typeof ShowPlanBlockRoleSchema>;
+
+export const ShowPlanBlockConstraintsSchema = z.object({
+  preferEra: z.string().optional(),
+  avoidExplicit: z.boolean().optional(),
+  moodHint: z.string().optional()
+});
+export type ShowPlanBlockConstraints = z.infer<typeof ShowPlanBlockConstraintsSchema>;
+
+export const ShowPlanBlockEpisodeTargetSchema = z.object({
+  role: z.enum(["opening-music", "closing-music", "bridge", "solo"]).optional(),
+  durationMinutes: z.number().int().positive().optional()
+});
+export type ShowPlanBlockEpisodeTarget = z.infer<typeof ShowPlanBlockEpisodeTargetSchema>;
+
+export const ShowPlanBlockSourceNeedSchema = z.object({
+  kind: z.enum(["artist-bio", "album-history", "song-meaning", "era-context", "relationship-story", "influence-link", "cover-version", "personal-memory"]),
+  description: z.string().min(1)
+});
+export type ShowPlanBlockSourceNeed = z.infer<typeof ShowPlanBlockSourceNeedSchema>;
+
+export const ShowPlanBlockSchema = z.object({
+  role: ShowPlanBlockRoleSchema,
+  title: z.string().min(1),
+  storyGoal: z.string().min(1),
+  selectionGoal: z.string().min(1),
+  sourceNeeds: z.array(ShowPlanBlockSourceNeedSchema).default([]),
+  constraints: ShowPlanBlockConstraintsSchema.default({}),
+  episodeTargets: z.array(ShowPlanBlockEpisodeTargetSchema).default([])
+});
+export type ShowPlanBlock = z.infer<typeof ShowPlanBlockSchema>;
+
+export const ShowPlanSchema = z.object({
+  id: z.string().min(1),
+  briefId: z.string().min(1),
+  version: z.number().int().positive(),
+  active: z.boolean(),
+  briefSnapshot: ProgramBriefSchema,
+  blocks: z.array(ShowPlanBlockSchema).min(1),
+  totalDurationMinutes: z.number().int().positive().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type ShowPlan = z.infer<typeof ShowPlanSchema>;
+
+export const ShowPlansListResponseSchema = z.object({
+  plans: z.array(ShowPlanSchema)
+});
+
+export const ShowPlanResponseSchema = z.object({
+  plan: ShowPlanSchema
+});
+
+export type ShowPlansListResponse = z.infer<typeof ShowPlansListResponseSchema>;
+export type ShowPlanResponse = z.infer<typeof ShowPlanResponseSchema>;
+
+export const ShowJobStatusSchema = z.enum([
+  "pending",
+  "running",
+  "paused",
+  "needs-replan",
+  "cancelled",
+  "failed",
+  "completed"
+]);
+export type ShowJobStatus = z.infer<typeof ShowJobStatusSchema>;
+
+export const ProductionLogLevelSchema = z.enum(["info", "warn", "error"]);
+export type ProductionLogLevel = z.infer<typeof ProductionLogLevelSchema>;
+
+export const ProductionLogSchema = z.object({
+  level: ProductionLogLevelSchema,
+  message: z.string().min(1),
+  timestamp: z.string().datetime(),
+  phase: z.string().optional()
+});
+export type ProductionLog = z.infer<typeof ProductionLogSchema>;
+
+export const TechTraceEntrySchema = z.object({
+  timestamp: z.string().datetime(),
+  type: z.enum(["adapter", "llm", "cache", "tts", "audio", "export", "fallback", "error"]),
+  provider: z.string().optional(),
+  operation: z.string().min(1),
+  durationMs: z.number().int().nonnegative().optional(),
+  summary: z.string().min(1),
+  success: z.boolean().default(true),
+  errorSummary: z.string().optional()
+});
+export type TechTraceEntry = z.infer<typeof TechTraceEntrySchema>;
+
+export const ShowJobSchema = z.object({
+  id: z.string().min(1),
+  briefId: z.string().min(1),
+  planId: z.string().min(1),
+  status: ShowJobStatusSchema,
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  startedAt: z.string().datetime().optional(),
+  completedAt: z.string().datetime().optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  logs: z.array(ProductionLogSchema).default([]),
+  trace: z.array(TechTraceEntrySchema).default([])
+});
+export type ShowJob = z.infer<typeof ShowJobSchema>;
+
+export const ShowJobsListResponseSchema = z.object({
+  jobs: z.array(ShowJobSchema)
+});
+
+export const ShowJobResponseSchema = z.object({
+  job: ShowJobSchema.nullable()
+});
+
+export type ShowJobsListResponse = z.infer<typeof ShowJobsListResponseSchema>;
+export type ShowJobResponse = z.infer<typeof ShowJobResponseSchema>;
+
+export const StartJobRequestSchema = z.object({
+  briefId: z.string().min(1),
+  planId: z.string().min(1)
+});
+
+export type StartJobRequest = z.infer<typeof StartJobRequestSchema>;
+
+export const ShowProjectStatusSchema = z.enum([
+  "draft",
+  "generating",
+  "ready",
+  "exported",
+  "archived"
+]);
+export type ShowProjectStatus = z.infer<typeof ShowProjectStatusSchema>;
+
+export const ShowProjectSchema = z.object({
+  id: z.string().min(1),
+  briefId: z.string().min(1),
+  slug: z.string().min(1),
+  status: ShowProjectStatusSchema,
+  activePlanId: z.string().min(1).optional(),
+  activeJobId: z.string().min(1).optional(),
+  directoryPath: z.string().min(1),
+  showPlanPath: z.string().optional(),
+  productionTracePath: z.string().optional(),
+  showNotesPath: z.string().optional(),
+  showAudioPath: z.string().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional()
+});
+export type ShowProject = z.infer<typeof ShowProjectSchema>;
+
+export const ShowProjectsListResponseSchema = z.object({
+  projects: z.array(ShowProjectSchema)
+});
+export type ShowProjectsListResponse = z.infer<typeof ShowProjectsListResponseSchema>;
+
+export const ShowProjectResponseSchema = z.object({
+  project: ShowProjectSchema
+});
+export type ShowProjectResponse = z.infer<typeof ShowProjectResponseSchema>;
+
+// Generate Now and Schedule Tonight
+export const GenerateNowRequestSchema = z.object({
+  briefId: z.string().min(1)
+});
+export type GenerateNowRequest = z.infer<typeof GenerateNowRequestSchema>;
+
+export const GenerateNowResponseSchema = z.object({
+  project: ShowProjectSchema,
+  job: ShowJobSchema
+});
+export type GenerateNowResponse = z.infer<typeof GenerateNowResponseSchema>;
+
+export const ScheduleTonightRequestSchema = z.object({
+  briefId: z.string().min(1)
+});
+export type ScheduleTonightRequest = z.infer<typeof ScheduleTonightRequestSchema>;
+
+export const ScheduleTonightResponseSchema = z.object({
+  project: ShowProjectSchema,
+  brief: ProgramBriefSchema,
+  scheduledAt: z.string().datetime()
+});
+export type ScheduleTonightResponse = z.infer<typeof ScheduleTonightResponseSchema>;

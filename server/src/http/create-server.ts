@@ -37,6 +37,10 @@ import { createSessionRepository } from "../user/session-repository.js";
 import { createTrackRegistry } from "../audio/track-registry.js";
 import { createCachedStorySourceAdapter } from "../adapters/story-source/cached-web-research-adapter.js";
 import { createProgramBriefRepository } from "../show/program-brief-repository.js";
+import { createShowPlanRepository } from "../show/show-plan-repository.js";
+import { createShowPlanGenerator } from "../show/show-plan-generator.js";
+import { createJobRegistry } from "../show/show-generation-job.js";
+import { createShowProjectRepository } from "../show/show-project-repository.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -147,7 +151,13 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
   // Routes
   const baseDir = options.baseDir ?? resolve(process.cwd());
-  const programBriefRepo = createProgramBriefRepository(baseDir);
+  const programsDir = resolve(baseDir, "user", "programs");
+  const showsDir = resolve(baseDir, "user", "shows");
+  const programBriefRepo = createProgramBriefRepository(programsDir);
+  const showPlanRepo = createShowPlanRepository(programsDir);
+  const showPlanGenerator = createShowPlanGenerator();
+  const jobRegistry = createJobRegistry(programsDir);
+  const showProjectRepo = createShowProjectRepository(showsDir);
   registerRoutes({
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus,
     ttsStatus: effectiveTtsStatus, tts, ttsCacheDir,
@@ -159,7 +169,11 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     webResearchStatus: effectiveWebResearchStatus,
     neteaseAuth,
     baseDir,
-    programBriefRepo
+    programBriefRepo,
+    showPlanRepo,
+    showPlanGenerator,
+    jobRegistry,
+    showProjectRepo
   });
 
   const schedulerLoop = createSchedulerLoop({

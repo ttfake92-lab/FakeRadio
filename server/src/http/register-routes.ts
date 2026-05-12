@@ -13,7 +13,20 @@ import {
   TodayPlanResponseSchema,
   BriefsListResponseSchema,
   BriefResponseSchema,
-  type RadioEpisode
+  ShowPlansListResponseSchema,
+  ShowPlanResponseSchema,
+  ShowJobsListResponseSchema,
+  ShowJobResponseSchema,
+  StartJobRequestSchema,
+  GenerateNowRequestSchema,
+  GenerateNowResponseSchema,
+  ScheduleTonightRequestSchema,
+  ScheduleTonightResponseSchema,
+  ShowProjectsListResponseSchema,
+  ShowProjectResponseSchema,
+  type RadioEpisode,
+  type ProgramBrief,
+  type ShowPlan
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
@@ -35,7 +48,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
-    storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo
+    storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo,
+    showPlanRepo, showPlanGenerator, jobRegistry, showProjectRepo
   } = deps;
 
   const episodeRunnerDeps: EpisodeRunnerDeps = {
@@ -452,6 +466,231 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       return reply.status(404).send({ error: "brief not found" });
     }
     return reply.send(BriefResponseSchema.parse({ brief }));
+  });
+
+  app.get("/api/plans", async (_request, reply) => {
+    const plans = await showPlanRepo.list();
+    return reply.send(ShowPlansListResponseSchema.parse({ plans }));
+  });
+
+  app.get("/api/plans/:briefId", async (request, reply) => {
+    const { briefId } = request.params as { briefId: string };
+    const plans = await showPlanRepo.list({ briefId, activeOnly: false });
+    return reply.send(ShowPlansListResponseSchema.parse({ plans }));
+  });
+
+  app.get("/api/plans/:briefId/active", async (request, reply) => {
+    const { briefId } = request.params as { briefId: string };
+    const plans = await showPlanRepo.list({ briefId, activeOnly: true });
+    const activePlan = plans[0];
+    if (!activePlan) {
+      return reply.status(404).send({ error: "no active plan found for this brief" });
+    }
+    return reply.send(ShowPlanResponseSchema.parse({ plan: activePlan }));
+  });
+
+  app.post("/api/jobs", async (request, reply) => {
+    const body = StartJobRequestSchema.parse(request.body);
+    const job = await jobRegistry.create({ briefId: body.briefId, planId: body.planId });
+    await jobRegistry.addLog(job.id, { level: "info", message: "Job created", phase: "init" });
+    return reply.status(201).send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.get("/api/jobs", async (_request, reply) => {
+    const jobs = await jobRegistry.list();
+    return reply.send(ShowJobsListResponseSchema.parse({ jobs }));
+  });
+
+  app.get("/api/jobs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = await jobRegistry.get(id);
+    if (!job) {
+      return reply.status(404).send({ error: "job not found" });
+    }
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.post("/api/jobs/:id/start", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = await jobRegistry.start(id);
+    if (!job) {
+      return reply.status(400).send({ error: "cannot start job (invalid state transition or not found)" });
+    }
+    await jobRegistry.addLog(job.id, { level: "info", message: "Job started", phase: "running" });
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.post("/api/jobs/:id/pause", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = await jobRegistry.pause(id);
+    if (!job) {
+      return reply.status(400).send({ error: "cannot pause job (invalid state transition or not found)" });
+    }
+    await jobRegistry.addLog(job.id, { level: "info", message: "Job paused", phase: "paused" });
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.post("/api/jobs/:id/resume", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = await jobRegistry.resume(id);
+    if (!job) {
+      return reply.status(400).send({ error: "cannot resume job (invalid state transition or not found)" });
+    }
+    await jobRegistry.addLog(job.id, { level: "info", message: "Job resumed", phase: "running" });
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.post("/api/jobs/:id/cancel", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = await jobRegistry.cancel(id);
+    if (!job) {
+      return reply.status(400).send({ error: "cannot cancel job (invalid state transition or not found)" });
+    }
+    await jobRegistry.addLog(job.id, { level: "warn", message: "Job cancelled", phase: "cancelled" });
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  app.post("/api/jobs/:id/needs-replan", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { reason?: string };
+    const reason = body?.reason ?? "User requested replan";
+    const job = await jobRegistry.markNeedsReplan(id, reason);
+    if (!job) {
+      return reply.status(400).send({ error: "cannot mark job as needs-replan (invalid state transition or not found)" });
+    }
+    await jobRegistry.addLog(job.id, { level: "warn", message: `Job needs replan: ${reason}`, phase: "needs-replan" });
+    return reply.send(ShowJobResponseSchema.parse({ job }));
+  });
+
+  // Show Projects API
+  app.get("/api/shows", async (_request, reply) => {
+    const projects = await showProjectRepo.list();
+    return reply.send(ShowProjectsListResponseSchema.parse({ projects }));
+  });
+
+  app.get("/api/shows/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = await showProjectRepo.get(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project not found" });
+    }
+    return reply.send(ShowProjectResponseSchema.parse({ project }));
+  });
+
+  // Generate Now API
+  app.post("/api/shows/generate-now", async (request, reply) => {
+    const body = GenerateNowRequestSchema.parse(request.body);
+    const brief = await programBriefRepo.get(body.briefId);
+    if (!brief) {
+      return reply.status(404).send({ error: "brief not found" });
+    }
+
+    // Check if there's an existing project for this brief
+    let project = await showProjectRepo.getByBriefId(brief.id);
+    if (!project) {
+      // Create a new project
+      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
+      project = await showProjectRepo.create({ briefId: brief.id, slug });
+    }
+
+    // Check if there's an active plan, if not create one
+    let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
+    let activePlan = plans[0];
+    if (!activePlan) {
+      const draftPlan = await showPlanGenerator.generate(brief);
+      activePlan = await showPlanRepo.save(draftPlan);
+    }
+
+    // Update project with active plan
+    project = await showProjectRepo.update(project.id, { 
+      activePlanId: activePlan.id,
+      status: "generating"
+    }) ?? project;
+
+    // Save show plan to project
+    await showProjectRepo.saveShowPlan(project.id, activePlan);
+
+    // Create and start job
+    const job = await jobRegistry.create({ briefId: brief.id, planId: activePlan.id });
+    await jobRegistry.addLog(job.id, { level: "info", message: "Job created for generate-now", phase: "init" });
+    const startedJob = await jobRegistry.start(job.id);
+    if (startedJob) {
+      await jobRegistry.addLog(startedJob.id, { level: "info", message: "Job started immediately", phase: "running" });
+    }
+
+    // Update project with active job
+    project = await showProjectRepo.update(project.id, {
+      activeJobId: startedJob?.id ?? job.id
+    }) ?? project;
+
+    await showProjectRepo.appendTrace(project.id, {
+      type: "job-started",
+      jobId: startedJob?.id ?? job.id,
+      briefId: brief.id,
+      planId: activePlan.id,
+      status: "generating"
+    });
+
+    const projectWithTrace = await showProjectRepo.get(project.id);
+
+    return reply.status(201).send(GenerateNowResponseSchema.parse({
+      project: projectWithTrace ?? project,
+      job: startedJob ?? job
+    }));
+  });
+
+  // Schedule Tonight API
+  app.post("/api/shows/schedule-tonight", async (request, reply) => {
+    const body = ScheduleTonightRequestSchema.parse(request.body);
+    const brief = await programBriefRepo.get(body.briefId);
+    if (!brief) {
+      return reply.status(404).send({ error: "brief not found" });
+    }
+
+    // Check if there's an existing project for this brief
+    let project = await showProjectRepo.getByBriefId(brief.id);
+    if (!project) {
+      // Create a new project
+      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
+      project = await showProjectRepo.create({ briefId: brief.id, slug });
+    }
+
+    // Check if there's an active plan, if not create one
+    let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
+    let activePlan = plans[0];
+    if (!activePlan) {
+      const draftPlan = await showPlanGenerator.generate(brief);
+      activePlan = await showPlanRepo.save(draftPlan);
+    }
+
+    // Update project with active plan
+    project = await showProjectRepo.update(project.id, { 
+      activePlanId: activePlan.id,
+      status: "draft"
+    }) ?? project;
+
+    // Save show plan to project
+    await showProjectRepo.saveShowPlan(project.id, activePlan);
+
+    // Update brief to scheduled
+    const updatedBrief = await programBriefRepo.update(brief.id, { status: "scheduled" });
+
+    const scheduledAt = nowProvider().toISOString();
+
+    await showProjectRepo.appendTrace(project.id, {
+      type: "scheduled",
+      briefId: brief.id,
+      planId: activePlan.id,
+      scheduledAt
+    });
+
+    const projectWithTrace = await showProjectRepo.get(project.id);
+
+    return reply.status(201).send(ScheduleTonightResponseSchema.parse({
+      project: projectWithTrace ?? project,
+      brief: updatedBrief ?? brief,
+      scheduledAt
+    }));
   });
 
   app.get("/stream", { websocket: true }, (connection) => {

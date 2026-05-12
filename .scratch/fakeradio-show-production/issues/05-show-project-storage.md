@@ -1,6 +1,6 @@
 # 05 ShowProject 本地工程存储
 
-Status: needs-triage
+Status: resolved
 
 ## Parent
 
@@ -30,6 +30,10 @@ Status: needs-triage
 AFK
 
 ## Comments
+
+- 2026-05-12: Resolved — `createShowProjectRepository` 实现，包含 SQLite registry + 文件系统层，14 个测试全部通过。acceptance criteria 全部满足。
+
+
 
 这不是单纯 repository 重构，而是节目制作系统的工程文件模型。实现时必须尊重本地优先和隐私边界。
 

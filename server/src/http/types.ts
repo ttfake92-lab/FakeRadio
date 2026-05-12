@@ -12,6 +12,10 @@ import type { PlaybackState } from "./playback-state.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { StreamBroadcaster } from "../realtime/stream-bus.js";
 import type { ProgramBriefRepository } from "../show/program-brief-repository.js";
+import type { ShowPlanRepository } from "../show/show-plan-repository.js";
+import type { ShowPlanGenerator } from "../show/show-plan-generator.js";
+import type { JobRegistry } from "../show/show-generation-job.js";
+import type { ShowProjectRepository } from "../show/show-project-repository.js";
 
 export type RegisterRoutesDeps = {
   app: FastifyInstance;
@@ -47,4 +51,8 @@ export type RegisterRoutesDeps = {
   neteaseAuth: NeteaseAuthService;
   baseDir: string;
   programBriefRepo: ProgramBriefRepository;
+  showPlanRepo: ShowPlanRepository;
+  showPlanGenerator: ShowPlanGenerator;
+  jobRegistry: JobRegistry;
+  showProjectRepo: ShowProjectRepository;
 };

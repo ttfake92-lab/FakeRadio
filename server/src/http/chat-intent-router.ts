@@ -53,7 +53,8 @@ export async function handleChat(
   const {
     state, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
-    publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider, baseDir, programBriefRepo
+    publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider, baseDir, programBriefRepo,
+    showPlanRepo, showPlanGenerator
   } = deps;
 
   const parsedBody = ChatRequestSchema.parse(body);
@@ -78,6 +79,9 @@ export async function handleChat(
     const targetDate = formatRadioDate(nowDate);
     const brief = createBriefFromIntent(briefIntent, targetDate, "user-requested");
     await programBriefRepo.save(brief);
+
+    const plan = await showPlanGenerator.generate(brief);
+    await showPlanRepo.save(plan);
 
     const confirmMsg = briefIntent.type === "theme-show"
       ? `好的，我来帮你制作一期「${briefIntent.topic}」主题节目。你可以继续追加约束，或者直接说"开始生成"。`
