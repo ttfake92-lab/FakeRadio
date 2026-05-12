@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import type { ProgramBrief, ShowPlan, ShowJob } from "@fakeradio/shared";
+import { exportProject } from "../../lib/api-client";
 
 export type ProductionBoardProps = {
   brief?: ProgramBrief | null;
@@ -9,9 +11,32 @@ export type ProductionBoardProps = {
   isExpanded: boolean;
   onToggleExpand: () => void;
   onClose: () => void;
+  onExportStart?: (projectId: string) => void;
 };
 
-export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExpand, onClose }: ProductionBoardProps) {
+export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExpand, onClose, onExportStart }: ProductionBoardProps) {
+  const [includeTrace, setIncludeTrace] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const completedJob = jobs?.find((j) => j.status === "completed");
+
+  const handleExport = async () => {
+    if (!completedJob) return;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      await exportProject(completedJob.planId, { includeTrace });
+      if (onExportStart) {
+        onExportStart(completedJob.planId);
+      }
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -73,6 +98,12 @@ export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExp
               {...(brief !== undefined && { brief })}
               {...(showPlan !== undefined && { showPlan })}
               {...(jobs !== undefined && { jobs })}
+              {...(completedJob !== undefined && { completedJob })}
+              includeTrace={includeTrace}
+              onIncludeTraceChange={setIncludeTrace}
+              onExport={handleExport}
+              isExporting={isExporting}
+              exportError={exportError}
             />
           ) : (
             <EmptyState />
@@ -87,10 +118,22 @@ function ShowProjectView({
   brief,
   showPlan,
   jobs,
+  completedJob,
+  includeTrace = true,
+  onIncludeTraceChange,
+  onExport,
+  isExporting = false,
+  exportError = null,
 }: {
   brief?: ProgramBrief | null;
   showPlan?: ShowPlan | null;
   jobs?: ShowJob[];
+  completedJob?: ShowJob;
+  includeTrace?: boolean;
+  onIncludeTraceChange?: (v: boolean) => void;
+  onExport?: () => void;
+  isExporting?: boolean;
+  exportError?: string | null;
 }) {
   return (
     <div style={{ color: "#fff" }}>
@@ -126,6 +169,53 @@ function ShowProjectView({
           {jobs.map((job, idx) => (
             <JobView key={idx} job={job} />
           ))}
+        </div>
+      )}
+
+      {completedJob && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255, 255, 255, 0.1)" }}>
+          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.5)", marginBottom: 8 }}>
+            导出节目
+          </div>
+          
+          {onIncludeTraceChange && onExport && (
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={includeTrace}
+                  onChange={(e) => onIncludeTraceChange(e.target.checked)}
+                  style={{ cursor: "pointer" }}
+                />
+                <span style={{ fontSize: 12, color: "#fff" }}>包含制作 trace</span>
+              </label>
+
+              <button
+                onClick={onExport}
+                disabled={isExporting}
+                style={{
+                  width: "100%",
+                  padding: "10px 16px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#4ade80",
+                  color: "#000",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isExporting ? "not-allowed" : "pointer",
+                  opacity: isExporting ? 0.6 : 1,
+                }}
+              >
+                {isExporting ? "导出中…" : "📦 导出节目包"}
+              </button>
+            </>
+          )}
+
+          {exportError && (
+            <p style={{ marginTop: 8, fontSize: 12, color: "#f87171", margin: "8px 0 0" }}>
+              {exportError}
+            </p>
+          )}
         </div>
       )}
     </div>

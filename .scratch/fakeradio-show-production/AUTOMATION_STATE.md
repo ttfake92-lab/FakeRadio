@@ -6,11 +6,11 @@ Phase 1 - Theme Story Show MVP
 
 ## Current Active Task
 
-Task 8 - Export Package (in progress)
+Phase 1 完结总结 (待进行)
 
 ## Current Active Issue
 
-`.scratch/fakeradio-show-production/issues/08-export-package-with-plan-and-trace.md` (in-progress)
+None (Task 8 已完成)
 
 ## Last Known Verification
 
@@ -31,13 +31,15 @@ Task 8 - Export Package (in progress)
   - **Cycle 2**: 新增 `export-show-project.ts`（`exportShowProject` 函数）和 5 个单元测试
   - **Cycle 3**: 新增 `POST /api/projects/:id/export` 和 `GET /api/export/project/:id/download` 路由，3 个集成测试
   - **Cycle 4**: 前端 API client 新增 `exportProject`, `getProjectExportFiles`, `downloadProjectFile` 函数
+  - **Cycle 5**: 添加"是否包含 trace"选项到 ProductionBoard UI，集成 ExportQueue 下载功能
   - All 526 tests pass, typecheck clean
 
 ## Next Action
 
-Task 8 核心逻辑完成。下一步需要：
-- Task 8 Step 5: 添加"是否包含 trace"选项到 ExportQueue UI
-- 完成后可标记 Task 8 complete，进入 Phase 1 完结总结
+Phase 1 完结总结：
+- 检查所有验收标准是否满足
+- 标记 Phase 1 为完成
+- 准备 Phase 2 开始
 
 ## Done Log
 
@@ -60,6 +62,7 @@ Task 8 核心逻辑完成。下一步需要：
 - 2026-05-12: **Task 7 partial complete** — committed Task 6 changes (2 commits), implemented panel state management hook (useProductionPanels), ProductionBoard, GenerationConsole, and ExportQueue components. All 514 tests pass and typecheck is clean. Default view remains listening desk + chat.
 - 2026-05-12: **Task 7 Step 6 complete** — integrated panels into SkinStage with floating toolbar buttons (📻⚡📦). Added ProductionToolbar, connected panel toggle to SkinStage state. Added API client functions: getBriefs, getShowPlans, getShowJobs, getShowProjects. All 514 tests pass, typecheck clean.
 - 2026-05-12: **Task 8 partial complete** — extended show-notes-generator with showPlan and externalTrack support (4 new tests), implemented exportShowProject pipeline (5 tests), added POST /api/projects/:id/export and GET /api/export/project/:id/download routes (3 integration tests), added frontend API client functions (exportProject, getProjectExportFiles, downloadProjectFile). All 526 tests pass, typecheck clean. Task 7 browser verification (Step 7) remains HITL.
+- 2026-05-12: **Task 8 complete** — added "是否包含 trace"选项到 ProductionBoard UI，集成 ExportQueue 下载功能，所有 526 测试通过，类型检查干净。
 
 ## Blockers
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import type { NowResponse, Track } from "@fakeradio/shared";
+import type { NowResponse, Track, ProgramBrief, ShowPlan, ShowJob } from "@fakeradio/shared";
 import type { OnAirThemeId } from "./player-view-model";
 import type { FavoriteTrack } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
@@ -12,6 +12,10 @@ import { SkinTerminal } from "./skin-terminal";
 import { SkinBento } from "./skin-bento";
 import { SkinY2K } from "./skin-y2k";
 import { SKINS, PERSONAS, type Persona } from "./skin-config";
+import { useProductionPanels, type PanelId } from "../show/use-production-panels";
+import { ProductionBoard } from "../show/production-board";
+import { GenerationConsole } from "../show/generation-console";
+import { ExportQueue, type ExportTask } from "../show/export-queue";
 
 export type SkinStageProps = {
   theme: OnAirThemeId;
@@ -44,6 +48,12 @@ export type SkinStageProps = {
   onSeek: (pos01: number) => void;
   onToggleFavorite: () => void;
   onNext: () => void;
+  productionBriefs?: ProgramBrief[];
+  productionPlans?: ShowPlan[];
+  productionJobs?: ShowJob[];
+  generationLogs?: { timestamp: number; level: string; phase?: string; message: string }[];
+  isGenerating?: boolean;
+  onOpenPanel?: (panelId: PanelId) => void;
 };
 
 function generateTone(id: string): [string, string, string] {
@@ -93,6 +103,12 @@ export function SkinStage({
   onSeek,
   onToggleFavorite,
   onNext,
+  productionBriefs,
+  productionPlans,
+  productionJobs,
+  generationLogs,
+  isGenerating,
+  onOpenPanel,
 }: SkinStageProps) {
   const liked = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -179,6 +195,15 @@ export function SkinStage({
     onNext,
   });
 
+  const { panels, togglePanel } = useProductionPanels();
+
+  const handlePanelToggle = useCallback((panelId: PanelId) => {
+    togglePanel(panelId);
+    if (onOpenPanel) {
+      onOpenPanel(panelId);
+    }
+  }, [togglePanel, onOpenPanel]);
+
   const skinProps = {
     r: bridge.r,
     persona: selectedPersona,
@@ -198,6 +223,25 @@ export function SkinStage({
       default: return <SkinAmber {...skinProps} />;
     }
   };
+
+  const exportTasks: ExportTask[] = (productionJobs ?? []).map((job) => {
+    const task: ExportTask = {
+      id: job.id,
+      projectId: job.planId,
+      status: job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "running" ? "running" : "pending",
+      createdAt: new Date(job.createdAt).getTime(),
+    };
+    if (job.completedAt) {
+      task.completedAt = new Date(job.completedAt).getTime();
+    }
+    if (job.error) {
+      task.error = job.error;
+    }
+    return task;
+  });
+
+  const activeBrief = productionBriefs?.[0] ?? null;
+  const activePlan = productionPlans?.find((p) => p.active) ?? null;
 
   return (
     <>
@@ -224,6 +268,40 @@ export function SkinStage({
           {error}
         </div>
       )}
+
+      <ProductionToolbar panels={panels} onToggle={handlePanelToggle} />
+
+      <ProductionBoard
+        brief={activeBrief}
+        showPlan={activePlan}
+        jobs={productionJobs ?? []}
+        isExpanded={panels.productionBoard.isExpanded}
+        onToggleExpand={() => handlePanelToggle("productionBoard")}
+        onClose={() => panels.productionBoard.isOpen && handlePanelToggle("productionBoard")}
+        onExportStart={() => handlePanelToggle("exportQueue")}
+      />
+
+      <GenerationConsole
+        logs={(generationLogs ?? []).map((l) => ({
+          ...l,
+          level: l.level as "info" | "warn" | "error" | "trace",
+        }))}
+        currentPhase={isGenerating ? "generating" : ""}
+        isExpanded={panels.generationConsole.isExpanded}
+        isOpen={panels.generationConsole.isOpen}
+        isGenerating={isGenerating ?? false}
+        onToggleExpand={() => handlePanelToggle("generationConsole")}
+        onClose={() => panels.generationConsole.isOpen && handlePanelToggle("generationConsole")}
+      />
+
+      <ExportQueue
+        tasks={exportTasks}
+        isExpanded={panels.exportQueue.isExpanded}
+        isOpen={panels.exportQueue.isOpen}
+        onToggleExpand={() => handlePanelToggle("exportQueue")}
+        onClose={() => panels.exportQueue.isOpen && handlePanelToggle("exportQueue")}
+      />
+
       {showSettings && (
         <SettingsPanel
           theme={theme}
@@ -237,6 +315,82 @@ export function SkinStage({
         />
       )}
     </>
+  );
+}
+
+function ProductionToolbar({
+  panels,
+  onToggle,
+}: {
+  panels: ReturnType<typeof useProductionPanels>["panels"];
+  onToggle: (id: PanelId) => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 16,
+        right: 16,
+        display: "flex",
+        gap: 6,
+        zIndex: 90,
+      }}
+    >
+      <ToolbarButton
+        label="📻"
+        title="制作台"
+        isActive={panels.productionBoard.isOpen}
+        onClick={() => onToggle("productionBoard")}
+      />
+      <ToolbarButton
+        label="⚡"
+        title="生成控制台"
+        isActive={panels.generationConsole.isOpen}
+        onClick={() => onToggle("generationConsole")}
+      />
+      <ToolbarButton
+        label="📦"
+        title="导出队列"
+        isActive={panels.exportQueue.isOpen}
+        onClick={() => onToggle("exportQueue")}
+      />
+    </div>
+  );
+}
+
+function ToolbarButton({
+  label,
+  title,
+  isActive,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        border: isActive ? "1px solid rgba(232, 160, 74, 0.5)" : "1px solid rgba(255, 255, 255, 0.1)",
+        background: isActive ? "rgba(232, 160, 74, 0.2)" : "rgba(0, 0, 0, 0.7)",
+        color: "#fff",
+        fontSize: 16,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(8px)",
+        transition: "all 0.15s ease",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

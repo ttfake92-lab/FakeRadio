@@ -1,5 +1,8 @@
 "use client";
 
+import { getProjectExportFiles, downloadProjectFile } from "../../lib/api-client";
+import { useState } from "react";
+
 export type ExportTask = {
   id: string;
   projectId: string;
@@ -17,7 +20,6 @@ export type ExportQueueProps = {
   onToggleExpand: () => void;
   onClose: () => void;
   onRetry?: (taskId: string) => void;
-  onDownload?: (taskId: string) => void;
   onDelete?: (taskId: string) => void;
 };
 
@@ -28,13 +30,36 @@ export function ExportQueue({
   onToggleExpand,
   onClose,
   onRetry,
-  onDownload,
   onDelete,
 }: ExportQueueProps) {
   if (!isOpen) return null;
 
+  const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
+
   const pendingTasks = tasks.filter((t) => t.status === "pending" || t.status === "running");
   const completedTasks = tasks.filter((t) => t.status === "completed" || t.status === "failed");
+
+  const handleDownload = async (task: ExportTask) => {
+    setDownloadingProjectId(task.projectId);
+    try {
+      const files = await getProjectExportFiles(task.projectId);
+      for (const file of files) {
+        const blob = await downloadProjectFile(task.projectId, file);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error("Download failed", e);
+    } finally {
+      setDownloadingProjectId(null);
+    }
+  };
 
   return (
     <div
@@ -118,31 +143,33 @@ export function ExportQueue({
                     进行中 ({pendingTasks.length})
                   </div>
                   {pendingTasks.map((task) => (
-                    <TaskItem
-                      key={task.id}
-                      task={task}
-                      {...(onRetry && { onRetry })}
-                      {...(onDownload && { onDownload })}
-                      {...(onDelete && { onDelete })}
-                    />
-                  ))}
-                </div>
-              )}
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  downloadingProjectId={downloadingProjectId}
+                  {...(onRetry && { onRetry })}
+                  onDownload={handleDownload}
+                  {...(onDelete && { onDelete })}
+                />
+              ))}
+            </div>
+          )}
 
-              {completedTasks.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", marginBottom: 8 }}>
-                    已完成 ({completedTasks.length})
-                  </div>
-                  {completedTasks.map((task) => (
-                    <TaskItem
-                      key={task.id}
-                      task={task}
-                      {...(onRetry && { onRetry })}
-                      {...(onDownload && { onDownload })}
-                      {...(onDelete && { onDelete })}
-                    />
-                  ))}
+          {completedTasks.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", marginBottom: 8 }}>
+                已完成 ({completedTasks.length})
+              </div>
+              {completedTasks.map((task) => (
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  downloadingProjectId={downloadingProjectId}
+                  {...(onRetry && { onRetry })}
+                  onDownload={handleDownload}
+                  {...(onDelete && { onDelete })}
+                />
+              ))}
                 </div>
               )}
             </>
@@ -155,13 +182,15 @@ export function ExportQueue({
 
 function TaskItem({
   task,
+  downloadingProjectId,
   onRetry,
   onDownload,
   onDelete,
 }: {
   task: ExportTask;
+  downloadingProjectId: string | null;
   onRetry?: (taskId: string) => void;
-  onDownload?: (taskId: string) => void;
+  onDownload?: (task: ExportTask) => void;
   onDelete?: (taskId: string) => void;
 }) {
   return (
@@ -243,7 +272,8 @@ function TaskItem({
         )}
         {task.status === "completed" && onDownload && (
           <button
-            onClick={() => onDownload(task.id)}
+            onClick={() => onDownload && onDownload(task)}
+            disabled={downloadingProjectId === task.projectId}
             style={{
               padding: "4px 8px",
               borderRadius: 4,
@@ -252,10 +282,11 @@ function TaskItem({
               color: "#000",
               fontSize: 11,
               fontWeight: 500,
-              cursor: "pointer",
+              cursor: downloadingProjectId === task.projectId ? "not-allowed" : "pointer",
+              opacity: downloadingProjectId === task.projectId ? 0.6 : 1,
             }}
           >
-            下载
+            {downloadingProjectId === task.projectId ? "下载中…" : "下载"}
           </button>
         )}
         {onDelete && (
