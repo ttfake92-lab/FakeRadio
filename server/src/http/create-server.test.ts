@@ -1590,3 +1590,125 @@ describe("TTS cache route", () => {
     rmSync(outsideDir, { recursive: true, force: true });
   });
 });
+
+describe("ProgramBrief intent parsing", () => {
+  it("creates a theme-show brief when user says '帮我做一期 Bee Gees 主题节目'", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我做一期 Bee Gees 主题节目" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.message).toContain("Bee Gees");
+    expect(body.brief).toBeDefined();
+    expect(body.brief.type).toBe("theme-show");
+    expect(body.brief.topic).toBe("Bee Gees");
+    expect(body.brief.status).toBe("draft");
+  });
+
+  it("creates a block-theme brief when user says '今晚想听 Bee Gees'", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      now: () => new Date(2026, 4, 12, 10, 0, 0)
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "今晚想听 Bee Gees" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.brief).toBeDefined();
+    expect(body.brief.type).toBe("block-theme");
+    expect(body.brief.topic).toBe("Bee Gees");
+    expect(body.brief.scope).toBe("block");
+  });
+
+  it("does not create brief for weak expression like '我喜欢 Bee Gees'", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "我喜欢 Bee Gees" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.brief).toBeUndefined();
+  });
+
+  it("does not create brief for casual chat", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "今天天气怎么样" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.brief).toBeUndefined();
+  });
+
+  it("lists briefs via GET /api/briefs", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我做一期 ABBA 主题节目" }
+    });
+    expect(createResponse.statusCode).toBe(200);
+
+    const response = await app.inject({ method: "GET", url: "/api/briefs" });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.briefs).toBeInstanceOf(Array);
+    expect(body.briefs.length).toBeGreaterThan(0);
+    expect(body.briefs.some((b: { topic: string }) => b.topic === "ABBA")).toBe(true);
+  });
+
+  it("gets brief by id via GET /api/briefs/:id", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我做一期 Queen 主题节目" }
+    });
+
+    const briefId = createResponse.json().brief.id;
+
+    const response = await app.inject({ method: "GET", url: `/api/briefs/${briefId}` });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.brief).toBeDefined();
+    expect(body.brief.topic).toBe("Queen");
+  });
+});

@@ -11,6 +11,7 @@ import type { TrackRegistry } from "../audio/track-registry.js";
 import type { PlaybackState } from "./playback-state.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { StreamBroadcaster } from "../realtime/stream-bus.js";
+import type { ProgramBriefRepository } from "../show/program-brief-repository.js";
 
 export type RegisterRoutesDeps = {
   app: FastifyInstance;
@@ -45,4 +46,5 @@ export type RegisterRoutesDeps = {
   webResearchStatus: string;
   neteaseAuth: NeteaseAuthService;
   baseDir: string;
+  programBriefRepo: ProgramBriefRepository;
 };

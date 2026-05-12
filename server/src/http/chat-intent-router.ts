@@ -13,6 +13,8 @@ import {
 import { env } from "../config/env.js";
 import type { RegisterRoutesDeps } from "./types.js";
 import type { Track } from "@fakeradio/shared";
+import { parseBriefIntent, createBriefFromIntent } from "../show/brief-intent-parser.js";
+import { formatRadioDate } from "../utils/time.js";
 
 function createKeepCurrentDecision(say: string, reason: string, segue?: string) {
   return {
@@ -51,7 +53,7 @@ export async function handleChat(
   const {
     state, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
-    publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider, baseDir
+    publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider, baseDir, programBriefRepo
   } = deps;
 
   const parsedBody = ChatRequestSchema.parse(body);
@@ -68,6 +70,23 @@ export async function handleChat(
   const userEntry: { timestamp: string; role: "user"; text: string; trackId?: string } = { timestamp: now, role: "user", text: msg };
   if (currentTrack) userEntry.trackId = currentTrack.id;
   await sessionRepo.appendMessage(userEntry);
+
+  // Intent: create-brief (theme-show or block-theme)
+  const nowDate = nowProvider ? nowProvider() : new Date();
+  const briefIntent = parseBriefIntent(msg, nowDate);
+  if (briefIntent.isBriefIntent) {
+    const targetDate = formatRadioDate(nowDate);
+    const brief = createBriefFromIntent(briefIntent, targetDate, "user-requested");
+    await programBriefRepo.save(brief);
+
+    const confirmMsg = briefIntent.type === "theme-show"
+      ? `好的，我来帮你制作一期「${briefIntent.topic}」主题节目。你可以继续追加约束，或者直接说"开始生成"。`
+      : `好的，今晚我会准备「${briefIntent.topic}」相关的内容。`;
+
+    const decision = createKeepCurrentDecision(confirmMsg, "brief created");
+    await sessionRepo.appendMessage({ timestamp: new Date().toISOString(), role: "agent", text: confirmMsg });
+    return ChatResponseSchema.parse({ message: confirmMsg, decision, brief });
+  }
 
   // Intent: next-track
   if (/^(下一首|next|切歌|换一首)/i.test(msg)) {

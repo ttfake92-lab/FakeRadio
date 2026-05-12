@@ -11,6 +11,8 @@ import {
   StreamEventSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema,
+  BriefsListResponseSchema,
+  BriefResponseSchema,
   type RadioEpisode
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
@@ -33,7 +35,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
-    storySourceStatus, webResearchStatus, neteaseAuth, baseDir
+    storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo
   } = deps;
 
   const episodeRunnerDeps: EpisodeRunnerDeps = {
@@ -436,6 +438,20 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       .header("content-type", "application/zip")
       .header("content-disposition", `attachment; filename="fakeradio-${date}.zip"`)
       .send(createReadStream(filePath));
+  });
+
+  app.get("/api/briefs", async (_request, reply) => {
+    const briefs = await programBriefRepo.list();
+    return reply.send(BriefsListResponseSchema.parse({ briefs }));
+  });
+
+  app.get("/api/briefs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const brief = await programBriefRepo.get(id);
+    if (!brief) {
+      return reply.status(404).send({ error: "brief not found" });
+    }
+    return reply.send(BriefResponseSchema.parse({ brief }));
   });
 
   app.get("/stream", { websocket: true }, (connection) => {

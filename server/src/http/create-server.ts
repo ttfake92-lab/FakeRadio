@@ -36,6 +36,7 @@ import { createLikedSongsRepository } from "../user/liked-songs-repository.js";
 import { createSessionRepository } from "../user/session-repository.js";
 import { createTrackRegistry } from "../audio/track-registry.js";
 import { createCachedStorySourceAdapter } from "../adapters/story-source/cached-web-research-adapter.js";
+import { createProgramBriefRepository } from "../show/program-brief-repository.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -145,6 +146,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const effectiveWebResearchStatus = (options.webResearchAdapter || env.FAKERADIO_BRAVE_API_KEY) ? "ready" : "disabled";
 
   // Routes
+  const baseDir = options.baseDir ?? resolve(process.cwd());
+  const programBriefRepo = createProgramBriefRepository(baseDir);
   registerRoutes({
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus,
     ttsStatus: effectiveTtsStatus, tts, ttsCacheDir,
@@ -155,7 +158,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     storySourceStatus: effectiveStorySourceStatus,
     webResearchStatus: effectiveWebResearchStatus,
     neteaseAuth,
-    baseDir: resolve(process.cwd())
+    baseDir,
+    programBriefRepo
   });
 
   const schedulerLoop = createSchedulerLoop({

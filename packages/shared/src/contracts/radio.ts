@@ -75,6 +75,35 @@ export const ChatRequestSchema = z.object({
   message: z.string().min(1)
 });
 
+export const ProgramBriefTypeSchema = z.enum(["theme-show", "block-theme", "daily-show"]);
+export const ProgramBriefScopeSchema = z.enum(["full-show", "block"]);
+export const ProgramBriefPrioritySchema = z.enum(["user-requested", "daily-default"]);
+export const ProgramBriefStatusSchema = z.enum(["draft", "confirmed", "scheduled", "generating", "completed", "cancelled"]);
+
+export const ProgramBriefConstraintsSchema = z.object({
+  durationMinutes: z.number().int().positive().optional(),
+  avoidExplicit: z.boolean().optional(),
+  includeEra: z.string().optional(),
+  excludeTracks: z.array(z.string()).optional(),
+  includeTracks: z.array(z.string()).optional(),
+  moodHint: z.string().optional()
+});
+
+export const ProgramBriefSchema = z.object({
+  id: z.string().min(1),
+  type: ProgramBriefTypeSchema,
+  topic: z.string().min(1).optional(),
+  scope: ProgramBriefScopeSchema.optional(),
+  targetDate: z.string().min(1),
+  targetBlockAt: z.string().datetime().optional(),
+  priority: ProgramBriefPrioritySchema,
+  constraints: ProgramBriefConstraintsSchema.optional(),
+  status: ProgramBriefStatusSchema,
+  createdFromMessageId: z.string().min(1).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
 export const ChatResponseSchema = z.object({
   message: z.string().min(1),
   decision: DjDecisionSchema,
@@ -83,7 +112,8 @@ export const ChatResponseSchema = z.object({
     trackId: z.string().optional(),
     title: z.string().optional(),
     artist: z.string().optional()
-  }).optional()
+  }).optional(),
+  brief: ProgramBriefSchema.optional()
 });
 
 export const TasteResponseSchema = z.object({
@@ -251,35 +281,6 @@ export const LikedSongsDiagnosticsSchema = z.object({
   ).max(3)
 });
 
-export const ProgramBriefTypeSchema = z.enum(["theme-show", "block-theme", "daily-show"]);
-export const ProgramBriefScopeSchema = z.enum(["full-show", "block"]);
-export const ProgramBriefPrioritySchema = z.enum(["user-requested", "daily-default"]);
-export const ProgramBriefStatusSchema = z.enum(["draft", "confirmed", "scheduled", "generating", "completed", "cancelled"]);
-
-export const ProgramBriefConstraintsSchema = z.object({
-  durationMinutes: z.number().int().positive().optional(),
-  avoidExplicit: z.boolean().optional(),
-  includeEra: z.string().optional(),
-  excludeTracks: z.array(z.string()).optional(),
-  includeTracks: z.array(z.string()).optional(),
-  moodHint: z.string().optional()
-});
-
-export const ProgramBriefSchema = z.object({
-  id: z.string().min(1),
-  type: ProgramBriefTypeSchema,
-  topic: z.string().min(1).optional(),
-  scope: ProgramBriefScopeSchema.optional(),
-  targetDate: z.string().min(1),
-  targetBlockAt: z.string().datetime().optional(),
-  priority: ProgramBriefPrioritySchema,
-  constraints: ProgramBriefConstraintsSchema.optional(),
-  status: ProgramBriefStatusSchema,
-  createdFromMessageId: z.string().min(1).optional(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime()
-});
-
 export type Track = z.infer<typeof TrackSchema>;
 export type ContextFragment = z.infer<typeof ContextFragmentSchema>;
 export type TtsResult = z.infer<typeof TtsResultSchema>;
@@ -314,3 +315,14 @@ export type ProgramBriefPriority = z.infer<typeof ProgramBriefPrioritySchema>;
 export type ProgramBriefStatus = z.infer<typeof ProgramBriefStatusSchema>;
 export type ProgramBriefConstraints = z.infer<typeof ProgramBriefConstraintsSchema>;
 export type ProgramBrief = z.infer<typeof ProgramBriefSchema>;
+
+export const BriefsListResponseSchema = z.object({
+  briefs: z.array(ProgramBriefSchema)
+});
+
+export const BriefResponseSchema = z.object({
+  brief: ProgramBriefSchema
+});
+
+export type BriefsListResponse = z.infer<typeof BriefsListResponseSchema>;
+export type BriefResponse = z.infer<typeof BriefResponseSchema>;
