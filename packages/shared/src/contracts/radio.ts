@@ -394,6 +394,17 @@ export const ShowPlanResponseSchema = z.object({
 export type ShowPlansListResponse = z.infer<typeof ShowPlansListResponseSchema>;
 export type ShowPlanResponse = z.infer<typeof ShowPlanResponseSchema>;
 
+export const AddConstraintsRequestSchema = z.object({
+  planId: z.string().min(1),
+  constraints: ShowPlanBlockConstraintsSchema
+});
+export type AddConstraintsRequest = z.infer<typeof AddConstraintsRequestSchema>;
+
+export const AddConstraintsResponseSchema = z.object({
+  plan: ShowPlanSchema
+});
+export type AddConstraintsResponse = z.infer<typeof AddConstraintsResponseSchema>;
+
 export const ShowJobStatusSchema = z.enum([
   "pending",
   "running",
@@ -466,6 +477,7 @@ export const ShowProjectStatusSchema = z.enum([
   "draft",
   "generating",
   "ready",
+  "failed",
   "exported",
   "archived"
 ]);
@@ -522,3 +534,34 @@ export const ScheduleTonightResponseSchema = z.object({
   scheduledAt: z.string().datetime()
 });
 export type ScheduleTonightResponse = z.infer<typeof ScheduleTonightResponseSchema>;
+
+export const SettingsSchema = z.object({
+  researchEnabled: z.boolean().default(true),
+  providerMode: z.enum(["auto", "mock", "netease"]).default("auto"),
+  ttsProvider: z.enum(["edge", "mimo"]).default("edge"),
+  ttsVoice: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
+  mimoVoice: z.string().min(1).default("茉莉"),
+  tracePrivacy: z.enum(["full", "summary", "off"]).default("summary"),
+  externalTrackLimit: z.number().int().min(0).max(100).default(60),
+  dailyShowAvoidRecentPlay: z.boolean().default(true),
+  themeShowAvoidRecentPlay: z.boolean().default(false)
+});
+export type Settings = z.infer<typeof SettingsSchema>;
+
+export const SettingsResponseSchema = z.object({
+  settings: SettingsSchema
+});
+export type SettingsResponse = z.infer<typeof SettingsResponseSchema>;
+
+export const UpdateSettingsRequestSchema = z.object({
+  researchEnabled: z.boolean().optional(),
+  providerMode: z.enum(["auto", "mock", "netease"]).optional(),
+  ttsProvider: z.enum(["edge", "mimo"]).optional(),
+  ttsVoice: z.string().min(1).optional(),
+  mimoVoice: z.string().min(1).optional(),
+  tracePrivacy: z.enum(["full", "summary", "off"]).optional(),
+  externalTrackLimit: z.number().int().min(0).max(100).optional(),
+  dailyShowAvoidRecentPlay: z.boolean().optional(),
+  themeShowAvoidRecentPlay: z.boolean().optional()
+});
+export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>;
