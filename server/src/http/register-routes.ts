@@ -24,9 +24,13 @@ import {
   ScheduleTonightResponseSchema,
   ShowProjectsListResponseSchema,
   ShowProjectResponseSchema,
+  SettingsSchema,
+  SettingsResponseSchema,
+  UpdateSettingsRequestSchema,
   type RadioEpisode,
   type ProgramBrief,
-  type ShowPlan
+  type ShowPlan,
+  type Settings
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
@@ -38,10 +42,12 @@ import { formatRadioDate } from "../utils/time.js";
 import { proxyAndRecord } from "../audio/audio-recorder.js";
 import { startExportTask, getExportTask, getExportFilePath, exportShowProject } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
+import { executeScheduledJob, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import type { PlaybackState } from "./playback-state.js";
 import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
 import { handleChat } from "./chat-intent-router.js";
 import type { RegisterRoutesDeps } from "./types.js";
+import { createMockStorySourceAdapter } from "../adapters/story-source/mock-story-source-adapter.js";
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
@@ -480,6 +486,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         plan,
         job: completedJob,
         includeTrace: body?.includeTrace ?? true,
+        ttsCacheDir,
       });
 
       await showProjectRepo.update(id, { status: "exported" });
@@ -503,6 +510,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       "show-plan.json": "show-plan.json",
       "show-notes.md": "show-notes.md",
       "production-trace.jsonl": "production-trace.jsonl",
+      "show.mp3": "show.mp3",
     };
 
     if (file && allowedFiles[file]) {
@@ -513,7 +521,10 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       } catch {
         return reply.status(404).send({ error: "file not found" });
       }
-      const contentType = file.endsWith(".json") ? "application/json" : file.endsWith(".md") ? "text/markdown" : "application/jsonl";
+      const contentType = file.endsWith(".json") ? "application/json" : 
+        file.endsWith(".md") ? "text/markdown" : 
+        file.endsWith(".mp3") ? "audio/mpeg" :
+        "application/jsonl";
       return reply
         .header("content-type", contentType)
         .header("content-disposition", `attachment; filename="${file}"`)
@@ -566,6 +577,32 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       return reply.status(404).send({ error: "no active plan found for this brief" });
     }
     return reply.send(ShowPlanResponseSchema.parse({ plan: activePlan }));
+  });
+
+  app.post("/api/plans/add-constraints", async (request, reply) => {
+    const body = request.body as { planId?: string; constraints?: Record<string, unknown> };
+    const planId = body?.planId;
+    const constraints = body?.constraints;
+
+    if (!planId) {
+      return reply.status(400).send({ error: "planId is required" });
+    }
+
+    const existingPlan = await showPlanRepo.get(planId);
+    if (!existingPlan) {
+      return reply.status(404).send({ error: "plan not found" });
+    }
+
+    const brief = await programBriefRepo.get(existingPlan.briefId);
+    const newPlan = await showPlanGenerator.generateFromPlan(
+      existingPlan,
+      brief ?? existingPlan.briefSnapshot,
+      constraints as { preferEra?: string; avoidExplicit?: boolean; moodHint?: string } ?? {}
+    );
+
+    await showPlanRepo.save(newPlan);
+
+    return reply.send({ plan: newPlan });
   });
 
   app.post("/api/jobs", async (request, reply) => {
@@ -656,6 +693,26 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.send(ShowProjectResponseSchema.parse({ project }));
   });
 
+  app.delete("/api/shows/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = await showProjectRepo.get(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project not found" });
+    }
+    await showProjectRepo.delete(id);
+    return reply.send({ success: true });
+  });
+
+  app.delete("/api/shows/:id/trace", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = await showProjectRepo.get(id);
+    if (!project) {
+      return reply.status(404).send({ error: "project not found" });
+    }
+    await showProjectRepo.deleteTrace(id);
+    return reply.send({ success: true });
+  });
+
   // Generate Now API
   app.post("/api/shows/generate-now", async (request, reply) => {
     const body = GenerateNowRequestSchema.parse(request.body);
@@ -681,7 +738,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     }
 
     // Update project with active plan
-    project = await showProjectRepo.update(project.id, { 
+    project = await showProjectRepo.update(project.id, {
       activePlanId: activePlan.id,
       status: "generating"
     }) ?? project;
@@ -697,25 +754,72 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       await jobRegistry.addLog(startedJob.id, { level: "info", message: "Job started immediately", phase: "running" });
     }
 
+    const targetJobId = startedJob?.id ?? job.id;
+
     // Update project with active job
     project = await showProjectRepo.update(project.id, {
-      activeJobId: startedJob?.id ?? job.id
+      activeJobId: targetJobId
     }) ?? project;
 
     await showProjectRepo.appendTrace(project.id, {
       type: "job-started",
-      jobId: startedJob?.id ?? job.id,
+      jobId: targetJobId,
       briefId: brief.id,
       planId: activePlan.id,
       status: "generating"
     });
 
-    const projectWithTrace = await showProjectRepo.get(project.id);
+    // Execute the scheduled job to generate episodes
+    try {
+      const executionDeps: SchedulerExecutionDeps = {
+        planRepo: showPlanRepo,
+        showProjectRepo,
+        jobRegistry,
+        llm,
+        music,
+        tts,
+        ttsCacheDir,
+        weather,
+        calendar,
+        devices,
+        storySource,
+        publicMetadataAdapter: publicMetadataAdapter ?? webResearchAdapter ?? createMockStorySourceAdapter(),
+        webResearchAdapter: webResearchAdapter ?? publicMetadataAdapter ?? createMockStorySourceAdapter(),
+        likedSongs,
+        systemPrompt
+      };
 
-    return reply.status(201).send(GenerateNowResponseSchema.parse({
-      project: projectWithTrace ?? project,
-      job: startedJob ?? job
-    }));
+      await executeScheduledJob(executionDeps, brief.id, activePlan.id, targetJobId);
+
+      const finalJob = await jobRegistry.get(targetJobId);
+      const projectWithTrace = await showProjectRepo.get(project.id);
+
+      if (finalJob && (finalJob.status === "completed" || finalJob.status === "failed")) {
+        await showProjectRepo.update(project.id, {
+          status: finalJob.status === "completed" ? "ready" : "failed"
+        });
+      }
+
+      const updatedProject = await showProjectRepo.get(project.id);
+
+      return reply.status(201).send(GenerateNowResponseSchema.parse({
+        project: updatedProject ?? projectWithTrace ?? project,
+        job: finalJob ?? startedJob ?? job
+      }));
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "unknown error";
+      await jobRegistry.addLog(targetJobId, { level: "error", message: `executeScheduledJob failed: ${errorMsg}`, phase: "execution" });
+      await jobRegistry.fail(targetJobId, errorMsg);
+
+      const failedJob = await jobRegistry.get(targetJobId);
+      await showProjectRepo.update(project.id, { status: "failed" });
+      const projectWithTrace = await showProjectRepo.get(project.id);
+
+      return reply.status(500).send(GenerateNowResponseSchema.parse({
+        project: projectWithTrace ?? project,
+        job: failedJob ?? startedJob ?? job
+      }));
+    }
   });
 
   // Schedule Tonight API
@@ -770,6 +874,25 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       brief: updatedBrief ?? brief,
       scheduledAt
     }));
+  });
+
+  app.get("/api/settings", async (_request, reply) => {
+    const settings = await stateRepo.getPref<Settings>("show:settings");
+    const defaultSettings = SettingsSchema.parse({});
+    return reply.send(SettingsResponseSchema.parse({
+      settings: settings ?? defaultSettings
+    }));
+  });
+
+  app.put("/api/settings", async (request, reply) => {
+    const body = UpdateSettingsRequestSchema.parse(request.body);
+    const currentSettings = await stateRepo.getPref<Settings>("show:settings") ?? {};
+    const mergedSettings = SettingsSchema.parse({
+      ...currentSettings,
+      ...body
+    });
+    await stateRepo.upsertPref("show:settings", mergedSettings);
+    return reply.send(SettingsResponseSchema.parse({ settings: mergedSettings }));
   });
 
   app.get("/stream", { websocket: true }, (connection) => {
