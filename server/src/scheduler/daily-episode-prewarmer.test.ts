@@ -37,6 +37,27 @@ const TRACKS: Track[] = [
     artist: "FakeRadio Session",
     durationMs: 221000,
     source: "mock"
+  },
+  {
+    id: "mock-track-004",
+    title: "Afternoon Haze",
+    artist: "FakeRadio Session",
+    durationMs: 195000,
+    source: "mock"
+  },
+  {
+    id: "mock-track-005",
+    title: "Evening Protocol",
+    artist: "FakeRadio Session",
+    durationMs: 212000,
+    source: "mock"
+  },
+  {
+    id: "mock-track-006",
+    title: "Midnight Thread",
+    artist: "FakeRadio Session",
+    durationMs: 198000,
+    source: "mock"
   }
 ];
 
@@ -130,16 +151,51 @@ describe("runPrewarmForDate", () => {
 
     expect(results).toEqual([
       { blockAt: "07:00", prepared: 2, failed: 0, errors: [] },
-      { blockAt: "09:00", prepared: 1, failed: 1, errors: ["No track could be resolved"] }
+      { blockAt: "09:00", prepared: 2, failed: 0, errors: [] }
     ]);
 
     const claimed = await Promise.all([
       deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00"),
       deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00"),
+      deps.stateRepo.claimPreparedEpisode("2026-05-01", "09:00"),
       deps.stateRepo.claimPreparedEpisode("2026-05-01", "09:00")
     ]);
     const trackIds = claimed.map((entry) => entry?.episode.track.id);
 
+    expect(new Set(trackIds).size).toBe(4);
+  });
+
+  it("Daily Show avoids recently played tracks from state repository", async () => {
+    const deps = createPrewarmDeps();
+
+    await deps.stateRepo.recordPlayedTrack({
+      id: "played-001",
+      trackId: "mock-track-001",
+      title: "Morning Signal",
+      artist: "FakeRadio Session",
+      album: null,
+      source: "mock",
+      playedAt: new Date(2026, 3, 30, 10, 0, 0).toISOString()
+    });
+
+    const results = await runPrewarmForDate(
+      deps,
+      "2026-05-01",
+      [{ at: "07:00", label: "早晨", moodHint: "warm morning indie" }],
+      3,
+      "你是 FakeRadio DJ。"
+    );
+
+    expect(results).toEqual([{ blockAt: "07:00", prepared: 3, failed: 0, errors: [] }]);
+
+    const claimed = await Promise.all([
+      deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00"),
+      deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00"),
+      deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00")
+    ]);
+    const trackIds = claimed.map((entry) => entry?.episode.track.id);
+
+    expect(trackIds).not.toContain("mock-track-001");
     expect(new Set(trackIds).size).toBe(3);
   });
 });

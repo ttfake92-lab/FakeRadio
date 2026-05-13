@@ -210,6 +210,9 @@ export async function runPrewarmForDate(
 ): Promise<PrewarmResult[]> {
   const { stateRepo, nowProvider } = deps;
   const results: PrewarmResult[] = [];
+
+  const recentPlayed = await stateRepo.getRecentlyPlayed(30);
+  const recentlyPlayedTrackIds = new Set(recentPlayed.map((p) => p.trackId));
   const dateSelectedTrackIds = new Set<string>();
 
   for (const block of blocks) {
@@ -217,16 +220,15 @@ export async function runPrewarmForDate(
     let prepared = 0;
     let failed = 0;
 
-    // Check existing ready count for this specific block
     const blockStatus = await stateRepo.getBlockPrewarmStatus(targetDate, block.at);
     const existingReady = blockStatus.ready;
 
-    // Only generate if we need more
     const needed = Math.max(0, episodesPerBlock - existingReady);
 
     for (let i = 0; i < needed; i++) {
       try {
-        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt, dateSelectedTrackIds);
+        const excludedTrackIds = new Set<string>([...recentlyPlayedTrackIds, ...dateSelectedTrackIds]);
+        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt, excludedTrackIds);
         if ("error" in result) {
           await stateRepo.savePreparedEpisode({
             radioDate: targetDate,
