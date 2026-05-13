@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import type { NowResponse, Track, ProgramBrief, ShowPlan, ShowJob } from "@fakeradio/shared";
+import type { NowResponse, Track, ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
 import type { OnAirThemeId } from "./player-view-model";
 import type { FavoriteTrack } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
@@ -51,9 +51,15 @@ export type SkinStageProps = {
   productionBriefs?: ProgramBrief[];
   productionPlans?: ShowPlan[];
   productionJobs?: ShowJob[];
+  productionProjects?: ShowProject[];
   generationLogs?: { timestamp: number; level: string; phase?: string; message: string }[];
   isGenerating?: boolean;
   onOpenPanel?: (panelId: PanelId) => void;
+  onPauseJob?: () => void;
+  onResumeJob?: () => void;
+  onCancelJob?: () => void;
+  onAddConstraint?: (constraints: { preferEra?: string; moodHint?: string; avoidExplicit?: boolean }) => void;
+  onProjectsChanged?: () => void;
 };
 
 function generateTone(id: string): [string, string, string] {
@@ -106,9 +112,15 @@ export function SkinStage({
   productionBriefs,
   productionPlans,
   productionJobs,
+  productionProjects,
   generationLogs,
   isGenerating,
   onOpenPanel,
+  onPauseJob,
+  onResumeJob,
+  onCancelJob,
+  onAddConstraint,
+  onProjectsChanged,
 }: SkinStageProps) {
   const liked = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -224,24 +236,36 @@ export function SkinStage({
     }
   };
 
-  const exportTasks: ExportTask[] = (productionJobs ?? []).map((job) => {
-    const task: ExportTask = {
-      id: job.id,
-      projectId: job.planId,
-      status: job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "running" ? "running" : "pending",
-      createdAt: new Date(job.createdAt).getTime(),
-    };
-    if (job.completedAt) {
-      task.completedAt = new Date(job.completedAt).getTime();
-    }
-    if (job.error) {
-      task.error = job.error;
-    }
-    return task;
-  });
+  const exportTasks: ExportTask[] = (productionJobs ?? [])
+    .map((job) => {
+      let project = (productionProjects ?? []).find(p => p.activeJobId === job.id);
+      if (!project && job.briefId) {
+        project = (productionProjects ?? []).find(p => p.briefId === job.briefId);
+      }
+      if (!project) {
+        return null;
+      }
+      const task: ExportTask = {
+        id: job.id,
+        projectId: project.id,
+        status: job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "running" ? "running" : "pending",
+        createdAt: new Date(job.createdAt).getTime(),
+      };
+      if (job.completedAt) {
+        task.completedAt = new Date(job.completedAt).getTime();
+      }
+      if (job.error) {
+        task.error = job.error;
+      }
+      return task;
+    })
+    .filter((task): task is ExportTask => task !== null);
 
   const activeBrief = productionBriefs?.[0] ?? null;
   const activePlan = productionPlans?.find((p) => p.active) ?? null;
+  const activeJob = productionJobs?.find(job => 
+    ["pending", "running", "paused", "needs-replan"].includes(job.status)
+  ) ?? productionJobs?.[0] ?? null;
 
   return (
     <>
@@ -275,10 +299,12 @@ export function SkinStage({
         brief={activeBrief}
         showPlan={activePlan}
         jobs={productionJobs ?? []}
+        projects={productionProjects ?? []}
         isExpanded={panels.productionBoard.isExpanded}
         onToggleExpand={() => handlePanelToggle("productionBoard")}
         onClose={() => panels.productionBoard.isOpen && handlePanelToggle("productionBoard")}
         onExportStart={() => handlePanelToggle("exportQueue")}
+        onProjectsChanged={onProjectsChanged}
       />
 
       <GenerationConsole
@@ -289,9 +315,14 @@ export function SkinStage({
         currentPhase={isGenerating ? "generating" : ""}
         isExpanded={panels.generationConsole.isExpanded}
         isOpen={panels.generationConsole.isOpen}
-        isGenerating={isGenerating ?? false}
+        isGenerating={activeJob?.status === "running"}
+        jobStatus={activeJob?.status}
         onToggleExpand={() => handlePanelToggle("generationConsole")}
         onClose={() => panels.generationConsole.isOpen && handlePanelToggle("generationConsole")}
+        onPause={onPauseJob}
+        onResume={onResumeJob}
+        onCancel={onCancelJob}
+        onAddConstraint={onAddConstraint}
       />
 
       <ExportQueue

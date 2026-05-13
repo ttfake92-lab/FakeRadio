@@ -1,9 +1,9 @@
 "use client";
 
-import type { ChatResponse, FavoriteTrack, HealthResponse, NowResponse, PrewarmStatus } from "@fakeradio/shared";
+import type { ChatResponse, FavoriteTrack, HealthResponse, NowResponse, PrewarmStatus, ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNow, getPrewarmStatus, removeFavorite, sendChat } from "../../lib/api-client";
+import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNow, getPrewarmStatus, removeFavorite, sendChat, getBriefs, getShowPlans, getShowJobs, getShowProjects, pauseJob, resumeJob, cancelJob, markJobNeedsReplan, addConstraintsToPlan, type ShowPlanBlockConstraints } from "../../lib/api-client";
 import {
   buildOnAirClock,
   formatDuration,
@@ -66,6 +66,12 @@ export function PlayerShell() {
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
   const [selectedPersona, setSelectedPersona] = useState<Persona>(Object.values(PERSONAS)[0]!);
   const [showSettings, setShowSettings] = useState(false);
+  const [productionBriefs, setProductionBriefs] = useState<ProgramBrief[]>([]);
+  const [productionPlans, setProductionPlans] = useState<ShowPlan[]>([]);
+  const [productionJobs, setProductionJobs] = useState<ShowJob[]>([]);
+  const [productionProjects, setProductionProjects] = useState<ShowProject[]>([]);
+
+  const activePlan = productionPlans.find((p) => p.active) ?? null;
 
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -120,17 +126,89 @@ export function PlayerShell() {
 
   const mood = onAirModeLabel;
 
+  // Find active job (first pending/running/paused/needs-replan job)
+  const activeJob = useMemo(() => {
+    return productionJobs.find(job => 
+      ["pending", "running", "paused", "needs-replan"].includes(job.status)
+    ) ?? productionJobs[0] ?? null;
+  }, [productionJobs]);
+
+  const handlePauseJob = useCallback(async () => {
+    if (!activeJob) return;
+    try {
+      const response = await pauseJob(activeJob.id);
+      if (response.job) {
+        setProductionJobs((prev) =>
+          prev.map((job) => (job.id === response.job!.id ? response.job! : job))
+        );
+      }
+    } catch {
+      // Ignore errors for now
+    }
+  }, [activeJob]);
+
+  const handleResumeJob = useCallback(async () => {
+    if (!activeJob) return;
+    try {
+      const response = await resumeJob(activeJob.id);
+      if (response.job) {
+        setProductionJobs((prev) =>
+          prev.map((job) => (job.id === response.job!.id ? response.job! : job))
+        );
+      }
+    } catch {
+      // Ignore errors for now
+    }
+  }, [activeJob]);
+
+  const handleCancelJob = useCallback(async () => {
+    if (!activeJob) return;
+    try {
+      const response = await cancelJob(activeJob.id);
+      if (response.job) {
+        setProductionJobs((prev) =>
+          prev.map((job) => (job.id === response.job!.id ? response.job! : job))
+        );
+      }
+    } catch {
+      // Ignore errors for now
+    }
+  }, [activeJob]);
+
+  const handleAddConstraint = useCallback(async (constraints: ShowPlanBlockConstraints) => {
+    if (!activePlan) return;
+    try {
+      const response = await addConstraintsToPlan(activePlan.id, constraints);
+      if (response.plan) {
+        setProductionPlans((prev) => [...prev, response.plan]);
+        if (activeJob) {
+          await markJobNeedsReplan(activeJob.id, "用户追加新约束，触发重新规划");
+        }
+      }
+    } catch {
+      // Ignore errors for now
+    }
+  }, [activePlan, activeJob]);
+
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     playback.setError(null);
     try {
-      const [nowResponse, healthResponse, favoritesResponse, prewarmStatusResponse] = await Promise.all([
-        getNow(), getHealth(), getFavorites(), getPrewarmStatus().catch(() => null)
+      const [nowResponse, healthResponse, favoritesResponse, prewarmStatusResponse, briefsResponse, plansResponse, jobsResponse, projectsResponse] = await Promise.all([
+        getNow(), getHealth(), getFavorites(), getPrewarmStatus().catch(() => null),
+        getBriefs().catch(() => ({ briefs: [] })),
+        getShowPlans().catch(() => ({ plans: [] })),
+        getShowJobs().catch(() => ({ jobs: [] })),
+        getShowProjects().catch(() => ({ projects: [] }))
       ]);
       setNow(nowResponse);
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
       setPrewarmStatus(prewarmStatusResponse);
+      setProductionBriefs(briefsResponse.briefs ?? []);
+      setProductionPlans(plansResponse.plans ?? []);
+      setProductionJobs(jobsResponse.jobs ?? []);
+      setProductionProjects(projectsResponse.projects ?? []);
       // Sync theme with time of day on load, while preserving any explicit skin choice.
       const hour = new Date().getHours();
       const savedTheme = localStorage.getItem("fakeradio-theme") as OnAirThemeId | null;
@@ -418,6 +496,14 @@ export function PlayerShell() {
           onSeek={handleSeek}
           onToggleFavorite={handleToggleFavorite}
           onNext={handleNext}
+          productionBriefs={productionBriefs}
+          productionPlans={productionPlans}
+          productionJobs={productionJobs}
+          productionProjects={productionProjects}
+          onPauseJob={handlePauseJob}
+          onResumeJob={handleResumeJob}
+          onCancelJob={handleCancelJob}
+          onAddConstraint={handleAddConstraint}
         />
       ) : (
       <OnAirTerminal
