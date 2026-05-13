@@ -1,6 +1,6 @@
 # FakeRadio Show Production - 自动化状态
 
-> 最后更新: 2026-05-14 Issue 12 实现已提交，待浏览器验收
+> **最后更新: 2026-05-14 项目状态检查完成，开发服务器正在运行**
 
 ## Current Phase
 
@@ -79,36 +79,35 @@
 
 ## Last Known Verification
 
-### 2026-05-14 完整验证
+### 2026-05-14 项目状态检查
 
 ```
 pnpm test: 555/555 passed
 pnpm typecheck: 通过
 git status: working tree clean
-端口 3302: 已被占用，开发服务器可能已在运行
-修复内容：
-- 统一了 generate-now 与 scheduler 的默认 adapter 策略
-- generate-now 不再硬编码 mock adapter，与 scheduler 使用相同的策略
-- create-server.ts 中统一创建默认适配器并在各处使用
-- 保持 gatherEpisodeSources() 行为兼容性
-- 所有测试通过，包括之前修复的版本化和 contract 查询功能
+端口 3302: 开发服务器正在运行（进程ID: 1041, 1192, 71534）
+验证内容：
+- 所有测试通过，包括 Phase 1-4 主线功能和 Issue 09-12 的修复
 - 所有类型检查通过
+- 工作区干净，已提交最新变更
+- 开发服务器正在运行，可进行浏览器验收
 ```
 
 ## Next Action
 
-下一轮由用户本地执行浏览器验收（HITL）：
-1. 确认开发服务器已在运行（端口 3302 已被占用），或重新运行 `pnpm dev` 启动本地服务器
-2. 在浏览器中访问 http://localhost:3302
-3. 验证 320px / 375px / 1440px 三种视图下：
+下一轮由用户选择：
+选项 1: 本地执行浏览器验收（HITL）：
+1. 开发服务器已在 http://localhost:3302 运行
+2. 验证 320px / 375px / 1440px 三种视图下：
    - Production Board 可折叠，正确展示 show -> block -> episode
    - Generation Console 可展开，显示日志流和控制按钮
    - Export Queue 可折叠，显示下载入口
-4. 完成验收后更新 issue 状态
+
+选项 2: 跳过浏览器验收，直接推进 Phase 2/3 的后续功能开发
 
 ## Blockers
 
-- **浏览器验收受限（HITL blocked）**：需要用户本地完成 320px / 375px / 1440px 的 Production Board、Generation Console、Export Queue 验收。
+- **浏览器验收受限（HITL blocked）：** 需要用户本地完成 320px / 375px / 1440px 的 Production Board、Generation Console、Export Queue 验收。
 
 ## 修改的文件（已提交）
 
