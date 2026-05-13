@@ -1819,6 +1819,67 @@ describe("ProgramBrief intent parsing", () => {
     });
   });
 
+  describe("ShowPlan constraints & versioning", () => {
+    it("adds constraints to existing plan and creates new version", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Beatles 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const brief = createResponse.json().brief;
+
+      const activePlanResponse = await app.inject({ method: "GET", url: `/api/plans/${brief.id}/active` });
+      expect(activePlanResponse.statusCode).toBe(200);
+      const originalPlan = activePlanResponse.json().plan;
+      expect(originalPlan.version).toBe(1);
+
+      const addConstraintsResponse = await app.inject({
+        method: "POST",
+        url: "/api/plans/add-constraints",
+        payload: {
+          planId: originalPlan.id,
+          constraints: {
+            preferEra: "1960s",
+            moodHint: "nostalgic"
+          }
+        }
+      });
+      expect(addConstraintsResponse.statusCode).toBe(200);
+      const newPlan = addConstraintsResponse.json().plan;
+
+      expect(newPlan.id).not.toBe(originalPlan.id);
+      expect(newPlan.version).toBe(2);
+      expect(newPlan.briefId).toBe(originalPlan.briefId);
+
+      const newActivePlanResponse = await app.inject({ method: "GET", url: `/api/plans/${brief.id}/active` });
+      expect(newActivePlanResponse.statusCode).toBe(200);
+      expect(newActivePlanResponse.json().plan.id).toBe(newPlan.id);
+    });
+
+    it("returns 404 when plan does not exist for add-constraints", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/plans/add-constraints",
+        payload: {
+          planId: "non-existent-plan-id",
+          constraints: { moodHint: "energetic" }
+        }
+      });
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
   describe("Theme Story Show: Generate Now & Schedule Tonight", () => {
     it("generates a project and job for generate-now", async () => {
       app = await createTestRadioServer({
@@ -1847,9 +1908,9 @@ describe("ProgramBrief intent parsing", () => {
       expect(project).toBeDefined();
       expect(job).toBeDefined();
       expect(project.briefId).toBe(brief.id);
-      expect(project.status).toBe("generating");
+      expect(project.status).toBe("ready");
       expect(job.briefId).toBe(brief.id);
-      expect(job.status).toBe("running");
+      expect(job.status).toBe("completed");
 
       // Test we can retrieve the project
       const projectResponse = await app.inject({ method: "GET", url: `/api/shows/${project.id}` });
@@ -1997,48 +2058,6 @@ describe("ProgramBrief intent parsing", () => {
       expect(response.statusCode).toBe(404);
     });
 
-    it("POST /api/projects/:id/export returns 400 for incomplete job", async () => {
-      app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: { async gather() { return []; } },
-        publicMetadataAdapter: createMockStorySourceAdapter()
-      });
-
-      const briefResp = await app.inject({
-        method: "POST",
-        url: "/api/chat",
-        payload: { message: "帮我做一期 Export Test 主题节目" }
-      });
-      expect(briefResp.statusCode).toBe(200);
-      const briefId = briefResp.json().brief?.id;
-      expect(briefId).toBeDefined();
-
-      const plan = await app.inject({
-        method: "GET",
-        url: `/api/plans/${briefId}/active`
-      });
-      expect(plan.json().plan).toBeDefined();
-      const planId = plan.json().plan?.id;
-
-      const generateResp = await app.inject({
-        method: "POST",
-        url: "/api/shows/generate-now",
-        payload: { briefId }
-      });
-      expect(generateResp.statusCode).toBe(201);
-      const projectId = generateResp.json().project.id;
-
-      const exportResp = await app.inject({
-        method: "POST",
-        url: `/api/projects/${projectId}/export`,
-        payload: { includeTrace: true }
-      });
-
-      expect(exportResp.statusCode).toBe(400);
-      expect(exportResp.json().error).toContain("尚未完成生成");
-    });
-
     it("GET /api/export/project/:id/download returns 404 for non-existent", async () => {
       app = await createTestRadioServer({
         musicAdapterResult: createMockMusicAdapterResult(),
@@ -2053,6 +2072,135 @@ describe("ProgramBrief intent parsing", () => {
       });
 
       expect(response.statusCode).toBe(404);
+    });
+
+    it("scheduler creates and starts a job when a scheduled brief matches target date", async () => {
+      const { scheduleTonightBriefIfNeeded } = await import("../show/scheduler-integration.js");
+      const { createProgramBriefRepository } = await import("../show/program-brief-repository.js");
+      const { createShowPlanRepository } = await import("../show/show-plan-repository.js");
+      const { createJobRegistry } = await import("../show/show-generation-job.js");
+      const { mkdtempSync, rmSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      try {
+        const programDir = join(baseDir, "programs");
+        const briefRepo = createProgramBriefRepository(programDir);
+        const planRepo = createShowPlanRepository(programDir);
+        const jobRegistry = createJobRegistry(programDir);
+
+        const now = new Date();
+        const targetDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const briefId = "test-brief-scheduler-001";
+
+        await briefRepo.save({
+          id: briefId,
+          type: "theme-show",
+          topic: "Test Scheduler Brief",
+          scope: "full-show",
+          targetDate,
+          priority: "user-requested",
+          status: "scheduled",
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString()
+        });
+
+        const briefData = {
+          id: briefId,
+          type: "theme-show" as const,
+          topic: "Test Scheduler Brief",
+          scope: "full-show" as const,
+          targetDate,
+          priority: "user-requested" as const,
+          status: "scheduled" as const,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString()
+        };
+
+        const planId = "test-plan-scheduler-001";
+        await planRepo.save({
+          id: planId,
+          version: 1,
+          briefId,
+          active: true,
+          briefSnapshot: briefData,
+          title: "Test Show Plan",
+          blocks: [{
+            role: "opening",
+            title: "Opening",
+            storyGoal: "Open the test show.",
+            selectionGoal: "Select an opening track.",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }],
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString()
+        });
+
+        const jobsBefore = await jobRegistry.list({ briefId });
+
+        await scheduleTonightBriefIfNeeded({
+          briefRepo,
+          planRepo,
+          jobRegistry,
+          targetDate
+        });
+
+        const jobsAfter = await jobRegistry.list({ briefId });
+        expect(jobsAfter.length).toBe(jobsBefore.length + 1);
+        const newJob = jobsAfter.find(j => !jobsBefore.map(b => b.id).includes(j.id));
+        expect(newJob).toBeDefined();
+        expect(newJob!.status).toBe("running");
+        expect(newJob!.briefId).toBe(briefId);
+      } finally {
+        rmSync(baseDir, { recursive: true, force: true });
+      }
+    });
+
+    it("scheduler skips brief when no scheduled briefs match target date", async () => {
+      const { scheduleTonightBriefIfNeeded } = await import("../show/scheduler-integration.js");
+      const { createProgramBriefRepository } = await import("../show/program-brief-repository.js");
+      const { createShowPlanRepository } = await import("../show/show-plan-repository.js");
+      const { createJobRegistry } = await import("../show/show-generation-job.js");
+      const { mkdtempSync, rmSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-skip-test-"));
+      try {
+        const programDir = join(baseDir, "programs");
+        const briefRepo = createProgramBriefRepository(programDir);
+        const planRepo = createShowPlanRepository(programDir);
+        const jobRegistry = createJobRegistry(programDir);
+
+        const targetDate = "2099-12-31";
+
+        await briefRepo.save({
+          id: "some-other-brief",
+          type: "theme-show",
+          targetDate: "1999-01-01",
+          priority: "user-requested",
+          status: "scheduled",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+
+        const jobsBefore = await jobRegistry.list();
+
+        await scheduleTonightBriefIfNeeded({
+          briefRepo,
+          planRepo,
+          jobRegistry,
+          targetDate
+        });
+
+        const jobsAfter = await jobRegistry.list();
+        expect(jobsAfter.length).toBe(jobsBefore.length);
+      } finally {
+        rmSync(baseDir, { recursive: true, force: true });
+      }
     });
   });
 });

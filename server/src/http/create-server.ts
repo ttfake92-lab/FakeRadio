@@ -41,6 +41,7 @@ import { createShowPlanRepository } from "../show/show-plan-repository.js";
 import { createShowPlanGenerator } from "../show/show-plan-generator.js";
 import { createJobRegistry } from "../show/show-generation-job.js";
 import { createShowProjectRepository } from "../show/show-project-repository.js";
+import { scheduleTonightBriefIfNeeded, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -208,30 +209,63 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     nowProvider,
     onPrewarmTick: async () => {
       if (!env.FAKERADIO_PREWARM_ENABLED) return;
+
+      const todayDate = formatRadioDate(nowProvider());
       const tomorrow = new Date(nowProvider());
       tomorrow.setDate(tomorrow.getDate() + 1);
-      const targetDate = formatRadioDate(tomorrow);
+      const tomorrowDate = formatRadioDate(tomorrow);
+
+      try {
+        await scheduleTonightBriefIfNeeded(
+          {
+            briefRepo: programBriefRepo,
+            planRepo: showPlanRepo,
+            jobRegistry,
+            targetDate: todayDate
+          },
+          {
+            planRepo: showPlanRepo,
+            showProjectRepo,
+            jobRegistry,
+            llm,
+            music,
+            tts,
+            ttsCacheDir,
+            weather,
+            calendar,
+            devices,
+            storySource,
+            publicMetadataAdapter: options.publicMetadataAdapter,
+            webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
+            likedSongs,
+            systemPrompt
+          }
+        );
+      } catch (err) {
+        console.error(`[prewarm] Theme show scheduler failed for ${todayDate}:`, err);
+      }
+
       const tomorrowPlan = buildTodayPlan(tomorrow, userPreferences.playlists);
-      const canRun = await shouldRunPrewarm(prewarmDeps, targetDate);
+      const canRun = await shouldRunPrewarm(prewarmDeps, tomorrowDate);
       if (!canRun) {
-        console.log(`[prewarm] Already ran for ${targetDate}, skipping.`);
+        console.log(`[prewarm] Daily prewarm already ran for ${tomorrowDate}, skipping.`);
         return;
       }
-      console.log(`[prewarm] Starting prewarm for ${targetDate}...`);
+      console.log(`[prewarm] Starting daily prewarm for ${tomorrowDate}...`);
       try {
         const results = await runPrewarmForDate(
           prewarmDeps,
-          targetDate,
+          tomorrowDate,
           tomorrowPlan.blocks,
           env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
           systemPrompt
         );
         const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
         const totalFailed = results.reduce((s, r) => s + r.failed, 0);
-        console.log(`[prewarm] Completed for ${targetDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
-        await markPrewarmRunComplete(prewarmDeps, targetDate);
+        console.log(`[prewarm] Daily prewarm completed for ${tomorrowDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
+        await markPrewarmRunComplete(prewarmDeps, tomorrowDate);
       } catch (err) {
-        console.error(`[prewarm] Prewarm failed for ${targetDate}:`, err);
+        console.error(`[prewarm] Daily prewarm failed for ${tomorrowDate}:`, err);
       }
     }
   });
