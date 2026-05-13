@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ConstraintDialog } from "./constraint-dialog";
 
 export type GenerationLogEntry = {
   timestamp: number;
@@ -10,6 +11,12 @@ export type GenerationLogEntry = {
   details?: string;
 };
 
+export type ShowPlanBlockConstraints = {
+  preferEra?: string;
+  avoidExplicit?: boolean;
+  moodHint?: string;
+};
+
 export type GenerationConsoleProps = {
   isExpanded: boolean;
   isOpen: boolean;
@@ -17,10 +24,12 @@ export type GenerationConsoleProps = {
   currentPhase?: string;
   onToggleExpand: () => void;
   onClose: () => void;
-  onPause?: () => void;
-  onCancel?: () => void;
-  onAddConstraint?: () => void;
+  onPause?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+  onAddConstraint?: ((constraints: ShowPlanBlockConstraints) => void) | undefined;
+  onResume?: (() => void) | undefined;
   isGenerating?: boolean;
+  jobStatus?: "pending" | "running" | "paused" | "needs-replan" | "cancelled" | "failed" | "completed" | undefined;
 };
 
 export function GenerationConsole({
@@ -33,9 +42,12 @@ export function GenerationConsole({
   onPause,
   onCancel,
   onAddConstraint,
+  onResume,
   isGenerating = false,
+  jobStatus,
 }: GenerationConsoleProps) {
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const [isConstraintDialogOpen, setIsConstraintDialogOpen] = useState(false);
 
   useEffect(() => {
     if (isExpanded && logsEndRef.current) {
@@ -43,10 +55,23 @@ export function GenerationConsole({
     }
   }, [logs, isExpanded]);
 
+  const handleConstraintSubmit = (constraints: ShowPlanBlockConstraints) => {
+    if (onAddConstraint) {
+      onAddConstraint(constraints);
+    }
+    setIsConstraintDialogOpen(false);
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div
+    <>
+      <ConstraintDialog
+        isOpen={isConstraintDialogOpen}
+        onClose={() => setIsConstraintDialogOpen(false)}
+        onSubmit={handleConstraintSubmit}
+      />
+      <div
       style={{
         position: "fixed",
         bottom: 80,
@@ -65,8 +90,7 @@ export function GenerationConsole({
     >
       <ConsoleHeader
         isExpanded={isExpanded}
-        isGenerating={isGenerating}
-        {...(currentPhase !== undefined && { currentPhase })}
+        jobStatus={jobStatus ?? undefined}
         onToggleExpand={onToggleExpand}
         onClose={onClose}
       />
@@ -74,31 +98,34 @@ export function GenerationConsole({
       {isExpanded && (
         <ConsoleContent
           logs={logs}
-          {...(currentPhase !== undefined && { currentPhase })}
-          {...(onPause !== undefined && { onPause })}
-          {...(onCancel !== undefined && { onCancel })}
-          {...(onAddConstraint !== undefined && { onAddConstraint })}
+          currentPhase={currentPhase}
+          jobStatus={jobStatus ?? undefined}
+          onPause={jobStatus === "running" ? onPause : undefined}
+          onResume={jobStatus === "paused" || jobStatus === "needs-replan" ? onResume : undefined}
+          onCancel={jobStatus && ["pending", "running", "paused", "needs-replan"].includes(jobStatus) ? onCancel : undefined}
+          onOpenConstraintDialog={jobStatus === "running" ? () => setIsConstraintDialogOpen(true) : undefined}
           isGenerating={isGenerating}
           logsEndRef={logsEndRef}
         />
       )}
     </div>
+    </>
   );
 }
 
 function ConsoleHeader({
   isExpanded,
-  isGenerating,
-  currentPhase,
+  jobStatus,
   onToggleExpand,
   onClose,
 }: {
   isExpanded: boolean;
-  isGenerating: boolean;
-  currentPhase?: string;
+  jobStatus?: string | undefined;
   onToggleExpand: () => void;
   onClose: () => void;
 }) {
+  const isActive = jobStatus && ["pending", "running", "paused", "needs-replan"].includes(jobStatus ?? "");
+
   return (
     <div
       style={{
@@ -117,7 +144,7 @@ function ConsoleHeader({
         <span style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>
           {isExpanded ? "Generation Console" : "生成控制台"}
         </span>
-        {isGenerating && (
+        {isActive && (
           <span
             style={{
               width: 8,
@@ -127,11 +154,6 @@ function ConsoleHeader({
               animation: "pulse 1.5s infinite",
             }}
           />
-        )}
-        {currentPhase && !isExpanded && (
-          <span style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.5)" }}>
-            {currentPhase}
-          </span>
         )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -160,18 +182,22 @@ function ConsoleContent({
   logs,
   currentPhase,
   onPause,
+  onResume,
   onCancel,
-  onAddConstraint,
+  onOpenConstraintDialog,
   isGenerating,
   logsEndRef,
+  jobStatus,
 }: {
   logs: GenerationLogEntry[];
-  currentPhase?: string;
-  onPause?: () => void;
-  onCancel?: () => void;
-  onAddConstraint?: () => void;
+  currentPhase?: string | undefined;
+  onPause?: (() => void) | undefined;
+  onResume?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+  onOpenConstraintDialog?: (() => void) | undefined;
   isGenerating: boolean;
   logsEndRef: React.RefObject<HTMLDivElement | null>;
+  jobStatus?: string | undefined;
 }) {
   const [showTrace, setShowTrace] = useState(false);
 
@@ -186,45 +212,58 @@ function ConsoleContent({
           gap: 8,
         }}
       >
-        {isGenerating && (
-          <>
-            {onPause && (
-              <button
-                onClick={onPause}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  background: "transparent",
-                  color: "#fff",
-                  fontSize: 11,
-                  cursor: "pointer",
-                }}
-              >
-                暂停
-              </button>
-            )}
-            {onCancel && (
-              <button
-                onClick={onCancel}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                  border: "1px solid rgba(248, 113, 113, 0.3)",
-                  background: "rgba(248, 113, 113, 0.1)",
-                  color: "#f87171",
-                  fontSize: 11,
-                  cursor: "pointer",
-                }}
-              >
-                取消
-              </button>
-            )}
-          </>
-        )}
-        {onAddConstraint && (
+        {/* Always show control buttons if available, not just when isGenerating is true */}
+        {onPause && (
           <button
-            onClick={onAddConstraint}
+            onClick={onPause}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              border: "1px solid rgba(255, 255, 255, 0.2)",
+              background: "transparent",
+              color: "#fff",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            暂停
+          </button>
+        )}
+        {onResume && (
+          <button
+            onClick={onResume}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              border: "1px solid rgba(74, 222, 128, 0.3)",
+              background: "rgba(74, 222, 128, 0.1)",
+              color: "#4ade80",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            恢复
+          </button>
+        )}
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              border: "1px solid rgba(248, 113, 113, 0.3)",
+              background: "rgba(248, 113, 113, 0.1)",
+              color: "#f87171",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            取消
+          </button>
+        )}
+        {onOpenConstraintDialog && (
+          <button
+            onClick={onOpenConstraintDialog}
             style={{
               padding: "4px 10px",
               borderRadius: 4,

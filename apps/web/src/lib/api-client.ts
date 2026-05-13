@@ -11,11 +11,16 @@ import {
   NextResponseSchema,
   NowResponseSchema,
   PrewarmStatusSchema,
+  ShowJobResponseSchema,
   ShowJobsListResponseSchema,
+  ShowPlanResponseSchema,
   ShowPlansListResponseSchema,
   ShowProjectsListResponseSchema,
   TasteResponseSchema,
-  TodayPlanResponseSchema
+  TodayPlanResponseSchema,
+  SettingsResponseSchema,
+  type Settings,
+  type UpdateSettingsRequest
 } from "@fakeradio/shared";
 
 export function getServerBaseUrl() {
@@ -161,7 +166,7 @@ export async function getShowJobs(briefId?: string) {
 }
 
 export async function getShowProjects() {
-  const response = await fetch(buildApiUrl("/api/projects"));
+  const response = await fetch(buildApiUrl("/api/shows"));
   if (!response.ok) {
     return { projects: [] };
   }
@@ -196,4 +201,112 @@ export async function downloadProjectFile(projectId: string, file: string) {
     throw new Error(`Failed to download ${file}: ${response.status}`);
   }
   return response.blob();
+}
+
+export async function pauseJob(jobId: string) {
+  const response = await fetch(buildApiUrl(`/api/jobs/${jobId}/pause`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Pause failed: ${response.status}`);
+  }
+  return ShowJobResponseSchema.parse(await response.json());
+}
+
+export async function resumeJob(jobId: string) {
+  const response = await fetch(buildApiUrl(`/api/jobs/${jobId}/resume`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Resume failed: ${response.status}`);
+  }
+  return ShowJobResponseSchema.parse(await response.json());
+}
+
+export async function cancelJob(jobId: string) {
+  const response = await fetch(buildApiUrl(`/api/jobs/${jobId}/cancel`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Cancel failed: ${response.status}`);
+  }
+  return ShowJobResponseSchema.parse(await response.json());
+}
+
+export async function markJobNeedsReplan(jobId: string, reason?: string) {
+  const response = await fetch(buildApiUrl(`/api/jobs/${jobId}/needs-replan`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Replan failed: ${response.status}`);
+  }
+  return ShowJobResponseSchema.parse(await response.json());
+}
+
+export type ShowPlanBlockConstraints = {
+  preferEra?: string;
+  avoidExplicit?: boolean;
+  moodHint?: string;
+};
+
+export async function addConstraintsToPlan(planId: string, constraints: ShowPlanBlockConstraints) {
+  const response = await fetch(buildApiUrl("/api/plans/add-constraints"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ planId, constraints }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Add constraints failed: ${response.status}`);
+  }
+  return ShowPlanResponseSchema.parse(await response.json());
+}
+
+export async function getSettings() {
+  const response = await fetch(buildApiUrl("/api/settings"));
+  if (!response.ok) {
+    throw new Error(`Failed to get settings: ${response.status}`);
+  }
+  return SettingsResponseSchema.parse(await response.json());
+}
+
+export async function updateSettings(settings: UpdateSettingsRequest) {
+  const response = await fetch(buildApiUrl("/api/settings"), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Failed to update settings: ${response.status}`);
+  }
+  return SettingsResponseSchema.parse(await response.json());
+}
+
+export async function deleteProject(projectId: string) {
+  const response = await fetch(buildApiUrl(`/api/shows/${projectId}`), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Failed to delete project: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function deleteProjectTrace(projectId: string) {
+  const response = await fetch(buildApiUrl(`/api/shows/${projectId}/trace`), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Failed to delete trace: ${response.status}`);
+  }
+  return response.json();
 }

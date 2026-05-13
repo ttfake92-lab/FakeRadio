@@ -1,39 +1,84 @@
 "use client";
 
 import { useState } from "react";
-import type { ProgramBrief, ShowPlan, ShowJob } from "@fakeradio/shared";
-import { exportProject } from "../../lib/api-client";
+import type { ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
+import { exportProject, deleteProject, deleteProjectTrace } from "../../lib/api-client";
 
 export type ProductionBoardProps = {
   brief?: ProgramBrief | null;
   showPlan?: ShowPlan | null;
   jobs?: ShowJob[];
+  projects?: ShowProject[];
   isExpanded: boolean;
   onToggleExpand: () => void;
   onClose: () => void;
   onExportStart?: (projectId: string) => void;
+  onProjectsChanged?: (() => void) | undefined;
 };
 
-export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExpand, onClose, onExportStart }: ProductionBoardProps) {
+export function ProductionBoard({ brief, showPlan, jobs, projects, isExpanded, onToggleExpand, onClose, onExportStart, onProjectsChanged }: ProductionBoardProps) {
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [includeTrace, setIncludeTrace] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const completedJob = jobs?.find((j) => j.status === "completed");
+  
+  let activeProject: ShowProject | undefined;
+  if (selectedProjectId && projects) {
+    activeProject = projects.find(p => p.id === selectedProjectId);
+  } else if (completedJob && projects) {
+    activeProject = projects.find(p => p.activeJobId === completedJob.id) || 
+      (completedJob.briefId ? projects.find(p => p.briefId === completedJob.briefId) : undefined);
+  }
 
   const handleExport = async () => {
-    if (!completedJob) return;
+    if (!activeProject) return;
     setIsExporting(true);
     setExportError(null);
     try {
-      await exportProject(completedJob.planId, { includeTrace });
+      await exportProject(activeProject.id, { includeTrace });
       if (onExportStart) {
-        onExportStart(completedJob.planId);
+        onExportStart(activeProject.id);
       }
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "Export failed");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!activeProject) return;
+    if (!confirm(`确定要删除节目 "${activeProject.slug}" 吗？`)) return;
+    setIsDeleting(true);
+    try {
+      await deleteProject(activeProject.id);
+      setSelectedProjectId(null);
+      if (onProjectsChanged) {
+        onProjectsChanged();
+      }
+    } catch (e) {
+      console.error("Delete failed:", e);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteTrace = async () => {
+    if (!activeProject) return;
+    if (!confirm("确定要删除该节目的制作 trace 吗？")) return;
+    setIsDeleting(true);
+    try {
+      await deleteProjectTrace(activeProject.id);
+      if (onProjectsChanged) {
+        onProjectsChanged();
+      }
+    } catch (e) {
+      console.error("Delete trace failed:", e);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -93,16 +138,25 @@ export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExp
 
       {isExpanded && (
         <div style={{ padding: 16, maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
-          {brief || showPlan ? (
+          <ProjectSelector
+            projects={projects ?? []}
+            selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
+          />
+          
+          {brief || showPlan || activeProject ? (
             <ShowProjectView
               {...(brief !== undefined && { brief })}
               {...(showPlan !== undefined && { showPlan })}
               {...(jobs !== undefined && { jobs })}
-              {...(completedJob !== undefined && { completedJob })}
+              project={activeProject}
               includeTrace={includeTrace}
               onIncludeTraceChange={setIncludeTrace}
               onExport={handleExport}
+              onDeleteProject={handleDeleteProject}
+              onDeleteTrace={handleDeleteTrace}
               isExporting={isExporting}
+              isDeleting={isDeleting}
               exportError={exportError}
             />
           ) : (
@@ -114,35 +168,81 @@ export function ProductionBoard({ brief, showPlan, jobs, isExpanded, onToggleExp
   );
 }
 
+function ProjectSelector({
+  projects,
+  selectedProjectId,
+  onSelectProject,
+}: {
+  projects: ShowProject[];
+  selectedProjectId: string | null;
+  onSelectProject: (id: string | null) => void;
+}) {
+  if (projects.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+        历史节目
+      </div>
+      <select
+        value={selectedProjectId ?? ""}
+        onChange={(e) => onSelectProject(e.target.value || null)}
+        style={{
+          width: "100%",
+          padding: "8px 12px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.1)",
+          background: "rgba(255,255,255,0.05)",
+          color: "#fff",
+          fontSize: 12,
+        }}
+      >
+        <option value="">当前制作</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.slug} · {p.status}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function ShowProjectView({
   brief,
   showPlan,
   jobs,
-  completedJob,
+  project,
   includeTrace = true,
   onIncludeTraceChange,
   onExport,
+  onDeleteProject,
+  onDeleteTrace,
   isExporting = false,
+  isDeleting = false,
   exportError = null,
 }: {
   brief?: ProgramBrief | null;
   showPlan?: ShowPlan | null;
   jobs?: ShowJob[];
-  completedJob?: ShowJob;
+  project?: ShowProject | undefined;
   includeTrace?: boolean;
   onIncludeTraceChange?: (v: boolean) => void;
   onExport?: () => void;
+  onDeleteProject?: () => void;
+  onDeleteTrace?: () => void;
   isExporting?: boolean;
+  isDeleting?: boolean;
   exportError?: string | null;
 }) {
   return (
     <div style={{ color: "#fff" }}>
       <div style={{ marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#e8a04a" }}>
-          {brief?.topic ?? "未命名节目"}
+          {brief?.topic ?? project?.slug ?? "未命名节目"}
         </h3>
         <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(255, 255, 255, 0.6)" }}>
-          {brief?.type ?? "theme-show"} · {brief?.status ?? "draft"}
+          {brief?.type ?? "theme-show"} · {brief?.status ?? project?.status ?? "draft"}
         </p>
       </div>
 
@@ -172,9 +272,9 @@ function ShowProjectView({
         </div>
       )}
 
-      {completedJob && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255, 255, 255, 0.1)" }}>
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.5)", marginBottom: 8 }}>
+      {project && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
             导出节目
           </div>
           
@@ -192,7 +292,7 @@ function ShowProjectView({
 
               <button
                 onClick={onExport}
-                disabled={isExporting}
+                disabled={isExporting || isDeleting}
                 style={{
                   width: "100%",
                   padding: "10px 16px",
@@ -202,8 +302,9 @@ function ShowProjectView({
                   color: "#000",
                   fontSize: 13,
                   fontWeight: 600,
-                  cursor: isExporting ? "not-allowed" : "pointer",
-                  opacity: isExporting ? 0.6 : 1,
+                  cursor: (isExporting || isDeleting) ? "not-allowed" : "pointer",
+                  opacity: (isExporting || isDeleting) ? 0.6 : 1,
+                  marginBottom: 8,
                 }}
               >
                 {isExporting ? "导出中…" : "📦 导出节目包"}
@@ -216,6 +317,52 @@ function ShowProjectView({
               {exportError}
             </p>
           )}
+
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+              管理
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {onDeleteTrace && project.productionTracePath && (
+                <button
+                  onClick={onDeleteTrace}
+                  disabled={isDeleting || isExporting}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "transparent",
+                    color: "#fff",
+                    fontSize: 12,
+                    cursor: (isDeleting || isExporting) ? "not-allowed" : "pointer",
+                    opacity: (isDeleting || isExporting) ? 0.5 : 1,
+                  }}
+                >
+                  删除 Trace
+                </button>
+              )}
+              {onDeleteProject && (
+                <button
+                  onClick={onDeleteProject}
+                  disabled={isDeleting || isExporting}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(248,113,113,0.5)",
+                    background: "transparent",
+                    color: "#f87171",
+                    fontSize: 12,
+                    cursor: (isDeleting || isExporting) ? "not-allowed" : "pointer",
+                    opacity: (isDeleting || isExporting) ? 0.5 : 1,
+                  }}
+                >
+                  删除节目
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
