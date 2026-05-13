@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createShowPlanGenerator } from "./show-plan-generator.js";
-import type { ProgramBrief } from "@fakeradio/shared";
+import type { ProgramBrief, ShowPlanBlock, ShowPlanBlockConstraints } from "@fakeradio/shared";
 
 describe("ShowPlanGenerator", () => {
   function createTestBrief(overrides: Partial<ProgramBrief> = {}): ProgramBrief {
@@ -63,5 +63,45 @@ describe("ShowPlanGenerator", () => {
 
     expect(plan.blocks[0].role).toBe("opening");
     expect(plan.blocks[plan.blocks.length - 1].role).toBe("closing");
+  });
+
+  it("generates new version with additional constraints from existing plan", async () => {
+    const generator = createShowPlanGenerator();
+    const brief = createTestBrief();
+    const existingPlan = await generator.generate(brief);
+
+    const additionalConstraints: ShowPlanBlockConstraints = {
+      preferEra: "1970s",
+      moodHint: "nostalgic"
+    };
+
+    const newPlan = await generator.generateFromPlan(existingPlan, brief, additionalConstraints);
+
+    expect(newPlan.id).not.toBe(existingPlan.id);
+    expect(newPlan.version).toBe(existingPlan.version + 1);
+    expect(newPlan.active).toBe(true);
+    expect(newPlan.briefId).toBe(existingPlan.briefId);
+
+    const newBlock = newPlan.blocks[1];
+    expect(newBlock.constraints.preferEra).toBe("1970s");
+    expect(newBlock.constraints.moodHint).toBe("nostalgic");
+  });
+
+  it("generates new version when job is in needs-replan state", async () => {
+    const generator = createShowPlanGenerator();
+    const brief = createTestBrief();
+    const originalPlan = await generator.generate(brief);
+
+    const replanConstraints: ShowPlanBlockConstraints = {
+      avoidExplicit: true,
+      moodHint: "energetic"
+    };
+
+    const replannedPlan = await generator.generateFromPlan(originalPlan, brief, replanConstraints);
+
+    expect(replannedPlan.version).toBe(2);
+    expect(replannedPlan.active).toBe(true);
+    expect(replannedPlan.briefId).toBe(originalPlan.briefId);
+    expect(replannedPlan.blocks.some(b => b.constraints.avoidExplicit === true)).toBe(true);
   });
 });

@@ -1,8 +1,9 @@
-import type { ShowPlan, ProgramBrief, ShowPlanBlock } from "@fakeradio/shared";
+import type { ShowPlan, ProgramBrief, ShowPlanBlock, ShowPlanBlockConstraints } from "@fakeradio/shared";
 import { randomUUID } from "node:crypto";
 
 export type ShowPlanGenerator = {
   generate(brief: ProgramBrief): Promise<ShowPlan>;
+  generateFromPlan(existingPlan: ShowPlan, brief: ProgramBrief, additionalConstraints: ShowPlanBlockConstraints): Promise<ShowPlan>;
 };
 
 export function createShowPlanGenerator(): ShowPlanGenerator {
@@ -113,6 +114,33 @@ export function createShowPlanGenerator(): ShowPlanGenerator {
         briefSnapshot: brief,
         blocks,
         totalDurationMinutes: 60,
+        createdAt: now,
+        updatedAt: now
+      };
+    },
+
+    async generateFromPlan(
+      existingPlan: ShowPlan,
+      brief: ProgramBrief,
+      additionalConstraints: ShowPlanBlockConstraints
+    ): Promise<ShowPlan> {
+      const now = new Date().toISOString();
+      const newBlocks = existingPlan.blocks.map((block) => ({
+        ...block,
+        constraints: {
+          ...block.constraints,
+          ...additionalConstraints
+        }
+      }));
+
+      return {
+        id: `plan-${randomUUID()}`,
+        briefId: existingPlan.briefId,
+        version: existingPlan.version + 1,
+        active: true,
+        briefSnapshot: brief,
+        blocks: newBlocks,
+        totalDurationMinutes: existingPlan.totalDurationMinutes ?? 60,
         createdAt: now,
         updatedAt: now
       };
