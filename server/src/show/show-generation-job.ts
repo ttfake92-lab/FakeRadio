@@ -131,12 +131,28 @@ export function createJobRegistry(baseDir: string): JobRegistry {
     };
   }
 
-  function updateJob(id: string, updater: (job: ShowJob) => ShowJob): ShowJob | null {
+  function updateJob(
+    id: string, 
+    updater: (job: ShowJob) => ShowJob,
+    requireStatusChange: boolean = true
+  ): ShowJob | null {
     const row = stmtGet.get(id) as JobRow | undefined;
     if (!row) return null;
     const job = mapRowToJob(row);
     const updated = updater(job);
-    if (updated.status === job.status) return null;
+    
+    // Check if status changed and if it's a valid transition
+    if (updated.status !== job.status) {
+      if (!isValidTransition(job.status, updated.status)) {
+        return null;
+      }
+    } else if (requireStatusChange) {
+      // If we require status change but none happened, return null
+      // This is for status transition methods like start(), pause(), etc.
+      return null;
+    }
+    
+    // Otherwise, proceed with update (for addLog(), addTrace(), etc.)
     stmtUpdate.run(jobRowToUpdateParams(updated));
     return updated;
   }
@@ -246,7 +262,7 @@ export function createJobRegistry(baseDir: string): JobRegistry {
         const now = new Date().toISOString();
         const fullLog: ProductionLog = { ...log, timestamp: now };
         return { ...job, logs: [...job.logs, fullLog], updatedAt: now };
-      });
+      }, false);
     },
 
     async addTrace(id: string, entry: Omit<TechTraceEntry, "timestamp">): Promise<ShowJob | null> {
@@ -254,7 +270,7 @@ export function createJobRegistry(baseDir: string): JobRegistry {
         const now = new Date().toISOString();
         const fullEntry: TechTraceEntry = { ...entry, timestamp: now };
         return { ...job, trace: [...job.trace, fullEntry], updatedAt: now };
-      });
+      }, false);
     }
   };
 }

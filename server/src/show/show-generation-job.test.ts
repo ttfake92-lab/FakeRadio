@@ -167,4 +167,74 @@ describe("ShowGenerationJob", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("logs and trace persistence", () => {
+    it("adds and persists production logs", async () => {
+      const job = await registry.create({ briefId: "brief-001", planId: "plan-001" });
+      
+      const log1 = await registry.addLog(job.id, {
+        level: "info",
+        message: "Job created",
+        category: "job"
+      });
+      
+      const log2 = await registry.addLog(job.id, {
+        level: "info",
+        message: "Job started",
+        category: "job"
+      });
+      
+      expect(log1).not.toBeNull();
+      expect(log2).not.toBeNull();
+      
+      // Read back from database
+      const retrieved = await registry.get(job.id);
+      expect(retrieved?.logs).toHaveLength(2);
+      expect(retrieved?.logs[0].message).toBe("Job created");
+      expect(retrieved?.logs[1].message).toBe("Job started");
+    });
+
+    it("adds and persists tech trace entries", async () => {
+      const job = await registry.create({ briefId: "brief-001", planId: "plan-001" });
+      
+      const trace1 = await registry.addTrace(job.id, {
+        type: "llm",
+        summary: "LLM call to generate show plan",
+        durationMs: 150
+      });
+      
+      const trace2 = await registry.addTrace(job.id, {
+        type: "tts",
+        summary: "TTS synthesis for opening",
+        durationMs: 80
+      });
+      
+      expect(trace1).not.toBeNull();
+      expect(trace2).not.toBeNull();
+      
+      // Read back from database
+      const retrieved = await registry.get(job.id);
+      expect(retrieved?.trace).toHaveLength(2);
+      expect(retrieved?.trace[0].summary).toBe("LLM call to generate show plan");
+      expect(retrieved?.trace[1].summary).toBe("TTS synthesis for opening");
+    });
+
+    it("persists logs/trace without requiring status change", async () => {
+      const job = await registry.create({ briefId: "brief-001", planId: "plan-001" });
+      
+      // Start job first
+      await registry.start(job.id);
+      
+      // Add multiple logs without changing status
+      await registry.addLog(job.id, { level: "info", message: "Generating episodes", category: "generation" });
+      await registry.addLog(job.id, { level: "info", message: "Fetching tracks", category: "generation" });
+      await registry.addTrace(job.id, { type: "music", summary: "Fetched 5 tracks", durationMs: 200 });
+      
+      // Read back
+      const retrieved = await registry.get(job.id);
+      expect(retrieved?.status).toBe("running"); // status still running
+      expect(retrieved?.logs).toHaveLength(2);
+      expect(retrieved?.trace).toHaveLength(1);
+    });
+  });
 });
