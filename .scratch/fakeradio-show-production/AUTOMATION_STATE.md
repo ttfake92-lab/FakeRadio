@@ -70,6 +70,13 @@
 - [x] 更新 AUTOMATION_STATE.md
 - [x] 提交所有变更
 
+### 2026-05-14 项目状态检查 ✅
+- [x] 验证 git status：工作区干净，本地领先 origin/main 一个 commit
+- [x] 运行完整测试：555/555 测试通过
+- [x] 运行 typecheck：通过
+- [x] 发现端口 3302 已被占用，开发服务器可能已在运行
+- [x] 更新 AUTOMATION_STATE.md
+
 ## Last Known Verification
 
 ### 2026-05-14 完整验证
@@ -77,6 +84,8 @@
 ```
 pnpm test: 555/555 passed
 pnpm typecheck: 通过
+git status: working tree clean
+端口 3302: 已被占用，开发服务器可能已在运行
 修复内容：
 - 统一了 generate-now 与 scheduler 的默认 adapter 策略
 - generate-now 不再硬编码 mock adapter，与 scheduler 使用相同的策略
@@ -89,12 +98,13 @@ pnpm typecheck: 通过
 ## Next Action
 
 下一轮由用户本地执行浏览器验收（HITL）：
-1. 运行 `pnpm dev` 启动本地服务器
-2. 在浏览器中访问，验证 320px / 375px / 1440px 三种视图下：
+1. 确认开发服务器已在运行（端口 3302 已被占用），或重新运行 `pnpm dev` 启动本地服务器
+2. 在浏览器中访问 http://localhost:3302
+3. 验证 320px / 375px / 1440px 三种视图下：
    - Production Board 可折叠，正确展示 show -> block -> episode
    - Generation Console 可展开，显示日志流和控制按钮
    - Export Queue 可折叠，显示下载入口
-3. 完成验收后更新 issue 状态
+4. 完成验收后更新 issue 状态
 
 ## Blockers
 
