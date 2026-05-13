@@ -288,6 +288,51 @@ describe("createThemeSelectionEngine", () => {
     return { id, artist, title, album: "Test Album", source };
   }
 
+  describe("excludedTrackIds", () => {
+    it("excludes specified track IDs from selection", () => {
+      const userLibrary = [
+        createTrack("track-1", "Artist A", "Song 1"),
+        createTrack("track-2", "Artist B", "Song 2"),
+        createTrack("track-3", "Artist C", "Song 3")
+      ];
+      const externalTracks: Track[] = [];
+
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start with a song")
+      ]);
+
+      const excludedIds = new Set(["track-1"]);
+      const selection = engine.selectForPlan(plan, userLibrary, externalTracks, undefined, excludedIds);
+      const selectedTracks = extractTracksFromSelection(selection);
+
+      expect(selectedTracks.some(t => t.id === "track-1")).toBe(false);
+      expect(selectedTracks.some(t => t.id === "track-2" || t.id === "track-3")).toBe(true);
+    });
+
+    it("falls back to available tracks when excludedIds reduce the pool", () => {
+      const userLibrary = [
+        createTrack("track-1", "Artist A", "Song 1"),
+        createTrack("track-2", "Artist B", "Song 2")
+      ];
+      const externalTracks = [
+        createTrack("ext-1", "Artist C", "Ext Song", "mock")
+      ];
+
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start with a song"),
+        createMockBlock("signature-era", "Classic hits")
+      ]);
+
+      const excludedIds = new Set(["track-1", "track-2"]);
+      const selection = engine.selectForPlan(plan, userLibrary, externalTracks, undefined, excludedIds);
+      const selectedTracks = extractTracksFromSelection(selection);
+
+      // Should select the external track since user library tracks are excluded
+      expect(selectedTracks.length).toBeGreaterThan(0);
+      expect(selectedTracks.every(t => t.id === "ext-1" || t.source === "external")).toBe(true);
+    });
+  });
+
   function createBlock(role: ShowPlanBlock["role"], selectionGoal: string): ShowPlanBlock {
     return {
       role,

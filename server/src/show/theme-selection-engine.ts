@@ -36,7 +36,8 @@ export type ThemeSelectionEngine = {
     plan: ShowPlan,
     userLibrary: Track[],
     externalTracks: Track[],
-    userAuthorizedExternalRatio?: number
+    userAuthorizedExternalRatio?: number,
+    excludedTrackIds?: Set<string>
   ): ShowSelection;
 };
 
@@ -60,13 +61,14 @@ function selectTracksForBlock(
   externalTracks: Track[],
   externalCap: number,
   totalNeeded: number,
-  existingSelections: TrackSelection[]
+  existingSelections: TrackSelection[],
+  excludedTrackIds: Set<string> = new Set()
 ): TrackSelection[] {
   const selections: TrackSelection[] = [...existingSelections];
   const usedIds = new Set(selections.map(s => s.track.id));
 
-  const remainingUserLibrary = userLibrary.filter(t => !usedIds.has(t.id));
-  const remainingExternal = externalTracks.filter(t => !usedIds.has(t.id));
+  const remainingUserLibrary = userLibrary.filter(t => !usedIds.has(t.id) && !excludedTrackIds.has(t.id));
+  const remainingExternal = externalTracks.filter(t => !usedIds.has(t.id) && !excludedTrackIds.has(t.id));
 
   const currentExternal = selections.filter(s => s.source === "external").length;
   const currentTotal = selections.length;
@@ -142,7 +144,8 @@ export function createThemeSelectionEngine(): ThemeSelectionEngine {
       plan: ShowPlan,
       userLibrary: Track[],
       externalTracks: Track[],
-      userAuthorizedExternalRatio?: number
+      userAuthorizedExternalRatio?: number,
+      excludedTrackIds: Set<string> = new Set()
     ): ShowSelection {
       const externalCap = computeExternalCap(userAuthorizedExternalRatio);
       const userIndex = buildTrackIndex(userLibrary);
@@ -161,7 +164,8 @@ export function createThemeSelectionEngine(): ThemeSelectionEngine {
           externalTracks,
           externalCap,
           episodeCount,
-          []
+          [],
+          excludedTrackIds
         );
 
         externalCount += blockSelections.filter(s => s.source === "external").length;
