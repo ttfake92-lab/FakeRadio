@@ -4,22 +4,49 @@ import type { ShowProject, ShowPlan, ShowJob } from "@fakeradio/shared";
 import type * as FsPromises from "node:fs/promises";
 import type * as FsModule from "node:fs";
 
-vi.mock("node:fs/promises", (): typeof FsPromises => ({
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  access: vi.fn().mockResolvedValue(undefined),
-  readFile: vi.fn().mockResolvedValue(""),
-  readdir: vi.fn().mockResolvedValue([]),
-}));
+const { mockFsPromises, mockFfmpegAvailable } = vi.hoisted(() => {
+  let ffmpegAvailable = true;
+  return {
+    mockFsPromises: {
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      access: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn().mockImplementation((path: string) => {
+        if (typeof path === "string" && path.includes(".json")) {
+          return Promise.resolve(JSON.stringify({
+            track: { id: "track-1", title: "Test Track", artist: "Test Artist", audioUrl: "/audio/test.mp3" },
+            story: { text: "Test story", audioUrl: "/cache/tts/test.mp3", type: "background" },
+            sources: [],
+            playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
+          }));
+        }
+        return Promise.resolve(Buffer.from("fake mp3 content"));
+      }),
+      readdir: vi.fn().mockResolvedValue(["episode-000-opening.json"]),
+    },
+    mockFfmpegAvailable: {
+      get value() { return ffmpegAvailable; },
+      set value(v: boolean) { ffmpegAvailable = v; },
+    },
+  };
+});
 
-vi.mock("node:fs", (): typeof FsModule => ({
+vi.mock("node:fs/promises", () => mockFsPromises);
+vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   createWriteStream: vi.fn(),
 }));
-vi.mock("./audio-mixer.js");
 vi.mock("./show-notes-generator.js", () => ({
   generateShowNotes: vi.fn().mockReturnValue("# FakeRadio · 2026-05-12\n\nMock notes.\n"),
 }));
+
+vi.mock("./audio-mixer.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./audio-mixer.js")>();
+  return {
+    ...original,
+    checkFfmpegAvailable: vi.fn().mockImplementation(() => Promise.resolve(mockFfmpegAvailable.value)),
+  };
+});
 
 const makeBrief = () => ({
   id: "brief-1",
@@ -68,6 +95,7 @@ const makeProject = (overrides: Partial<ShowProject> = {}): ShowProject => ({
   slug: "2026-05-12-bee-gees",
   status: "ready",
   directoryPath: "/tmp/fakeradio/shows/2026-05-12-bee-gees",
+  showAudioPath: "/tmp/fakeradio/shows/2026-05-12-bee-gees/show-original.mp3",
   createdAt: "2026-05-12T10:00:00Z",
   updatedAt: "2026-05-12T10:05:00Z",
   ...overrides,
@@ -148,5 +176,44 @@ describe("exportShowProject", () => {
     await expect(
       exportShowProject({ project, plan, job, includeTrace: true })
     ).rejects.toThrow("节目尚未完成生成");
+  });
+
+  it("throws with diagnostic error when no audio segments available", async () => {
+    const project = makeProject({ showAudioPath: undefined });
+    const plan = makeShowPlan();
+    const job = makeJob();
+
+    mockFsPromises.readdir.mockResolvedValueOnce(["episode-000-opening.json"] as any);
+    mockFsPromises.readFile.mockResolvedValueOnce(JSON.stringify({
+      track: { id: "track-1", title: "Test Track", artist: "Test Artist" },
+      story: { text: "Test story", type: "background" },
+      sources: [],
+      playback: {}
+    }) as any);
+
+    await expect(
+      exportShowProject({ project, plan, job, includeTrace: true })
+    ).rejects.toThrow("无法生成音频：未找到任何可拼接的音频片段");
+  });
+
+  it("throws with diagnostic error when ffmpeg is not available", async () => {
+    const project = makeProject({ showAudioPath: undefined });
+    const plan = makeShowPlan();
+    const job = makeJob();
+
+    mockFfmpegAvailable.value = false;
+    mockFsPromises.readdir.mockResolvedValueOnce(["episode-000-opening.json"] as any);
+    mockFsPromises.readFile.mockResolvedValueOnce(JSON.stringify({
+      track: { id: "track-1", title: "Test Track", artist: "Test Artist", audioUrl: "/audio/test.mp3" },
+      story: { text: "Test story", audioUrl: "/cache/tts/test.mp3", type: "background" },
+      sources: [],
+      playback: {}
+    }) as any);
+
+    await expect(
+      exportShowProject({ project, plan, job, includeTrace: true })
+    ).rejects.toThrow("无法生成音频：FFmpeg 未安装");
+    
+    mockFfmpegAvailable.value = true;
   });
 });
