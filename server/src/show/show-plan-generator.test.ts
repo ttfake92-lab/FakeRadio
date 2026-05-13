@@ -77,7 +77,7 @@ describe("ShowPlanGenerator", () => {
 
     const newPlan = await generator.generateFromPlan(existingPlan, brief, additionalConstraints);
 
-    expect(newPlan.id).not.toBe(existingPlan.id);
+    expect(newPlan.id).toBe(existingPlan.id);
     expect(newPlan.version).toBe(existingPlan.version + 1);
     expect(newPlan.active).toBe(true);
     expect(newPlan.briefId).toBe(existingPlan.briefId);

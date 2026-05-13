@@ -1,7 +1,7 @@
 import type { DjDecision, RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
 import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
 import { buildContextWindow, type ContextEnvironment } from "../context/context-builder.js";
-import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createMockMusicAdapter, createMockTtsAdapter, createMockStorySourceAdapter } from "../adapters/index.js";
 import type { MemoryRepository } from "../state/memory-repository.js";
 import type { PlaybackState } from "./playback-state.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
@@ -246,26 +246,25 @@ export async function gatherEpisodeSources(
   }
 
   let metadataSources: RadioEpisode["sources"] = [];
-  try {
-    const publicMetadata = publicMetadataAdapter ?? (await import("../adapters/index.js")).createPublicMetadataAdapter();
-    const adapterSources = await publicMetadata.gather(track);
-    metadataSources = adapterSources.length > 0 ? adapterSources : [];
-  } catch (error) {
-    console.warn("Public metadata gather failed:", error);
-    metadataSources = [];
+  if (publicMetadataAdapter) {
+    try {
+      const adapterSources = await publicMetadataAdapter.gather(track);
+      metadataSources = adapterSources.length > 0 ? adapterSources : [];
+    } catch (error) {
+      console.warn("Public metadata gather failed:", error);
+      metadataSources = [];
+    }
   }
 
   let webSources: RadioEpisode["sources"] = [];
-  try {
-    const { createWebResearchAdapter } = await import("../adapters/index.js");
-    const webResearch = webResearchAdapter ?? createWebResearchAdapter(
-      braveApiKey ? { apiKey: braveApiKey } : {}
-    );
-    const adapterSources = await webResearch.gather(track);
-    webSources = adapterSources.length > 0 ? adapterSources : [];
-  } catch (error) {
-    console.warn("Web research gather failed:", error);
-    webSources = [];
+  if (webResearchAdapter) {
+    try {
+      const adapterSources = await webResearchAdapter.gather(track);
+      webSources = adapterSources.length > 0 ? adapterSources : [];
+    } catch (error) {
+      console.warn("Web research gather failed:", error);
+      webSources = [];
+    }
   }
 
   const combinedSources = [...lyricSources, ...metadataSources, ...webSources];

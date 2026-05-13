@@ -22,6 +22,7 @@ export type SchedulerIntegrationDeps = {
 };
 
 export type SchedulerExecutionDeps = {
+  briefRepo: ProgramBriefRepository;
   planRepo: ShowPlanRepository;
   showProjectRepo: ShowProjectRepository;
   jobRegistry: JobRegistry;
@@ -157,7 +158,7 @@ export async function executeScheduledJob(
   planId: string,
   jobId: string
 ): Promise<void> {
-  const { planRepo, showProjectRepo, jobRegistry } = deps;
+  const { briefRepo, planRepo, showProjectRepo, jobRegistry } = deps;
 
   const plans = await planRepo.list({ briefId, activeOnly: true });
   const activePlan = plans[0];
@@ -242,6 +243,7 @@ export async function executeScheduledJob(
     });
 
     await showProjectRepo.update(project.id, { status: "ready" });
+    await briefRepo.updateStatus(briefId, "completed");
 
     const completedJob = await jobRegistry.complete(jobId);
     if (completedJob) {
@@ -253,6 +255,7 @@ export async function executeScheduledJob(
     }
   } else {
     await jobRegistry.fail(jobId, `All ${activePlan.blocks.length} blocks failed`);
+    await briefRepo.updateStatus(briefId, "failed");
   }
 }
 

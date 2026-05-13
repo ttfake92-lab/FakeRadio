@@ -134,14 +134,14 @@ export function createShowPlanGenerator(): ShowPlanGenerator {
       }));
 
       return {
-        id: `plan-${randomUUID()}`,
+        id: existingPlan.id,
         briefId: existingPlan.briefId,
         version: existingPlan.version + 1,
         active: true,
         briefSnapshot: brief,
         blocks: newBlocks,
         totalDurationMinutes: existingPlan.totalDurationMinutes ?? 60,
-        createdAt: now,
+        createdAt: existingPlan.createdAt,
         updatedAt: now
       };
     }

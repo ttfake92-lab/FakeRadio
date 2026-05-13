@@ -1853,7 +1853,7 @@ describe("ProgramBrief intent parsing", () => {
       expect(addConstraintsResponse.statusCode).toBe(200);
       const newPlan = addConstraintsResponse.json().plan;
 
-      expect(newPlan.id).not.toBe(originalPlan.id);
+      expect(newPlan.id).toBe(originalPlan.id);
       expect(newPlan.version).toBe(2);
       expect(newPlan.briefId).toBe(originalPlan.briefId);
 

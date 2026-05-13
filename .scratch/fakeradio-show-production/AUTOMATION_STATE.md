@@ -1,21 +1,25 @@
 # FakeRadio Show Production - 自动化状态
 
-> 最后更新: 2026-05-13 21:01
+> 最后更新: 2026-05-14 Issue 12 实现已提交，待浏览器验收
 
 ## Current Phase
 
-**Phase 1-4 主线全部完成，已同步到 origin/main**
+**Phase 1-4 主线实现已提交，Issue 12 已关闭（HITL 验收除外）**
 
 ## Current Active Task
 
 **Next Action 锚点（续跑用）：**
-Phase 1-4 主线已全部完成并 push 完毕。当前无 active task，进入"已完成待领新任务"状态。
+等待用户本地浏览器验收（HITL）：320px / 375px / 1440px 的 Production Board、Generation Console、Export Queue 验证。
+
+## Current Active Issue
+
+暂无（Issue 12 代码实现已提交，剩余浏览器验收为 HITL blocker）
 
 ## Done Log
 
-### Phase 1-4 主线 ✅
+### Phase 1-4 主线（实现已提交）
 - [x] ProgramBrief contract + intent parsing
-- [x] ShowPlan versioning
+- [x] ShowPlan versioning 初始实现
 - [x] Background job + generation logs
 - [x] Theme research + story selection
 - [x] ShowProject storage
@@ -36,93 +40,84 @@ Phase 1-4 主线已全部完成并 push 完毕。当前无 active task，进入"
 ### Issue 10: Show Production 审计回归修复 ✅
 - [x] `getShowProjects()` 调用 `/api/shows`，Production Board 拿到真实 ShowProject
 - [x] ExportQueue 只使用真实 `projectId`，无 fallback
-- [x] `generate-now` 完整 orchestration，HTTP 测试 555/555 通过
+- [x] `generate-now` 完整 orchestration，HTTP 测试曾验证通过
 - [x] `schedule-tonight` 和 scheduler 复用同一套执行路径
 - [x] `create-server.ts` 移除 `as any`
 - [x] Export Package 音频失败 fast-fail，不再生成 0 字节文件
 - [x] trace 合并 ShowProject trace 与 job trace
-- [x] 用户流级验证通过
 
-### Issue p3-01: Generation Console 控制功能 ✅
-- [x] 前端 api-client 添加 pauseJob, resumeJob, cancelJob 函数
-- [x] Generation Console 按钮回调连接完整
-- [x] 状态守卫正确（running -> pause/cancel, paused/needs-replan -> resume/cancel）
+### Issue 11: 完成声明后的审计回归修复 ✅
+- [x] `gatherEpisodeSources()` 默认不再创建真实 public metadata / web research provider
+- [x] `ProgramBriefStatusSchema` 新增 `failed` 状态
+- [x] `executeScheduledJob()` 成功时将 brief 标记为 `completed`，失败时标记为 `failed`
+- [x] `generate-now` API 在开始执行时标记为 `generating`，失败时标记为 `failed`
 
-### Issue p3-02: ShowPlan 追加约束功能 ✅
-- [x] ShowPlanGenerator 支持 generateFromPlan
-- [x] `/api/plans/add-constraints` POST API
-- [x] constraint-dialog.tsx 组件
-- [x] 追加约束后自动触发 needs-replan
+### Issue 12: Contract、版本化与验收回归修复 ✅（代码已提交）
+- [x] 修 `GET /api/plans?briefId=...`：支持 briefId 查询参数，避免前端拿到全局 plans
+- [x] 修 `GET /api/jobs?briefId=...`：支持 briefId 查询参数，避免前端拿到全局 jobs
+- [x] 修 `ShowPlanGenerator.generateFromPlan()`：追加约束生成同一 `ShowPlan.id` 的新 version，旧 active version 由 repo 自动失活
+- [x] 修复相关测试，验证版本化语义正确
+- [x] 统一 `generate-now` 与 scheduler 的默认 adapter 策略
+- [x] 运行完整测试套件：555/555 测试通过
+- [x] typecheck 通过
+- [x] 整理工作区并提交代码变更
+- [ ] HTTP / 浏览器验收验证（HITL，用户本地执行）
 
-### 本次会话 (2026-05-13 21:01) ✅
-- [x] 确认测试和类型检查状态：555/555 tests passed，100% typecheck
-- [x] `git push origin main` 成功，72 commits 同步到 origin/main
-- [x] git status 干净，与 origin/main 同步
+### 本次工作区整理 ✅
+- [x] 检查 git status 确认 dirty 状态
+- [x] 运行完整测试：555/555 测试通过
+- [x] 运行 typecheck：通过
+- [x] 更新 AUTOMATION_STATE.md
+- [x] 提交所有变更
 
-## 验证结果
+## Last Known Verification
 
-### 测试门禁 ✅
+### 2026-05-14 完整验证
+
 ```
-pnpm test: 555/555 passed (2026-05-13 21:01)
-pnpm typecheck: 100% passed (2026-05-13 21:01)
+pnpm test: 555/555 passed
+pnpm typecheck: 通过
+修复内容：
+- 统一了 generate-now 与 scheduler 的默认 adapter 策略
+- generate-now 不再硬编码 mock adapter，与 scheduler 使用相同的策略
+- create-server.ts 中统一创建默认适配器并在各处使用
+- 保持 gatherEpisodeSources() 行为兼容性
+- 所有测试通过，包括之前修复的版本化和 contract 查询功能
+- 所有类型检查通过
 ```
-
-### HTTP 用户流测试 ✅
-```
-server/src/http/generate-now-execution.test.ts: 6/6 passed
-server/src/http/export-incomplete-job.test.ts: 1/1 passed
-server/src/show/scheduler-integration.test.ts: 5/5 passed
-server/src/http/create-server.test.ts: 71/71 passed
-```
-
-### Git Push ✅
-```
-git push origin main → e013ab5..9860b2d main -> main
-72 commits pushed successfully
-```
-
-## 工作区状态
-
-- `git status`: 干净，与 origin/main 同步
-- 无待 push commits
-- 无 dirty worktree
 
 ## Next Action
 
-**主线全部完成并已 push。以下为用户确认的后续方向：**
-
-1. **浏览器验收（HITL blocked）：** dev server 需要真实端口监听，当前 sandbox 环境无法完成 320px/375px/1440px 尺寸验收。HTTP 级测试已覆盖核心用户流。
-2. **typed orchestration 架构优化（deferred）：** 当前 orchestration 散落在 `register-routes.ts`、`scheduler-integration.ts`、`create-server.ts`，功能正常但架构可收敛。当前不需要强制处理。
-3. **后续 PRD：** 公开发布/去版权版/授权版作为独立模式，需新 PRD 设计。
-4. **新功能领领：** 如需继续开发，请用户提供具体方向或 issue。
+下一轮由用户本地执行浏览器验收（HITL）：
+1. 运行 `pnpm dev` 启动本地服务器
+2. 在浏览器中访问，验证 320px / 375px / 1440px 三种视图下：
+   - Production Board 可折叠，正确展示 show -> block -> episode
+   - Generation Console 可展开，显示日志流和控制按钮
+   - Export Queue 可折叠，显示下载入口
+3. 完成验收后更新 issue 状态
 
 ## Blockers
 
-- **浏览器验收受限：** sandbox 环境无法监听端口，HITL 验证需要用户在本地浏览器完成。
-- **无 active task：** Phase 1-4 主线全部完成，等待用户指定新方向或创建新 issue。
+- **浏览器验收受限（HITL blocked）**：需要用户本地完成 320px / 375px / 1440px 的 Production Board、Generation Console、Export Queue 验收。
 
-## 修改的文件（本轮）
+## 修改的文件（已提交）
 
-### 本次 Push (14 commits 整理 + 58 commits 增量)
+- `.scratch/fakeradio-show-production/AUTOMATION_STATE.md`
+- `.scratch/fakeradio-show-production/issues/02-showplan-versioned-draft.md`
+- `.scratch/fakeradio-show-production/issues/03-background-job-and-generation-log-stream.md`
+- `.scratch/fakeradio-show-production/issues/04-theme-research-and-story-selection.md`
+- `.scratch/fakeradio-show-production/issues/07-collapsible-production-board-and-console-ui.md`
+- `.scratch/fakeradio-show-production/issues/08-export-package-with-plan-and-trace.md`
+- `.scratch/fakeradio-show-production/issues/11-post-completion-audit-regressions.md`
+- `.scratch/fakeradio-show-production/issues/12-contract-versioning-and-verification-regressions.md`
+- `.scratch/fakeradio-show-production/issues/p2-01-scheduler-consume-scheduled-brief.md`
+- `.scratch/fakeradio-show-production/audits/2026-05-14-0240-audit.md`
 - `packages/shared/src/contracts/radio.ts`
-- `server/src/show/show-generation-job.ts` + test
-- `server/src/show/show-plan-generator.ts` + test
-- `server/src/show/theme-selection-engine.ts` + test
-- `server/src/scheduler/daily-episode-prewarmer.ts` + test
-- `server/src/http/create-server.ts` + test
+- `server/src/http/create-server.test.ts`
+- `server/src/http/create-server.ts`
+- `server/src/http/episode-runner.ts`
 - `server/src/http/register-routes.ts`
-- `server/src/http/generate-now-execution.test.ts`
-- `server/src/http/export-incomplete-job.test.ts`
-- `server/src/show/scheduler-integration.ts` + test
-- `server/src/scheduler/scheduler-loop.test.ts`
-- `server/src/export/export-show-project.ts` + test
-- `apps/web/src/lib/api-client.ts`
-- `apps/web/src/features/show/production-board.tsx`
-- `apps/web/src/features/show/generation-console.tsx`
-- `apps/web/src/features/show/constraint-dialog.tsx`
-- `apps/web/src/features/player/player-shell.tsx`
-- `apps/web/src/features/player/skin-stage.tsx`
-- `apps/web/next-env.d.ts`
-- `apps/web/src/app/settings/page.tsx`
-- `.gitignore`
-- `.scratch/fakeradio-show-production/` (issues + audits + AUTOMATION_STATE.md)
+- `server/src/show/scheduler-integration.test.ts`
+- `server/src/show/scheduler-integration.ts`
+- `server/src/show/show-plan-generator.test.ts`
+- `server/src/show/show-plan-generator.ts`

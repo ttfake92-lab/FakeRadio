@@ -1,6 +1,6 @@
 # Phase 2 Issue 1: Scheduler 消费 Theme Show Brief
 
-Status: ready-for-agent
+Status: completed
 Opened: 2026-05-12
 
 ## Parent

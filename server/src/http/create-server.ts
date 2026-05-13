@@ -203,6 +203,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     audioDir
   };
 
+  // 统一的默认适配器策略
+  const defaultPublicMetadataAdapter = options.publicMetadataAdapter;
+  const defaultWebResearchAdapter = options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined;
+
   const prewarmScheduler: PrewarmScheduler = createPrewarmScheduler({
     prewarmTime: env.FAKERADIO_PREWARM_TIME,
     prewarmEnabled: env.FAKERADIO_PREWARM_ENABLED,
@@ -224,6 +228,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
             targetDate: todayDate
           },
           {
+            briefRepo: programBriefRepo,
             planRepo: showPlanRepo,
             showProjectRepo,
             jobRegistry,
@@ -235,8 +240,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
             calendar,
             devices,
             storySource,
-            publicMetadataAdapter: options.publicMetadataAdapter,
-            webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
+            publicMetadataAdapter: defaultPublicMetadataAdapter,
+            webResearchAdapter: defaultWebResearchAdapter,
             likedSongs,
             systemPrompt
           }

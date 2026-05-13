@@ -35,6 +35,7 @@ function createTestExecutionDeps(baseDir: string): SchedulerExecutionDeps {
   mkdirSync(showsDir, { recursive: true });
 
   return {
+    briefRepo: createTestBriefRepo(programsDir),
     planRepo: createTestPlanRepo(programsDir),
     showProjectRepo: createTestShowProjectRepo(showsDir),
     jobRegistry: createTestJobRegistry(programsDir),
@@ -269,6 +270,7 @@ describe("scheduler-integration", () => {
       await jobRegistry.start(job.id);
 
       const deps: SchedulerExecutionDeps = {
+        briefRepo,
         planRepo,
         showProjectRepo,
         jobRegistry,
@@ -323,6 +325,7 @@ describe("scheduler-integration", () => {
       await jobRegistry.start(job.id);
 
       const deps: SchedulerExecutionDeps = {
+        briefRepo: createTestBriefRepo(programsDir),
         planRepo,
         showProjectRepo,
         jobRegistry,

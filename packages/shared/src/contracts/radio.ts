@@ -78,7 +78,7 @@ export const ChatRequestSchema = z.object({
 export const ProgramBriefTypeSchema = z.enum(["theme-show", "block-theme", "daily-show"]);
 export const ProgramBriefScopeSchema = z.enum(["full-show", "block"]);
 export const ProgramBriefPrioritySchema = z.enum(["user-requested", "daily-default"]);
-export const ProgramBriefStatusSchema = z.enum(["draft", "confirmed", "scheduled", "generating", "completed", "cancelled"]);
+export const ProgramBriefStatusSchema = z.enum(["draft", "confirmed", "scheduled", "generating", "completed", "cancelled", "failed"]);
 
 export const ProgramBriefConstraintsSchema = z.object({
   durationMinutes: z.number().int().positive().optional(),

@@ -558,8 +558,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.send(BriefResponseSchema.parse({ brief }));
   });
 
-  app.get("/api/plans", async (_request, reply) => {
-    const plans = await showPlanRepo.list();
+  app.get("/api/plans", async (request, reply) => {
+    const { briefId } = request.query as { briefId?: string };
+    const plans = await showPlanRepo.list(briefId ? { briefId } : undefined);
     return reply.send(ShowPlansListResponseSchema.parse({ plans }));
   });
 
@@ -612,8 +613,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.status(201).send(ShowJobResponseSchema.parse({ job }));
   });
 
-  app.get("/api/jobs", async (_request, reply) => {
-    const jobs = await jobRegistry.list();
+  app.get("/api/jobs", async (request, reply) => {
+    const { briefId } = request.query as { briefId?: string };
+    const jobs = await jobRegistry.list(briefId ? { briefId } : undefined);
     return reply.send(ShowJobsListResponseSchema.parse({ jobs }));
   });
 
@@ -772,6 +774,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     // Execute the scheduled job to generate episodes
     try {
       const executionDeps: SchedulerExecutionDeps = {
+        briefRepo: programBriefRepo,
         planRepo: showPlanRepo,
         showProjectRepo,
         jobRegistry,
@@ -783,12 +786,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         calendar,
         devices,
         storySource,
-        publicMetadataAdapter: publicMetadataAdapter ?? webResearchAdapter ?? createMockStorySourceAdapter(),
-        webResearchAdapter: webResearchAdapter ?? publicMetadataAdapter ?? createMockStorySourceAdapter(),
+        publicMetadataAdapter: publicMetadataAdapter,
+        webResearchAdapter: webResearchAdapter,
         likedSongs,
         systemPrompt
       };
 
+      await programBriefRepo.updateStatus(brief.id, "generating");
       await executeScheduledJob(executionDeps, brief.id, activePlan.id, targetJobId);
 
       const finalJob = await jobRegistry.get(targetJobId);
@@ -810,6 +814,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       const errorMsg = err instanceof Error ? err.message : "unknown error";
       await jobRegistry.addLog(targetJobId, { level: "error", message: `executeScheduledJob failed: ${errorMsg}`, phase: "execution" });
       await jobRegistry.fail(targetJobId, errorMsg);
+      await programBriefRepo.updateStatus(brief.id, "failed");
 
       const failedJob = await jobRegistry.get(targetJobId);
       await showProjectRepo.update(project.id, { status: "failed" });
