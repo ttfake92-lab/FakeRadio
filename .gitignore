@@ -27,3 +27,5 @@ test-playback.mjs
 apps/web/inspect-player.mjs
 apps/web/test-playback.mjs
 player-screenshot.png
+dogfood-output/
+test-fakeradio*.py
