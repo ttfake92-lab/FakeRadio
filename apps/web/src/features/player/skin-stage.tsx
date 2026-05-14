@@ -49,12 +49,14 @@ export type SkinStageProps = {
   onToggleFavorite: () => void;
   onNext: () => void;
   productionBriefs?: ProgramBrief[];
+  activeBriefId?: string | null;
   productionPlans?: ShowPlan[];
   productionJobs?: ShowJob[];
   productionProjects?: ShowProject[];
   generationLogs?: { timestamp: number; level: string; phase?: string; message: string }[];
   isGenerating?: boolean;
   onOpenPanel?: (panelId: PanelId) => void;
+  onSwitchBrief?: (briefId: string) => void | Promise<void> | undefined;
   onPauseJob?: () => void;
   onResumeJob?: () => void;
   onCancelJob?: () => void;
@@ -110,12 +112,14 @@ export function SkinStage({
   onToggleFavorite,
   onNext,
   productionBriefs,
+  activeBriefId,
   productionPlans,
   productionJobs,
   productionProjects,
   generationLogs,
   isGenerating,
   onOpenPanel,
+  onSwitchBrief,
   onPauseJob,
   onResumeJob,
   onCancelJob,
@@ -236,36 +240,60 @@ export function SkinStage({
     }
   };
 
-  const exportTasks: ExportTask[] = (productionJobs ?? [])
-    .map((job) => {
-      let project = (productionProjects ?? []).find(p => p.activeJobId === job.id);
-      if (!project && job.briefId) {
-        project = (productionProjects ?? []).find(p => p.briefId === job.briefId);
-      }
-      if (!project) {
-        return null;
-      }
-      const task: ExportTask = {
-        id: job.id,
-        projectId: project.id,
-        status: job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "running" ? "running" : "pending",
-        createdAt: new Date(job.createdAt).getTime(),
-      };
-      if (job.completedAt) {
-        task.completedAt = new Date(job.completedAt).getTime();
-      }
-      if (job.error) {
-        task.error = job.error;
-      }
-      return task;
-    })
-    .filter((task): task is ExportTask => task !== null);
+  // 首先确定 activeBrief
+  const activeBrief = useMemo(() => {
+    if (activeBriefId) {
+      return productionBriefs?.find((b) => b.id === activeBriefId) ?? null;
+    }
+    return productionBriefs?.[0] ?? null;
+  }, [activeBriefId, productionBriefs]);
 
-  const activeBrief = productionBriefs?.[0] ?? null;
-  const activePlan = productionPlans?.find((p) => p.active) ?? null;
-  const activeJob = productionJobs?.find(job => 
-    ["pending", "running", "paused", "needs-replan"].includes(job.status)
-  ) ?? productionJobs?.[0] ?? null;
+  // 确保 activePlan 和 activeJob 都来自同一个 briefId
+  const activePlan = useMemo(() => {
+    if (!activeBrief) return null;
+    return productionPlans?.find((p) => p.active && p.briefId === activeBrief.id) 
+      ?? productionPlans?.find((p) => p.briefId === activeBrief.id) 
+      ?? null;
+  }, [activeBrief, productionPlans]);
+
+  const activeJob = useMemo(() => {
+    if (!activeBrief) return null;
+    const jobsForBrief = productionJobs?.filter((j) => j.briefId === activeBrief.id) ?? [];
+    return jobsForBrief.find(job => 
+      ["pending", "running", "paused", "needs-replan"].includes(job.status)
+    ) ?? jobsForBrief[0] ?? null;
+  }, [activeBrief, productionJobs]);
+
+  const exportTasks: ExportTask[] = useMemo(() => {
+    if (!activeBrief) return [];
+    const jobsForBrief = productionJobs?.filter((j) => j.briefId === activeBrief.id) ?? [];
+    const projectsForBrief = productionProjects?.filter((p) => p.briefId === activeBrief.id) ?? [];
+    
+    return jobsForBrief
+      .map((job) => {
+        let project = projectsForBrief.find(p => p.activeJobId === job.id);
+        if (!project) {
+          project = projectsForBrief.find(p => p.briefId === job.briefId);
+        }
+        if (!project) {
+          return null;
+        }
+        const task: ExportTask = {
+          id: job.id,
+          projectId: project.id,
+          status: job.status === "completed" ? "completed" : job.status === "failed" ? "failed" : job.status === "running" ? "running" : "pending",
+          createdAt: new Date(job.createdAt).getTime(),
+        };
+        if (job.completedAt) {
+          task.completedAt = new Date(job.completedAt).getTime();
+        }
+        if (job.error) {
+          task.error = job.error;
+        }
+        return task;
+      })
+      .filter((task): task is ExportTask => task !== null);
+  }, [activeBrief, productionJobs, productionProjects]);
 
   return (
     <>
@@ -297,12 +325,14 @@ export function SkinStage({
 
       <ProductionBoard
         brief={activeBrief}
+        briefs={productionBriefs}
         showPlan={activePlan}
         jobs={productionJobs ?? []}
         projects={productionProjects ?? []}
         isExpanded={panels.productionBoard.isExpanded}
         onToggleExpand={() => handlePanelToggle("productionBoard")}
         onClose={() => panels.productionBoard.isOpen && handlePanelToggle("productionBoard")}
+        onSwitchBrief={onSwitchBrief}
         onExportStart={() => handlePanelToggle("exportQueue")}
         onProjectsChanged={onProjectsChanged}
       />

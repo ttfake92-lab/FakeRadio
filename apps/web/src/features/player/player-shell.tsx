@@ -67,10 +67,12 @@ export function PlayerShell() {
   const [selectedPersona, setSelectedPersona] = useState<Persona>(Object.values(PERSONAS)[0]!);
   const [showSettings, setShowSettings] = useState(false);
   const [productionBriefs, setProductionBriefs] = useState<ProgramBrief[]>([]);
+  const [activeBriefId, setActiveBriefId] = useState<string | null>(null);
   const [productionPlans, setProductionPlans] = useState<ShowPlan[]>([]);
   const [productionJobs, setProductionJobs] = useState<ShowJob[]>([]);
   const [productionProjects, setProductionProjects] = useState<ShowProject[]>([]);
 
+  const activeBrief = productionBriefs.find((b) => b.id === activeBriefId) ?? productionBriefs[0] ?? null;
   const activePlan = productionPlans.find((p) => p.active) ?? null;
 
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -194,21 +196,42 @@ export function PlayerShell() {
     setIsLoading(true);
     playback.setError(null);
     try {
-      const [nowResponse, healthResponse, favoritesResponse, prewarmStatusResponse, briefsResponse, plansResponse, jobsResponse, projectsResponse] = await Promise.all([
+      const [nowResponse, healthResponse, favoritesResponse, prewarmStatusResponse, briefsResponse, projectsResponse] = await Promise.all([
         getNow(), getHealth(), getFavorites(), getPrewarmStatus().catch(() => null),
         getBriefs().catch(() => ({ briefs: [] })),
-        getShowPlans().catch(() => ({ plans: [] })),
-        getShowJobs().catch(() => ({ jobs: [] })),
         getShowProjects().catch(() => ({ projects: [] }))
       ]);
       setNow(nowResponse);
       setHealth(healthResponse);
       setFavorites(favoritesResponse.favorites);
       setPrewarmStatus(prewarmStatusResponse);
-      setProductionBriefs(briefsResponse.briefs ?? []);
+      const briefs = briefsResponse.briefs ?? [];
+      setProductionBriefs(briefs);
+      setProductionProjects(projectsResponse.projects ?? []);
+
+      // 确定 active brief
+      let currentActiveBriefId = activeBriefId;
+      if (briefs.length > 0) {
+        if (!currentActiveBriefId || !briefs.find(b => b.id === currentActiveBriefId)) {
+          const firstBrief = briefs[0];
+          if (firstBrief) {
+            currentActiveBriefId = firstBrief.id;
+            setActiveBriefId(currentActiveBriefId);
+          }
+        }
+      }
+
+      // 按 active brief 获取 plans 和 jobs
+      const [plansResponse, jobsResponse] = await Promise.all([
+        currentActiveBriefId 
+          ? getShowPlans(currentActiveBriefId).catch(() => ({ plans: [] })) 
+          : getShowPlans().catch(() => ({ plans: [] })),
+        currentActiveBriefId 
+          ? getShowJobs(currentActiveBriefId).catch(() => ({ jobs: [] })) 
+          : getShowJobs().catch(() => ({ jobs: [] }))
+      ]);
       setProductionPlans(plansResponse.plans ?? []);
       setProductionJobs(jobsResponse.jobs ?? []);
-      setProductionProjects(projectsResponse.projects ?? []);
       // Sync theme with time of day on load, while preserving any explicit skin choice.
       const hour = new Date().getHours();
       const savedTheme = localStorage.getItem("fakeradio-theme") as OnAirThemeId | null;
@@ -231,6 +254,16 @@ export function PlayerShell() {
     } finally {
       setIsLoading(false);
     }
+  }, [activeBriefId]);
+
+  const handleSwitchBrief = useCallback(async (briefId: string) => {
+    setActiveBriefId(briefId);
+    const [plansResponse, jobsResponse] = await Promise.all([
+      getShowPlans(briefId).catch(() => ({ plans: [] })),
+      getShowJobs(briefId).catch(() => ({ jobs: [] }))
+    ]);
+    setProductionPlans(plansResponse.plans ?? []);
+    setProductionJobs(jobsResponse.jobs ?? []);
   }, []);
 
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
@@ -497,9 +530,11 @@ export function PlayerShell() {
           onToggleFavorite={handleToggleFavorite}
           onNext={handleNext}
           productionBriefs={productionBriefs}
+          activeBriefId={activeBriefId}
           productionPlans={productionPlans}
           productionJobs={productionJobs}
           productionProjects={productionProjects}
+          onSwitchBrief={handleSwitchBrief}
           onPauseJob={handlePauseJob}
           onResumeJob={handleResumeJob}
           onCancelJob={handleCancelJob}

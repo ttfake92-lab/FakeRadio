@@ -6,17 +6,19 @@ import { exportProject, deleteProject, deleteProjectTrace } from "../../lib/api-
 
 export type ProductionBoardProps = {
   brief?: ProgramBrief | null;
+  briefs?: ProgramBrief[] | undefined;
   showPlan?: ShowPlan | null;
   jobs?: ShowJob[];
   projects?: ShowProject[];
   isExpanded: boolean;
   onToggleExpand: () => void;
   onClose: () => void;
+  onSwitchBrief?: ((briefId: string) => void | Promise<void>) | undefined;
   onExportStart?: (projectId: string) => void;
   onProjectsChanged?: (() => void) | undefined;
 };
 
-export function ProductionBoard({ brief, showPlan, jobs, projects, isExpanded, onToggleExpand, onClose, onExportStart, onProjectsChanged }: ProductionBoardProps) {
+export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExpanded, onToggleExpand, onClose, onSwitchBrief, onExportStart, onProjectsChanged }: ProductionBoardProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [includeTrace, setIncludeTrace] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -138,6 +140,12 @@ export function ProductionBoard({ brief, showPlan, jobs, projects, isExpanded, o
 
       {isExpanded && (
         <div style={{ padding: 16, maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+          <BriefSelector
+            briefs={briefs ?? []}
+            activeBriefId={brief?.id}
+            onSwitchBrief={onSwitchBrief}
+          />
+          
           <ProjectSelector
             projects={projects ?? []}
             selectedProjectId={selectedProjectId}
@@ -164,6 +172,45 @@ export function ProductionBoard({ brief, showPlan, jobs, projects, isExpanded, o
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function BriefSelector({
+  briefs,
+  activeBriefId,
+  onSwitchBrief,
+}: {
+  briefs?: ProgramBrief[] | undefined;
+  activeBriefId?: string | null | undefined;
+  onSwitchBrief?: ((briefId: string) => void | Promise<void>) | undefined;
+}) {
+  if (!briefs || briefs.length <= 1) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
+        选择 Brief
+      </div>
+      <select
+        value={activeBriefId ?? ""}
+        onChange={(e) => onSwitchBrief && onSwitchBrief(e.target.value)}
+        style={{
+          width: "100%",
+          padding: "8px 12px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.1)",
+          background: "rgba(255,255,255,0.05)",
+          color: "#fff",
+          fontSize: 12,
+        }}
+      >
+        {briefs.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.topic} · {b.status}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
