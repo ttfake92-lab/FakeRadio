@@ -1,140 +1,121 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新: 2026-05-14 14:04 CST，Issue 13 提交完成，工作区干净**
+> **最后更新: 2026-05-14 22:35 CST，准备提交代码**
 
 ## Current Phase
 
-**Phase 1-4 全部完成，Phase 2 Schedule Tonight 和 Phase 3 制作体验深化均已实现。**
-
-已实现：
-1. ProgramBrief contract、intent parsing、SQLite 持久化
-2. ShowPlan versioning、story-driven generation、needs-replan 支持
-3. Background job、production trace、privacy redaction
-4. Theme selection engine（用户库优先、60%外部曲目上限）
-5. ShowProject storage（SQLite registry + 文件系统）
-6. Generate now + Schedule tonight 复用同一 execution 路径
-7. 可折叠 Production Board、Generation Console、Export Queue UI
-8. Export Package（show.mp3、show-notes.md、show-plan.json、production-trace.jsonl）
-9. Scheduler 消费 scheduled Brief 并执行同一 job 路径
-10. Generation Console 控制（pause/resume/cancel/add-constraint）
-11. ShowPlan 追加约束生成新版本
-12. 多 brief 不串台（activeBriefId 隔离）
-13. 浏览器验收通过（320px/375px/1440px）
-14. Trace redaction 在所有写入/导出边界强制执行（Issue 13）
+**Phase 2 已完成，P2-02 完全实现。**
+**Issue 14 实现已完成。**
+**准备提交 Ahead 10 commits + 新变更。**
 
 ## Current Active Task
 
-None - 所有已规划任务已完成。
+**提交代码到 main 分支**
+
+状态：
+- ✅ 测试全部通过（610 tests）
+- ✅ typecheck 全部通过
+- ✅ 所有 modified files 验证为计划内变更
+- ✅ 所有 untracked files 验证为计划内新文件
 
 ## Current Active Issue
 
-None - 所有 Phase 1-4 issues 已关闭。
+**提交阶段 - 无 active issue 待实现**
 
-## Done Log
+所有 Phase 2 issue 均已实现完成。
 
-### Issue 13 完成 (2026-05-14 14:04 CST)
-
-Trace redaction 修复提交：
-- `fba9bbc` feat: Issue 13 - trace redaction enforcement on all write/export boundaries
-- `adb9bb6` docs: add Issue 13 audit reports and closed issue document
-
-修改文件：
-- `server/src/export/export-show-project.ts` - export 层 redaction 兜底
-- `server/src/show/production-trace.ts` - 新增 redactTechTraceEntry, redactProductionLog, redactArbitraryEntry
-- `server/src/show/production-trace.test.ts` - 22 个测试覆盖敏感信息
-- `server/src/show/show-generation-job.ts` - addTrace/addLog 写入前 redaction
-- `server/src/show/show-project-repository.ts` - appendTrace 写入前 redaction
-
-### Phase 1-4 完成 (2026-05-14)
-
-所有 Phase 1-4 issues 状态：
-
-- Issue 01: ProgramBrief contract + intent parsing - **done**
-- Issue 02: ShowPlan versioning - **done**
-- Issue 03: Background job + generation logs - **done**
-- Issue 04: Theme research + story selection - **done**
-- Issue 05: ShowProject storage - **resolved**
-- Issue 06: Generate now + Schedule tonight - **resolved**
-- Issue 07: Collapsible UI panels - **done** (HITL verified)
-- Issue 08: Export Package - **done**
-- Issue 09: Phase 1 回归修复 - **completed**
-- Issue 10: Show production 审计回归 - **completed**
-- Issue 11: 完成声明审计回归 - **done**
-- Issue 12: Contract + 版本化回归 - **completed**
-- Issue 13: 门禁验证 + trace redaction - **closed**
-- p2-01: Scheduler 消费 Theme Show Brief - **completed**
-- p3-01: Generation Console 控制 - **completed**
-- p3-02: ShowPlan 追加约束 - **completed**
-
-## Last Known Verification
-
-### 2026-05-14 14:04 CST 验证结果
+## Current Verification (2026-05-14 22:35)
 
 ```bash
 pnpm test
 ```
-
-结果：53 test files, 568 tests passed, 0 failed。
-
-```bash
-pnpm vitest run server/src/show/production-trace.test.ts
-```
-
-结果：22 个 trace redaction 测试全部通过。
+- 58 test files, 610 tests passed
 
 ```bash
-git status --short --branch
+pnpm typecheck
 ```
+- packages/shared ✅
+- apps/web ✅
+- server ✅
 
-结果：
-- main...origin/main [ahead 10]
-- Working tree clean（无 modified/untracked 文件）
+## Done Log
+
+### 2026-05-14 22:35 提交前最终验证通过
+
+测试验证：
+- `pnpm test`：58 test files, 610 tests passed
+- `pnpm typecheck`：packages/shared、apps/web、server 均通过
+
+### 2026-05-14 22:01 验证当前状态稳定
+
+测试验证：
+- `pnpm test`：58 test files, 610 tests passed
+- `pnpm typecheck`：全部通过
+- P2-02 所有 slice 验证通过
+- Issue 14 所有可实现验收条件完成
+
+### 2026-05-14 21:35 验证并确认当前状态稳定
+
+验证：
+- `pnpm typecheck`：packages/shared、apps/web、server 均通过
+- `pnpm test`：58 个测试文件，610 个测试全部通过
 
 ## Next Action
 
-**所有已规划任务已完成。** Ahead 10 commits 待用户确认提交。
+**提交代码（待用户确认）**
 
-用户可选择：
-1. Push ahead commits 到 origin
-2. 继续后续 PRD（公开发布、去版权导出等）
-3. 优化现有功能
-4. 添加新的 Phase 5
+建议分两次提交：
+1. **Commit 1**: Phase 2 功能提交（P2-02 Daily Show recent exclusion + scheduler integration）
+2. **Commit 2**: Issue 14 功能提交（multi-brief UI filter）
 
 ## Blockers
 
-None - 所有 Phase 1-4 blocker 已清除。
+无 blocker。
 
-## Ahead Commits (待用户确认提交)
+## 待提交文件清单
 
-```
-adb9bb6 docs: add Issue 13 audit reports and closed issue document
-fba9bbc feat: Issue 13 - trace redaction enforcement on all write/export boundaries
-1850e55 docs: add audit report 2026-05-14-0839
-9adca54 chore: ignore dogfood test artifacts and scripts
-4e47e04 docs: Issue 12 status update after Brief switching fix
-3b5fad2 docs: update automation state after Brief switching fix
-7aaa137 feat: add BriefSelector and active brief switching in Production Board
-099f900 Update automation state: Dev server running, waiting for user choice
-5e34139 Update automation state: Waiting for browser acceptance
-7104986 feat: Complete Issue 12 - Contract, versioning and verification regressions fix
-```
+### Modified Files (11)
 
-## 已确认仍然成立
+**P2-02 相关：**
+- `packages/shared/src/contracts/radio.ts`（添加 morning/afternoon/evening block roles）
+- `server/src/show/theme-selection-engine.ts`（添加新时间段角色默认值）
+- `server/src/http/types.ts`（扩展 RegisterRoutesDeps）
+- `server/src/http/create-server.ts`（集成 DailyShowPlanGenerator 和 DailySelectionEngine）
+- `server/src/http/register-routes.ts`（daily-show route 分流）
+- `server/src/http/generate-now-execution.test.ts`（测试 daily-show 分流）
+- `server/src/show/scheduler-integration.ts`（集成 DailyShowPlanGenerator 和 DailySelectionEngine）
+- `server/src/show/scheduler-integration.test.ts`（新增测试）
+- `apps/web/src/features/player/player-shell.tsx`（保持不变）
+- `apps/web/src/features/show/production-board.tsx`（保持不变）
 
-- [x] `GET /api/plans?briefId=...` 和 `GET /api/jobs?briefId=...` 支持 query filter
-- [x] `PlayerShell` 有 `activeBriefId`，按 active brief 拉取 plans/jobs
-- [x] `SkinStage` 按同一个 `briefId` 过滤 active plan、active job 和 export tasks
-- [x] `ProductionBoard` 提供 `BriefSelector` 组件
-- [x] `generate-now`、`scheduler integration`、`export incomplete job` 的 HTTP 注入级测试通过
-- [x] trace redaction 在所有关键写入/导出边界强制执行
-- [x] 多 brief 用户流不串台（已通过集成测试验证）
-- [x] 工作区干净，无 dirty files
+**Issue 14 相关：**
+- `apps/web/src/features/player/player-shell.tsx`（activePlan/activeJob 按 activeBriefId 过滤）
+- `apps/web/src/features/show/production-board.tsx`（jobsForBrief/projectsForBrief 按 brief?.id 过滤）
+
+### Untracked Files (13)
+
+**P2-02 新增文件：**
+- `server/src/show/daily-selection-engine.ts`
+- `server/src/show/daily-selection-engine.test.ts`
+- `server/src/show/daily-show-plan-generator.ts`
+- `server/src/show/daily-show-plan-generator.test.ts`
+- `server/src/show/state-recent-played-repository.ts`
+
+**Issue 14 新增测试文件：**
+- `apps/web/src/features/player/player-shell-brief-filter.test.ts`
+- `apps/web/src/features/show/production-board-multi-brief.test.ts`
+- `server/src/http/multi-brief-filter.test.ts`
+
+**Issue tracker 和 audit 文件：**
+- `.scratch/fakeradio-show-production/issues/14-active-brief-ui-control-and-browser-gate.md`
+- `.scratch/fakeradio-show-production/issues/p2-02-daily-show-recent-play-exclusion.md`
+- `.scratch/fakeradio-show-production/audits/2026-05-14-1421-audit.md`
+- `.scratch/fakeradio-show-production/audits/2026-05-14-2023-audit.md`
 
 ## 待后续迭代（不在当前计划内）
 
+- [ ] Phase 3：制作体验深化（Generation Console controls、ShowPlan constraints 等）
 - [ ] 公开发布模式
 - [ ] 去版权版导出
 - [ ] 创作者授权导出
 - [ ] 复杂在线重排
-- [ ] 多 brief query filter HTTP 用户流测试
-- [ ] 前端 active brief 切换 UI 覆盖测试

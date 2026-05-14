@@ -41,6 +41,9 @@ import { createShowPlanRepository } from "../show/show-plan-repository.js";
 import { createShowPlanGenerator } from "../show/show-plan-generator.js";
 import { createJobRegistry } from "../show/show-generation-job.js";
 import { createShowProjectRepository } from "../show/show-project-repository.js";
+import { createDailyShowPlanGenerator } from "../show/daily-show-plan-generator.js";
+import { createDailySelectionEngine } from "../show/daily-selection-engine.js";
+import { createStateRecentPlayedRepository } from "../show/state-recent-played-repository.js";
 import { scheduleTonightBriefIfNeeded, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
@@ -157,6 +160,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const programBriefRepo = createProgramBriefRepository(programsDir);
   const showPlanRepo = createShowPlanRepository(programsDir);
   const showPlanGenerator = createShowPlanGenerator();
+  const dailyShowPlanGenerator = createDailyShowPlanGenerator();
   const jobRegistry = createJobRegistry(programsDir);
   const showProjectRepo = createShowProjectRepository(showsDir);
   registerRoutes({
@@ -173,6 +177,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     programBriefRepo,
     showPlanRepo,
     showPlanGenerator,
+    dailyShowPlanGenerator,
     jobRegistry,
     showProjectRepo
   });
@@ -219,13 +224,18 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowDate = formatRadioDate(tomorrow);
 
+      const dailyShowPlanGenerator = createDailyShowPlanGenerator();
+      const recentPlayedRepo = createStateRecentPlayedRepository(stateRepo);
+      const dailySelectionEngine = createDailySelectionEngine(recentPlayedRepo, { exclusionWindowDays: 7 });
+
       try {
         await scheduleTonightBriefIfNeeded(
           {
             briefRepo: programBriefRepo,
             planRepo: showPlanRepo,
             jobRegistry,
-            targetDate: todayDate
+            targetDate: todayDate,
+            dailyShowPlanGenerator
           },
           {
             briefRepo: programBriefRepo,
@@ -243,7 +253,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
             publicMetadataAdapter: defaultPublicMetadataAdapter,
             webResearchAdapter: defaultWebResearchAdapter,
             likedSongs,
-            systemPrompt
+            systemPrompt,
+            dailySelectionEngine
           }
         );
       } catch (err) {

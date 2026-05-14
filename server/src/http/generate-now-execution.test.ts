@@ -309,3 +309,50 @@ describe("generate-now execution flow", () => {
     });
   });
 });
+
+describe("daily-show plan generator selection", () => {
+  it("uses showPlanGenerator for theme-show briefs", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      storySourceAdapter: createMockStorySourceAdapter(),
+      publicMetadataAdapter: createMockStorySourceAdapter(),
+      webResearchAdapter: createMockStorySourceAdapter(),
+      now: () => new Date(2026, 4, 14, 11, 0, 0)
+    });
+
+    // Create a theme-show brief via chat
+    const briefResponse = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我做一期 Theme Test 主题节目" }
+    });
+    expect(briefResponse.statusCode).toBe(200);
+    const brief = briefResponse.json().brief;
+
+    // Verify the brief is theme-show
+    expect(brief.type).toBe("theme-show");
+
+    // Call schedule-tonight
+    const scheduleResponse = await app.inject({
+      method: "POST",
+      url: "/api/shows/schedule-tonight",
+      payload: { briefId: brief.id }
+    });
+    expect(scheduleResponse.statusCode).toBe(201);
+
+    // Check that the generated plan has theme-show roles, not daily roles
+    const planResponse = await app.inject({
+      method: "GET",
+      url: `/api/plans/${brief.id}/active`
+    });
+    expect(planResponse.statusCode).toBe(200);
+    const activePlan = planResponse.json().plan;
+    
+    // Verify no blocks have daily-show roles
+    const hasDailyRoles = activePlan.blocks.some((block: any) => 
+      ["morning", "afternoon", "evening"].includes(block.role)
+    );
+    expect(hasDailyRoles).toBe(false);
+  });
+});

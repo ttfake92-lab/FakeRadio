@@ -73,7 +73,14 @@ export function PlayerShell() {
   const [productionProjects, setProductionProjects] = useState<ShowProject[]>([]);
 
   const activeBrief = productionBriefs.find((b) => b.id === activeBriefId) ?? productionBriefs[0] ?? null;
-  const activePlan = productionPlans.find((p) => p.active) ?? null;
+  const activePlan = useMemo(() => {
+    if (!activeBrief) return null;
+    return (
+      productionPlans.find((p) => p.active && p.briefId === activeBrief.id) ??
+      productionPlans.find((p) => p.briefId === activeBrief.id) ??
+      null
+    );
+  }, [activeBrief, productionPlans]);
 
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -130,10 +137,14 @@ export function PlayerShell() {
 
   // Find active job (first pending/running/paused/needs-replan job)
   const activeJob = useMemo(() => {
-    return productionJobs.find(job => 
-      ["pending", "running", "paused", "needs-replan"].includes(job.status)
-    ) ?? productionJobs[0] ?? null;
-  }, [productionJobs]);
+    if (!activeBrief) return null;
+    const jobsForBrief = productionJobs.filter((j) => j.briefId === activeBrief.id);
+    return (
+      jobsForBrief.find((j) =>
+        ["pending", "running", "paused", "needs-replan"].includes(j.status)
+      ) ?? jobsForBrief[0] ?? null
+    );
+  }, [activeBrief, productionJobs]);
 
   const handlePauseJob = useCallback(async () => {
     if (!activeJob) return;

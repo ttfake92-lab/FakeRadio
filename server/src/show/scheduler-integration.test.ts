@@ -8,9 +8,13 @@ import { createShowPlanRepository } from "./show-plan-repository.js";
 import { createJobRegistry } from "./show-generation-job.js";
 import { createShowProjectRepository } from "./show-project-repository.js";
 import { createMockLlmAdapter, createMockMusicAdapter, createMockTtsAdapter, createMockWeatherAdapter, createMockCalendarAdapter, createMockDeviceAdapter, createMockStorySourceAdapter } from "../adapters/index.js";
+import type { Track } from "@fakeradio/shared";
 import type { ProgramBrief, ShowPlan } from "@fakeradio/shared";
+import { createDailyShowPlanGenerator } from "./daily-show-plan-generator.js";
+import { createDailySelectionEngine } from "./daily-selection-engine.js";
 
 let testDirs: string[] = [];
+let testDailyShowPlanGenerator: ReturnType<typeof createDailyShowPlanGenerator>;
 
 function createTestBriefRepo(programsDir: string) {
   return createProgramBriefRepository(programsDir);
@@ -57,6 +61,7 @@ function createTestExecutionDeps(baseDir: string): SchedulerExecutionDeps {
 describe("scheduler-integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    testDailyShowPlanGenerator = createDailyShowPlanGenerator();
   });
 
   afterEach(() => {
@@ -207,6 +212,157 @@ describe("scheduler-integration", () => {
       const jobs = await jobRegistry.list();
       expect(jobs).toHaveLength(0);
     });
+
+    it("generates plan for daily-show brief when no active plan exists", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+      const programsDir = join(baseDir, "programs");
+      mkdirSync(programsDir, { recursive: true });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+
+      const dailyBrief: ProgramBrief = {
+        id: "test-daily-brief-001",
+        type: "daily-show",
+        scope: "full-show",
+        priority: "daily-default",
+        status: "scheduled",
+        targetDate: "2026-05-14",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(dailyBrief);
+
+      const deps: SchedulerIntegrationDeps = {
+        briefRepo,
+        planRepo,
+        jobRegistry,
+        targetDate: "2026-05-14",
+        dailyShowPlanGenerator: testDailyShowPlanGenerator
+      };
+
+      await scheduleTonightBriefIfNeeded(deps);
+
+      const plans = await planRepo.list({ briefId: dailyBrief.id, activeOnly: true });
+      expect(plans).toHaveLength(1);
+      expect(plans[0].active).toBe(true);
+      expect(plans[0].briefSnapshot.id).toBe(dailyBrief.id);
+
+      const jobs = await jobRegistry.list({ briefId: dailyBrief.id });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].status).toBe("running");
+
+      const updatedBrief = await briefRepo.get(dailyBrief.id);
+      expect(updatedBrief?.status).toBe("generating");
+    });
+
+    it("uses existing plan for daily-show brief when active plan already exists", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+      const programsDir = join(baseDir, "programs");
+      mkdirSync(programsDir, { recursive: true });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+
+      const dailyBrief: ProgramBrief = {
+        id: "test-daily-brief-002",
+        type: "daily-show",
+        scope: "full-show",
+        priority: "daily-default",
+        status: "scheduled",
+        targetDate: "2026-05-14",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(dailyBrief);
+
+      const existingPlan: ShowPlan = {
+        id: "test-plan-daily-002",
+        briefId: dailyBrief.id,
+        version: 1,
+        active: true,
+        briefSnapshot: dailyBrief,
+        blocks: [
+          {
+            role: "morning",
+            title: "Morning Block",
+            storyGoal: "Morning music",
+            selectionGoal: "Pick morning tracks",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: [{ role: "opening-music" }]
+          }
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await planRepo.save(existingPlan);
+
+      const deps: SchedulerIntegrationDeps = {
+        briefRepo,
+        planRepo,
+        jobRegistry,
+        targetDate: "2026-05-14",
+        dailyShowPlanGenerator: testDailyShowPlanGenerator
+      };
+
+      await scheduleTonightBriefIfNeeded(deps);
+
+      const plans = await planRepo.list({ briefId: dailyBrief.id, activeOnly: true });
+      expect(plans).toHaveLength(1);
+      expect(plans[0].id).toBe(existingPlan.id);
+
+      const jobs = await jobRegistry.list({ briefId: dailyBrief.id });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].status).toBe("running");
+    });
+
+    it("generates daily-show plan with morning/afternoon/evening blocks", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+      const programsDir = join(baseDir, "programs");
+      mkdirSync(programsDir, { recursive: true });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+
+      const dailyBrief: ProgramBrief = {
+        id: "test-daily-brief-003",
+        type: "daily-show",
+        scope: "full-show",
+        priority: "daily-default",
+        status: "scheduled",
+        targetDate: "2026-05-14",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(dailyBrief);
+
+      const deps: SchedulerIntegrationDeps = {
+        briefRepo,
+        planRepo,
+        jobRegistry,
+        targetDate: "2026-05-14",
+        dailyShowPlanGenerator: testDailyShowPlanGenerator
+      };
+
+      await scheduleTonightBriefIfNeeded(deps);
+
+      const plans = await planRepo.list({ briefId: dailyBrief.id, activeOnly: true });
+      expect(plans).toHaveLength(1);
+      const plan = plans[0];
+
+      const roles = new Set(plan.blocks.map(b => b.role));
+      expect(roles.has("morning")).toBe(true);
+      expect(roles.has("afternoon")).toBe(true);
+      expect(roles.has("evening")).toBe(true);
+      expect(plan.blocks.length).toBeGreaterThanOrEqual(6);
+    });
   });
 
   describe("executeScheduledJob", () => {
@@ -345,6 +501,208 @@ describe("scheduler-integration", () => {
 
       const updatedJob = await jobRegistry.get(job.id);
       expect(updatedJob?.status).toBe("failed");
+    });
+
+    it("uses DailySelectionEngine for daily-show brief to exclude recently played tracks", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+
+      const programsDir = join(baseDir, "programs");
+      const showsDir = join(baseDir, "shows");
+      mkdirSync(programsDir, { recursive: true });
+      mkdirSync(showsDir, { recursive: true });
+
+      const recentTrack: Track = {
+        id: "recent-track-001",
+        title: "Recently Played Song",
+        artist: "Recent Artist",
+        album: "Recent Album",
+        source: "netease"
+      };
+
+      const recentPlayedRepo = {
+        listRecentlyPlayed: vi.fn<() => Promise<Track[]>>().mockResolvedValue([recentTrack])
+      };
+
+      const dailySelectionEngine = createDailySelectionEngine(recentPlayedRepo, { exclusionWindowDays: 7 });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+      const showProjectRepo = createTestShowProjectRepo(showsDir);
+
+      const dailyBrief: ProgramBrief = {
+        id: "test-daily-brief-exec-001",
+        type: "daily-show",
+        scope: "full-show",
+        priority: "daily-default",
+        status: "generating",
+        targetDate: "2026-05-14",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(dailyBrief);
+
+      const dailyPlan: ShowPlan = {
+        id: "test-daily-plan-exec-001",
+        briefId: dailyBrief.id,
+        version: 1,
+        active: true,
+        briefSnapshot: dailyBrief,
+        blocks: [
+          {
+            role: "morning",
+            title: "Morning Block",
+            storyGoal: "Start the day",
+            selectionGoal: "Pick morning tracks",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await planRepo.save(dailyPlan);
+
+      const project = await showProjectRepo.create({ briefId: dailyBrief.id, slug: "test-daily-show-001" });
+      await showProjectRepo.update(project.id, { activePlanId: dailyPlan.id });
+
+      const job = await jobRegistry.create({ briefId: dailyBrief.id, planId: dailyPlan.id });
+      await jobRegistry.start(job.id);
+
+      const deps: SchedulerExecutionDeps = {
+        briefRepo,
+        planRepo,
+        showProjectRepo,
+        jobRegistry,
+        llm: createMockLlmAdapter(),
+        music: createMockMusicAdapter(),
+        tts: createMockTtsAdapter(),
+        ttsCacheDir: join(baseDir, "tts-cache"),
+        weather: createMockWeatherAdapter(),
+        calendar: createMockCalendarAdapter(),
+        devices: createMockDeviceAdapter(),
+        storySource: createMockStorySourceAdapter(),
+        likedSongs: {
+          list: async () => [{
+            id: "recent-track-001",
+            title: "Recently Played Song",
+            artist: "Recent Artist",
+            album: "Recent Album",
+            audioUrl: "https://example.com/track1.mp3"
+          }]
+        } as any,
+        systemPrompt: "You are a test DJ.",
+        dailySelectionEngine
+      };
+
+      await executeScheduledJob(deps, dailyBrief.id, dailyPlan.id, job.id);
+
+      expect(recentPlayedRepo.listRecentlyPlayed).toHaveBeenCalledWith({ sinceDays: 7 });
+
+      const updatedJob = await jobRegistry.get(job.id);
+      expect(updatedJob).not.toBeNull();
+      const executionLog = updatedJob!.logs.find(l => l.message.includes("DailySelectionEngine"));
+      expect(executionLog).toBeDefined();
+    });
+
+    it("does not use DailySelectionEngine for theme-show brief", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+
+      const programsDir = join(baseDir, "programs");
+      const showsDir = join(baseDir, "shows");
+      mkdirSync(programsDir, { recursive: true });
+      mkdirSync(showsDir, { recursive: true });
+
+      const recentTrack: Track = {
+        id: "recent-track-002",
+        title: "Recently Played Song",
+        artist: "Recent Artist",
+        album: "Recent Album",
+        source: "netease"
+      };
+
+      const recentPlayedRepo = {
+        listRecentlyPlayed: vi.fn<() => Promise<Track[]>>().mockResolvedValue([recentTrack])
+      };
+
+      const dailySelectionEngine = createDailySelectionEngine(recentPlayedRepo, { exclusionWindowDays: 7 });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+      const showProjectRepo = createTestShowProjectRepo(showsDir);
+
+      const themeBrief: ProgramBrief = {
+        id: "test-theme-brief-exec-001",
+        type: "theme-show",
+        scope: "full-show",
+        priority: "user-requested",
+        status: "generating",
+        targetDate: "2026-05-14",
+        topic: "Test Theme",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(themeBrief);
+
+      const themePlan: ShowPlan = {
+        id: "test-theme-plan-exec-001",
+        briefId: themeBrief.id,
+        version: 1,
+        active: true,
+        briefSnapshot: themeBrief,
+        blocks: [
+          {
+            role: "opening",
+            title: "Test Opening",
+            storyGoal: "Open the show",
+            selectionGoal: "Pick opening track",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await planRepo.save(themePlan);
+
+      const project = await showProjectRepo.create({ briefId: themeBrief.id, slug: "test-theme-show-001" });
+      await showProjectRepo.update(project.id, { activePlanId: themePlan.id });
+
+      const job = await jobRegistry.create({ briefId: themeBrief.id, planId: themePlan.id });
+      await jobRegistry.start(job.id);
+
+      const deps: SchedulerExecutionDeps = {
+        briefRepo,
+        planRepo,
+        showProjectRepo,
+        jobRegistry,
+        llm: createMockLlmAdapter(),
+        music: createMockMusicAdapter(),
+        tts: createMockTtsAdapter(),
+        ttsCacheDir: join(baseDir, "tts-cache"),
+        weather: createMockWeatherAdapter(),
+        calendar: createMockCalendarAdapter(),
+        devices: createMockDeviceAdapter(),
+        storySource: createMockStorySourceAdapter(),
+        likedSongs: {
+          list: async () => []
+        } as any,
+        systemPrompt: "You are a test DJ.",
+        dailySelectionEngine
+      };
+
+      await executeScheduledJob(deps, themeBrief.id, themePlan.id, job.id);
+
+      expect(recentPlayedRepo.listRecentlyPlayed).not.toHaveBeenCalled();
+
+      const updatedJob = await jobRegistry.get(job.id);
+      const dailyLog = updatedJob!.logs.find(l => l.message.includes("DailySelectionEngine"));
+      expect(dailyLog).toBeUndefined();
     });
   });
 });

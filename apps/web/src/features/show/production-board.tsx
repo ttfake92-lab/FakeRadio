@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
 import { exportProject, deleteProject, deleteProjectTrace } from "../../lib/api-client";
 
@@ -18,6 +18,16 @@ export type ProductionBoardProps = {
   onProjectsChanged?: (() => void) | undefined;
 };
 
+function getJobsForBrief(jobs: ShowJob[] | undefined, briefId: string | null | undefined): ShowJob[] {
+  if (!briefId || !jobs) return [];
+  return jobs.filter((j) => j.briefId === briefId);
+}
+
+function getProjectsForBrief(projects: ShowProject[] | undefined, briefId: string | null | undefined): ShowProject[] {
+  if (!briefId || !projects) return [];
+  return projects.filter((p) => p.briefId === briefId);
+}
+
 export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExpanded, onToggleExpand, onClose, onSwitchBrief, onExportStart, onProjectsChanged }: ProductionBoardProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [includeTrace, setIncludeTrace] = useState(true);
@@ -25,15 +35,27 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const completedJob = jobs?.find((j) => j.status === "completed");
-  
+  const jobsForBrief = useMemo(() => getJobsForBrief(jobs, brief?.id), [jobs, brief?.id]);
+  const projectsForBrief = useMemo(() => getProjectsForBrief(projects, brief?.id), [projects, brief?.id]);
+
+  const completedJob = jobsForBrief.find((j) => j.status === "completed");
+
   let activeProject: ShowProject | undefined;
-  if (selectedProjectId && projects) {
-    activeProject = projects.find(p => p.id === selectedProjectId);
-  } else if (completedJob && projects) {
-    activeProject = projects.find(p => p.activeJobId === completedJob.id) || 
-      (completedJob.briefId ? projects.find(p => p.briefId === completedJob.briefId) : undefined);
+  if (selectedProjectId && projectsForBrief) {
+    activeProject = projectsForBrief.find(p => p.id === selectedProjectId);
+  } else if (completedJob && projectsForBrief) {
+    activeProject = projectsForBrief.find(p => p.activeJobId === completedJob.id) ||
+      projectsForBrief.find(p => p.briefId === completedJob.briefId);
   }
+
+  useEffect(() => {
+    if (selectedProjectId && brief?.id) {
+      const stillValid = projectsForBrief.some(p => p.id === selectedProjectId);
+      if (!stillValid) {
+        setSelectedProjectId(null);
+      }
+    }
+  }, [brief?.id, selectedProjectId, projectsForBrief]);
 
   const handleExport = async () => {
     if (!activeProject) return;
@@ -147,7 +169,7 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
           />
           
           <ProjectSelector
-            projects={projects ?? []}
+            projects={projectsForBrief ?? []}
             selectedProjectId={selectedProjectId}
             onSelectProject={setSelectedProjectId}
           />
@@ -156,7 +178,7 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
             <ShowProjectView
               {...(brief !== undefined && { brief })}
               {...(showPlan !== undefined && { showPlan })}
-              {...(jobs !== undefined && { jobs })}
+              jobs={jobsForBrief}
               project={activeProject}
               includeTrace={includeTrace}
               onIncludeTraceChange={setIncludeTrace}

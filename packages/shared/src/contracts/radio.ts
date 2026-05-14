@@ -336,7 +336,10 @@ export const ShowPlanBlockRoleSchema = z.enum([
   "influence",
   "contrast",
   "personal-anchor",
-  "closing"
+  "closing",
+  "morning",
+  "afternoon",
+  "evening"
 ]);
 export type ShowPlanBlockRole = z.infer<typeof ShowPlanBlockRoleSchema>;
 

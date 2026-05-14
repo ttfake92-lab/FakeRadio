@@ -55,7 +55,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
     storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo,
-    showPlanRepo, showPlanGenerator, jobRegistry, showProjectRepo
+    showPlanRepo, showPlanGenerator, dailyShowPlanGenerator, jobRegistry, showProjectRepo
   } = deps;
 
   const episodeRunnerDeps: EpisodeRunnerDeps = {
@@ -735,7 +735,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
     let activePlan = plans[0];
     if (!activePlan) {
-      const draftPlan = await showPlanGenerator.generate(brief);
+      const draftPlan = brief.type === "daily-show" 
+        ? await dailyShowPlanGenerator.generate(brief) 
+        : await showPlanGenerator.generate(brief);
       activePlan = await showPlanRepo.save(draftPlan);
     }
 
@@ -847,7 +849,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
     let activePlan = plans[0];
     if (!activePlan) {
-      const draftPlan = await showPlanGenerator.generate(brief);
+      const draftPlan = brief.type === "daily-show" 
+        ? await dailyShowPlanGenerator.generate(brief) 
+        : await showPlanGenerator.generate(brief);
       activePlan = await showPlanRepo.save(draftPlan);
     }
 

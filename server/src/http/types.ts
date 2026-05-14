@@ -14,6 +14,7 @@ import type { StreamBroadcaster } from "../realtime/stream-bus.js";
 import type { ProgramBriefRepository } from "../show/program-brief-repository.js";
 import type { ShowPlanRepository } from "../show/show-plan-repository.js";
 import type { ShowPlanGenerator } from "../show/show-plan-generator.js";
+import type { DailyShowPlanGenerator } from "../show/daily-show-plan-generator.js";
 import type { JobRegistry } from "../show/show-generation-job.js";
 import type { ShowProjectRepository } from "../show/show-project-repository.js";
 
@@ -53,6 +54,7 @@ export type RegisterRoutesDeps = {
   programBriefRepo: ProgramBriefRepository;
   showPlanRepo: ShowPlanRepository;
   showPlanGenerator: ShowPlanGenerator;
+  dailyShowPlanGenerator: DailyShowPlanGenerator;
   jobRegistry: JobRegistry;
   showProjectRepo: ShowProjectRepository;
 };

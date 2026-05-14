@@ -132,7 +132,10 @@ function calculateEpisodeTargetsForBlock(block: ShowPlanBlock): number {
     "relationship": 2,
     "influence": 2,
     "contrast": 1,
-    "personal-anchor": 2
+    "personal-anchor": 2,
+    "morning": 3,
+    "afternoon": 3,
+    "evening": 3
   };
 
   return roleToDefaultCount[block.role] ?? 2;

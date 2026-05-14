@@ -5,6 +5,8 @@ import type { ShowProjectRepository } from "./show-project-repository.js";
 import type { ShowPlanBlock, Track, RadioEpisode } from "@fakeradio/shared";
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
+import type { DailyShowPlanGenerator } from "./daily-show-plan-generator.js";
+import type { DailySelectionEngine } from "./daily-selection-engine.js";
 import { gatherEpisodeSources, narrateStoryWithSources, synthesizeWithFallback } from "../http/episode-runner.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
@@ -18,6 +20,7 @@ export type SchedulerIntegrationDeps = {
   planRepo: ShowPlanRepository;
   jobRegistry: JobRegistry;
   showProjectRepo?: ShowProjectRepository;
+  dailyShowPlanGenerator?: DailyShowPlanGenerator;
   targetDate: string;
 };
 
@@ -38,6 +41,7 @@ export type SchedulerExecutionDeps = {
   webResearchAdapter: StorySourceAdapter | undefined;
   likedSongs: LikedSongsRepository;
   systemPrompt: string;
+  dailySelectionEngine?: DailySelectionEngine;
 };
 
 async function generateEpisodeForBlock(
@@ -186,8 +190,27 @@ export async function executeScheduledJob(
     phase: "execution"
   });
 
+  const brief = await briefRepo.get(briefId);
   const now = new Date();
-  const excludedTrackIds = new Set<string>();
+  let excludedTrackIds = new Set<string>();
+
+  if (brief?.type === "daily-show" && deps.dailySelectionEngine) {
+    await jobRegistry.addLog(jobId, {
+      level: "info",
+      message: "Using DailySelectionEngine for daily-show (strong recent-play exclusion enabled)",
+      phase: "execution"
+    });
+    const favoritesTracks = await deps.likedSongs.list();
+    const externalTracks: Track[] = [];
+    const selection = await deps.dailySelectionEngine.selectForPlan(
+      activePlan,
+      favoritesTracks,
+      externalTracks
+    );
+    const alreadySelected = selection.selections.flatMap((bs) => bs.selections.map((s) => s.track.id));
+    excludedTrackIds = new Set([...excludedTrackIds, ...alreadySelected]);
+  }
+
   let successCount = 0;
   let failCount = 0;
 
@@ -263,13 +286,20 @@ export async function scheduleTonightBriefIfNeeded(
   integrationDeps: SchedulerIntegrationDeps,
   executionDeps?: SchedulerExecutionDeps
 ): Promise<void> {
-  const { briefRepo, planRepo, jobRegistry, targetDate } = integrationDeps;
+  const { briefRepo, planRepo, jobRegistry, targetDate, dailyShowPlanGenerator } = integrationDeps;
 
   const briefs = await briefRepo.list({ status: "scheduled", targetDate });
 
   for (const brief of briefs) {
-    const plans = await planRepo.list({ briefId: brief.id, activeOnly: true });
-    const activePlan = plans[0];
+    let plans = await planRepo.list({ briefId: brief.id, activeOnly: true });
+    let activePlan = plans[0];
+
+    if (!activePlan && brief.type === "daily-show" && dailyShowPlanGenerator) {
+      const generatedPlan = dailyShowPlanGenerator.generate(brief);
+      await planRepo.save(generatedPlan);
+      activePlan = generatedPlan;
+    }
+
     if (!activePlan) {
       console.log(`[scheduler] No active plan found for brief ${brief.id}, skipping.`);
       continue;
