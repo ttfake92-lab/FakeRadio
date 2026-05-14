@@ -1,14 +1,14 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新: 2026-05-15 CST，Phase 3 P3-03 needs-replan restart 已完成，worktree ahead 3 commits**
+> **最后更新: 2026-05-15 CST，Phase 3 P3-03 已 commit，等待用户决策下一步**
 
 ## Current Phase
 
-**Phase 1-2 完全闭合，Phase 3 制作体验深化进行中（追加约束闭环已完成）。**
+**Phase 1-2 完全闭合，Phase 3 制作体验深化（追加约束完整闭环）已完成，当前等待用户决策下一步。**
 
 ## Current Active Task
 
-**Phase 3 P3-03 needs-replan job 重启执行逻辑（已闭合 ✅）**
+**Phase 3 P3-03 needs-replan job 重启执行逻辑（已闭合 ✅，已 commit）**
 - 新增 `server/src/show/needs-replan-restart.test.ts` — 4 个测试验证 registry 层 `needs-replan → running` 转换
 - 新增 `server/src/http/start-job-replan.test.ts` — 3 个集成测试验证 route 层行为
 - GREEN: 修改 `server/src/http/register-routes.ts` 中 `/api/jobs/:id/start`
@@ -17,6 +17,7 @@
   - 新增错误信息区分"not found"和"invalid state transition"
 - typecheck: 全部通过 ✅
 - test: 60 test files, 614 tests passed ✅
+- git commit: `309df04` ✅
 
 ## Current Active Issue
 
@@ -34,7 +35,7 @@
 ```bash
 git status
 ```
-- Worktree ahead 3 commits（待 git commit）
+- Worktree 干净，commit `309df04` 已完成
 
 ```bash
 pnpm test
@@ -50,7 +51,7 @@ pnpm typecheck
 
 ## Done Log
 
-### 2026-05-15 Phase 3 P3-03 needs-replan job 重启执行
+### 2026-05-15 Phase 3 P3-03 needs-replan job 重启执行（已 commit）
 
 - **RED (registry 层)**: `server/src/show/needs-replan-restart.test.ts` - 4 个测试
   - 测试 1: `needs-replan → running` 状态转换 ✅
@@ -67,6 +68,7 @@ pnpm typecheck
   - 复用 `generate-now` 的 `executionDeps` 构建方式
   - 修复了 `not found` 和 `invalid state transition` 两种错误的区分
 - **验证**: typecheck 全绿，test 614/614 passed
+- **git commit**: `309df04` ✅
 
 ### 2026-05-15 Phase 3 P3-01 Generation Console 实时日志 polling
 
@@ -82,7 +84,7 @@ pnpm typecheck
 
 ## Next Action
 
-**Phase 3 追加约束完整闭环已完成。下一步有两个方向：**
+**Phase 3 追加约束完整闭环已完成。下一步有两个方向，需要用户决策：**
 
 ### 方向 A：Settings UI（Phase 3 剩余验收项）
 PRD 验收条件之一：Settings 能控制外部资料研究、provider、音色、trace 隐私。
@@ -99,7 +101,7 @@ PRD Phase 4 目标：
 
 ## Blockers
 
-**无技术 blocker。Next Action 需要用户决策方向 A 或 B。**
+**无技术 blocker。Next Action 需要用户确认方向 A 或 B，或两者皆做。**
 
 ## 待后续迭代（不在当前计划内）
 
