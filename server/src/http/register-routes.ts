@@ -630,10 +630,48 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.post("/api/jobs/:id/start", async (request, reply) => {
     const { id } = request.params as { id: string };
+
+    const existingJob = await jobRegistry.get(id);
+    if (!existingJob) {
+      return reply.status(400).send({ error: "cannot start job (not found)" });
+    }
+
+    const wasNeedsReplan = existingJob.status === "needs-replan";
     const job = await jobRegistry.start(id);
     if (!job) {
-      return reply.status(400).send({ error: "cannot start job (invalid state transition or not found)" });
+      return reply.status(400).send({ error: "cannot start job (invalid state transition)" });
     }
+
+    if (wasNeedsReplan) {
+      const executionDeps: SchedulerExecutionDeps = {
+        briefRepo: programBriefRepo,
+        planRepo: showPlanRepo,
+        showProjectRepo,
+        jobRegistry,
+        llm,
+        music,
+        tts,
+        ttsCacheDir,
+        weather,
+        calendar,
+        devices,
+        storySource,
+        publicMetadataAdapter,
+        webResearchAdapter,
+        likedSongs,
+        systemPrompt
+      };
+
+      await programBriefRepo.updateStatus(job.briefId, "generating");
+      await executeScheduledJob(executionDeps, job.briefId, job.planId, job.id);
+
+      const finalJob = await jobRegistry.get(job.id);
+      const updatedJob = finalJob ?? job;
+
+      await jobRegistry.addLog(job.id, { level: "info", message: "Job restarted from needs-replan", phase: "running" });
+      return reply.send(ShowJobResponseSchema.parse({ job: updatedJob }));
+    }
+
     await jobRegistry.addLog(job.id, { level: "info", message: "Job started", phase: "running" });
     return reply.send(ShowJobResponseSchema.parse({ job }));
   });
