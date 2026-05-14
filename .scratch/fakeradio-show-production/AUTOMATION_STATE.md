@@ -76,7 +76,7 @@ pnpm typecheck
 可选方向：
 1. **恢复 generate-now failed 测试** - 需要找到在 chat 初始化失败时不炸掉 server 的方式
 2. **进入 Phase 3 slice** - 如 ProgramBrief lifecycle 状态机（draft → confirmed → generating → completed/failed）、Settings UI、公开/授权导出等
-3. **git push** - 推送 12 个 commits 到 origin
+3. **git push** - 推送 13 个 commits 到 origin
 
 ## Blockers
 
