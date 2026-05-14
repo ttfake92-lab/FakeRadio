@@ -2041,6 +2041,40 @@ describe("ProgramBrief intent parsing", () => {
       expect(lastEntry.type).toBe("scheduled");
     });
 
+    it("generate-now 成功后 brief 进入 completed 状态", async () => {
+      app = await createTestRadioServer({
+        musicAdapterResult: createMockMusicAdapterResult(),
+        ttsAdapter: createMockTtsAdapter()
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/chat",
+        payload: { message: "帮我做一期 Beatles 主题节目" }
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const { brief } = createResponse.json();
+      expect(brief).toBeDefined();
+      expect(brief.status).toBe("draft");
+
+      const briefId = brief.id;
+
+      const generateResponse = await app.inject({
+        method: "POST",
+        url: "/api/shows/generate-now",
+        payload: { briefId }
+      });
+      expect(generateResponse.statusCode).toBe(201);
+
+      const updatedBriefResponse = await app.inject({
+        method: "GET",
+        url: `/api/briefs/${briefId}`
+      });
+      expect(updatedBriefResponse.statusCode).toBe(200);
+      const updatedBrief = updatedBriefResponse.json().brief;
+      expect(updatedBrief.status).toBe("completed");
+    });
+
     it("POST /api/projects/:id/export returns 404 for non-existent project", async () => {
       app = await createTestRadioServer({
         musicAdapterResult: createMockMusicAdapterResult(),

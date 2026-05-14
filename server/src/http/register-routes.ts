@@ -804,6 +804,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         await showProjectRepo.update(project.id, {
           status: finalJob.status === "completed" ? "ready" : "failed"
         });
+        if (finalJob.status === "completed") {
+          await programBriefRepo.updateStatus(brief.id, "completed");
+        }
       }
 
       const updatedProject = await showProjectRepo.get(project.id);
