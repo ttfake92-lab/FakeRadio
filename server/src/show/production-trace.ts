@@ -23,6 +23,25 @@ function redactString(text: string): string {
   return result;
 }
 
+function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string") {
+      result[key] = redactString(value);
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((item) => 
+        typeof item === "object" && item !== null ? redactObject(item as Record<string, unknown>) :
+        typeof item === "string" ? redactString(item) : item
+      );
+    } else if (typeof value === "object" && value !== null) {
+      result[key] = redactObject(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export function redactSensitiveData(data: {
   logs: ProductionLog[];
   trace: TechTraceEntry[];
@@ -41,6 +60,25 @@ export function redactSensitiveData(data: {
       errorSummary: entry.errorSummary ? redactString(entry.errorSummary) : undefined
     }))
   };
+}
+
+export function redactTechTraceEntry(entry: TechTraceEntry): TechTraceEntry {
+  return {
+    ...entry,
+    summary: redactString(entry.summary),
+    errorSummary: entry.errorSummary ? redactString(entry.errorSummary) : undefined
+  };
+}
+
+export function redactProductionLog(log: ProductionLog): ProductionLog {
+  return {
+    ...log,
+    message: redactString(log.message)
+  };
+}
+
+export function redactArbitraryEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  return redactObject(entry);
 }
 
 export function createProductionLog(

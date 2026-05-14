@@ -3,6 +3,7 @@ import type { ShowProject, ShowPlan } from "@fakeradio/shared";
 import { ShowProjectSchema } from "@fakeradio/shared";
 import { join } from "node:path";
 import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, rmSync } from "node:fs";
+import { redactArbitraryEntry } from "./production-trace.js";
 
 export type ShowProjectRepository = {
   create(input: { briefId: string; slug: string }): Promise<ShowProject>;
@@ -233,8 +234,9 @@ export function createShowProjectRepository(baseDir: string): ShowProjectReposit
       const project = await this.get(projectId);
       if (!project) throw new Error(`Project ${projectId} not found`);
 
+      const redactedEntry = redactArbitraryEntry(entry);
       const tracePath = join(project.directoryPath, "production-trace.jsonl");
-      appendFileSync(tracePath, JSON.stringify(entry) + "\n", "utf-8");
+      appendFileSync(tracePath, JSON.stringify(redactedEntry) + "\n", "utf-8");
       updateProjectPaths(projectId, { production_trace_path: tracePath });
     },
 

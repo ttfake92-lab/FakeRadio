@@ -8,6 +8,7 @@ import type {
 import { ShowJobSchema } from "@fakeradio/shared";
 import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
+import { redactTechTraceEntry, redactProductionLog } from "./production-trace.js";
 
 export type JobRegistry = {
   create(params: { briefId: string; planId: string }): Promise<ShowJob>;
@@ -260,7 +261,7 @@ export function createJobRegistry(baseDir: string): JobRegistry {
     async addLog(id: string, log: Omit<ProductionLog, "timestamp">): Promise<ShowJob | null> {
       return updateJob(id, (job) => {
         const now = new Date().toISOString();
-        const fullLog: ProductionLog = { ...log, timestamp: now };
+        const fullLog: ProductionLog = redactProductionLog({ ...log, timestamp: now });
         return { ...job, logs: [...job.logs, fullLog], updatedAt: now };
       }, false);
     },
@@ -268,7 +269,7 @@ export function createJobRegistry(baseDir: string): JobRegistry {
     async addTrace(id: string, entry: Omit<TechTraceEntry, "timestamp">): Promise<ShowJob | null> {
       return updateJob(id, (job) => {
         const now = new Date().toISOString();
-        const fullEntry: TechTraceEntry = { ...entry, timestamp: now };
+        const fullEntry: TechTraceEntry = redactTechTraceEntry({ ...entry, timestamp: now });
         return { ...job, trace: [...job.trace, fullEntry], updatedAt: now };
       }, false);
     }

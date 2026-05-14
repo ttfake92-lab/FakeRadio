@@ -1,9 +1,10 @@
 import { writeFile, mkdir, readdir, readFile, access } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { ShowProject, ShowPlan, ShowJob, RadioEpisode } from "@fakeradio/shared";
+import type { ShowProject, ShowPlan, ShowJob, RadioEpisode, TechTraceEntry } from "@fakeradio/shared";
 import { generateShowNotes, type ShowNotesTrack } from "./show-notes-generator.js";
 import { checkFfmpegAvailable } from "./audio-mixer.js";
+import { redactTechTraceEntry, redactArbitraryEntry } from "../show/production-trace.js";
 
 export type ExportShowProjectDeps = {
   project: ShowProject;
@@ -177,7 +178,7 @@ export async function exportShowProject(
   }
 
   if (includeTrace) {
-    const allTraceEntries: typeof job.trace = [];
+    const allTraceEntries: Array<Record<string, unknown> | TechTraceEntry> = [];
     
     const projectTracePath = join(baseDir, "production-trace.jsonl");
     if (existsSync(projectTracePath)) {
@@ -185,15 +186,17 @@ export async function exportShowProject(
       const lines = existingTrace.split("\n").filter(line => line.trim());
       for (const line of lines) {
         try {
-          const entry = JSON.parse(line) as typeof job.trace[0];
-          allTraceEntries.push(entry);
+          const entry = JSON.parse(line);
+          allTraceEntries.push(redactArbitraryEntry(entry));
         } catch {
         }
       }
     }
     
     if (job.trace && job.trace.length > 0) {
-      allTraceEntries.push(...job.trace);
+      for (const entry of job.trace) {
+        allTraceEntries.push(redactTechTraceEntry(entry));
+      }
     }
     
     if (allTraceEntries.length > 0) {
