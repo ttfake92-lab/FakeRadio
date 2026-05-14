@@ -32,8 +32,8 @@ Issue 11 (post-completion audit regressions) 记录：
 ```bash
 git status
 ```
-- `main...origin/main [ahead 12]`
-- Worktree 有未提交修改
+- `main...origin/main [ahead 14]`
+- Worktree 干净
 
 ```bash
 pnpm test
