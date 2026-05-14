@@ -165,6 +165,18 @@ export async function getShowJobs(briefId?: string) {
   return ShowJobsListResponseSchema.parse(await response.json());
 }
 
+export async function getJob(jobId: string) {
+  try {
+    const response = await fetch(buildApiUrl(`/api/jobs/${jobId}`));
+    if (!response.ok) {
+      return { job: null };
+    }
+    return ShowJobResponseSchema.parse(await response.json());
+  } catch {
+    return { job: null };
+  }
+}
+
 export async function getShowProjects() {
   const response = await fetch(buildApiUrl("/api/shows"));
   if (!response.ok) {

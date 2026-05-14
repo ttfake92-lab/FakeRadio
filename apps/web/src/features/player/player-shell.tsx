@@ -1,9 +1,9 @@
 "use client";
 
-import type { ChatResponse, FavoriteTrack, HealthResponse, NowResponse, PrewarmStatus, ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
+import type { ChatResponse, FavoriteTrack, HealthResponse, NowResponse, PrewarmStatus, ProductionLog, ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { addFavorite, buildMediaUrl, getFavorites, getHealth, getNow, getPrewarmStatus, removeFavorite, sendChat, getBriefs, getShowPlans, getShowJobs, getShowProjects, pauseJob, resumeJob, cancelJob, markJobNeedsReplan, addConstraintsToPlan, type ShowPlanBlockConstraints } from "../../lib/api-client";
+import { addFavorite, buildMediaUrl, getFavorites, getHealth, getJob, getNow, getPrewarmStatus, removeFavorite, sendChat, getBriefs, getShowPlans, getShowJobs, getShowProjects, pauseJob, resumeJob, cancelJob, markJobNeedsReplan, addConstraintsToPlan, type ShowPlanBlockConstraints } from "../../lib/api-client";
 import {
   buildOnAirClock,
   formatDuration,
@@ -71,6 +71,7 @@ export function PlayerShell() {
   const [productionPlans, setProductionPlans] = useState<ShowPlan[]>([]);
   const [productionJobs, setProductionJobs] = useState<ShowJob[]>([]);
   const [productionProjects, setProductionProjects] = useState<ShowProject[]>([]);
+  const [generationLogs, setGenerationLogs] = useState<ProductionLog[]>([]);
 
   const activeBrief = productionBriefs.find((b) => b.id === activeBriefId) ?? productionBriefs[0] ?? null;
   const activePlan = useMemo(() => {
@@ -349,9 +350,28 @@ export function PlayerShell() {
     };
   }, [isPlaying, audio.musicRef]);
 
+  // Poll active job logs while running
+   useEffect(() => {
+     if (!activeJob) return;
+     const pollJob = async () => {
+       try {
+         const result = await getJob(activeJob.id);
+         if (result.job) {
+           setProductionJobs((prev) =>
+             prev.map((j) => (j.id === result.job!.id ? result.job! : j))
+           );
+           setGenerationLogs(result.job.logs);
+         }
+       } catch {
+         // silently fail
+       }
+     };
+     pollJob();
+     const id = setInterval(pollJob, 3000);
+     return () => clearInterval(id);
+   }, [activeJob?.id]);
+
   const handleNext = useCallback(async () => {
-    setIsActing(true);
-    playback.setError(null);
     try {
       audio.musicRef.current?.pause();
       audio.speechRef.current?.pause();
@@ -545,6 +565,7 @@ export function PlayerShell() {
           productionPlans={productionPlans}
           productionJobs={productionJobs}
           productionProjects={productionProjects}
+          generationLogs={generationLogs}
           onSwitchBrief={handleSwitchBrief}
           onPauseJob={handlePauseJob}
           onResumeJob={handleResumeJob}

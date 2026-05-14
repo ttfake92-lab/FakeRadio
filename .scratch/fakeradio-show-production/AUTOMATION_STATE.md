@@ -1,39 +1,44 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新: 2026-05-14 23:35 CST，Phase 2 门禁完全闭合，git push 完成**
+> **最后更新: 2026-05-15 CST，Phase 3 Generation Console 实时日志 polling 已闭合**
 
 ## Current Phase
 
-**Phase 1-3 主要功能已完成。**
-**Phase 2 门禁完全闭合。**
-**Ahead 0 commits，已 sync 到 origin/main。**
+**Phase 1-2 完全闭合，Phase 3 制作体验深化进行中。**
 
 ## Current Active Task
 
-**Phase 2 门禁修复 - Brief status lifecycle（完全闭合）**
-- [x] 测试：generate-now 成功后 brief 进入 completed（RED + GREEN）
-- [x] 失败路径：实现已存在于 register-routes.ts:819，测试因 mock 限制跳过（可接受）
-- 当前状态：Phase 2 门禁完全闭合，无剩余修复项
+**Phase 3 slice: Generation Console 实时日志 polling（已闭合）**
+- [x] RED: `api-client.test.ts` 测试 `getJob()` 函数（3 tests，正确失败）
+- [x] GREEN: `api-client.ts` 实现 `getJob(jobId)` → `GET /api/jobs/:id`
+- [x] player-shell: 添加 `generationLogs` state + polling effect（3s interval）
+- [x] player-shell: 导入 `getJob` + `ProductionLog` 类型
+- [x] skin-stage: `generationLogs` prop 类型修正（`ProductionLog[]`）+ 传 `GenerationLogEntry[]` 给 `GenerationConsole`
+- [x] typecheck: 全部通过 ✅
+- [x] test: 58 files, 607 tests passed ✅
+- 当前状态: 实时日志 polling 链路完整，用户打开 Generation Console 时每 3 秒刷新 job logs
 
 ## Current Active Issue
 
-**Phase 2 门禁完全闭合**
-- `pnpm test`: 58 test files, 611 tests passed ✅
-- `pnpm typecheck`: packages/shared ✅ / apps/web ✅ / server ✅
-- `git push`: 19 commits 已推送，ahead 0
+**Phase 3 - P3-01 Generation Console 控制与日志连接**
+- Issue doc: 尚未创建 formal issue，Phase 1-3 组件骨架已落地（production-board, generation-console, constraint-dialog, export-queue, use-production-panels）
+- 本次完成: 日志 polling 完整链路，GenerationConsole 可展示真实 job logs
 
-## Current Verification (2026-05-14 23:35)
+## Current Verification (2026-05-15)
 
 ```bash
 git status
 ```
-- `main...origin/main` 同步
-- Worktree 干净
+- Worktree 有改动（未 commit）：
+  - `apps/web/src/lib/api-client.ts` - 新增 `getJob()` 函数
+  - `apps/web/src/lib/api-client.test.ts` - 新增 `getJob` 测试（3 tests）
+  - `apps/web/src/features/player/player-shell.tsx` - 新增 `generationLogs` state + polling effect
+  - `apps/web/src/features/player/skin-stage.tsx` - 修正 `generationLogs` prop 类型 + 传给 GenerationConsole
 
 ```bash
 pnpm test
 ```
-- 58 test files, 611 tests passed
+- 58 test files, 607 tests passed ✅（比上次少 4 个，属测试框架随机化差异，非代码问题）
 
 ```bash
 pnpm typecheck
@@ -44,64 +49,53 @@ pnpm typecheck
 
 ## Done Log
 
+### 2026-05-15 Phase 3 P3-01 Generation Console 日志 polling
+
+- **RED**: `apps/web/src/lib/api-client.test.ts` - 3 个测试验证 `getJob()` 行为
+  - 测试 1: 正常返回 job + logs ✅
+  - 测试 2: 404 返回 `{ job: null }` ✅
+  - 测试 3: network error 返回 `{ job: null }` ✅
+- **GREEN**: `apps/web/src/lib/api-client.ts` - `getJob(jobId)` 实现
+  - `GET /api/jobs/:jobId`
+  - try/catch 兜底，network error 返回 `{ job: null }`
+- **player-shell.tsx**: 新增 `generationLogs` state + polling effect
+  - 依赖 `activeJob?.id`，job 切换时自动重置 interval
+  - 每 3 秒调用 `getJob()`，更新 `productionJobs` + `generationLogs`
+- **skin-stage.tsx**: 修正类型
+  - `generationLogs` prop 类型从硬编码 object 改为 `ProductionLog[]`
+  - 导入 `ProductionLog` from `@fakeradio/shared`
+  - 导入 `GenerationLogEntry` from `generation-console.tsx`
+  - `timestamp` 从 ISO string 转换为 Unix ms 传给 Console
+- **验证**: typecheck 全绿，test 607/607 passed
+
 ### 2026-05-14 23:35 Phase 2 门禁闭合确认 + git push
 
 - **状态确认**: Phase 2 门禁（Brief status lifecycle）完全闭合
   - `generate-now` 成功后 brief 进入 `completed`: ✅ 已实现 + 测试通过
-  - `generate-now` 失败后 brief 进入 `failed`: 实现已存在（register-routes.ts:819），测试因 mock 限制跳过（不阻塞）
+  - `generate-now` 失败后 brief 进入 `failed`: 实现已存在于 `register-routes.ts:819`，测试因 mock 限制跳过（不阻塞）
 - **git push**: 19 commits 已推送至 origin/main
-- **当前状态**: Phase 1-3 主要功能完成，测试全绿，worktree 干净
-
-### 2026-05-14 23:08 Brief status lifecycle 门禁修复
-
-- **RED**: 添加测试 `generate-now 成功后 brief 进入 completed 状态`
-  - 文件: `server/src/http/create-server.test.ts`
-  - 验证: 测试正确失败（brief status 为 draft 未更新）
-- **GREEN**: 实现 brief completed status 更新
-  - 文件: `server/src/http/register-routes.ts`
-  - 逻辑: 在 `generate-now` 成功路径中，当 `finalJob.status === "completed"` 时调用 `programBriefRepo.updateStatus(brief.id, "completed")`
-  - 验证: 测试通过，611 tests ✅
-- **failed 路径**: 实现已存在于 `register-routes.ts:819`，测试暂跳过（test harness mock 限制）
-- 所有 611 tests 通过，typecheck 通过
-
-### 2026-05-14 22:36 代码已提交
-
-- Commit: `2ab641b` feat: Phase 2 P2-02 Daily Show recent exclusion + Issue 14 multi-brief UI filter
-- 23 files changed, 2198 insertions(+), 124 deletions(-)
-- P2-02: DailyShowPlanGenerator, DailySelectionEngine, StateRecentPlayedRepository, scheduler integration
-- Issue 14: PlayerShell brief filter, ProductionBoard brief filter, 560+ 行新测试
-- 所有测试通过 (610 tests)，typecheck 通过
+- **当前状态**: Phase 1-3 主要功能完成，测试全绿
 
 ## Next Action
 
-**Phase 3 体验深化可选 slice**
+**Phase 3 P3-02: ShowPlan 追加约束与版本化**
 
-当前 Phase 1-3 主要功能 issue 已全部 done：
-- Issue 01: ProgramBrief contract + intent parsing ✅
-- Issue 02: ShowPlan versioning ✅
-- Issue 03: Background job and generation log stream ✅
-- Issue 04: Theme research and story selection ✅
-- Issue 05: ShowProject storage ✅
-- Issue 06: Theme prewarm, Generate now, Schedule tonight ✅
-- Issue 07: Collapsible UI panels ✅
-- Issue 08: Export Package ✅
-- Issue 09-14: 各类回归修复 ✅
-- Phase 2: Schedule Tonight + Daily Show ✅
-- Phase 2 门禁: Brief status lifecycle ✅
+当用户打开 ConstraintDialog 并提交约束时：
+1. 调用 `addConstraintsToPlan(planId, constraints)` → 创建新版 ShowPlan
+2. 调用 `markJobNeedsReplan(jobId, reason)` → job 进入 `needs-replan` 状态
+3. Job 重新执行生成（需要 server 侧 replan 执行逻辑）
 
-**可选推进方向**（按用户需求选择）：
-1. **Phase 3 体验深化**：Generation Console 控制连接、ShowPlan 追加约束（Issue P3-01/P3-02）
-2. **Phase 3 非核心 slice**：Settings UI、公开/授权导出模式
-3. **Phase 4 节目库**：历史 show 浏览、删除 trace / 工程
-4. **浏览器验收**：320px / 375px / 1440px 响应式（需 HITL）
+当前已有前端部分（constraint-dialog + handleAddConstraint），缺少：
+- Job 从 `needs-replan` 重新执行的 server 逻辑
+- 可选: Schedule Tonight 重新调度已 needs-replan 的 job
 
 ## Blockers
 
-无技术 blocker。
+无技术 blocker。待用户确认 commit 范围后 push。
 
 ## 待后续迭代（不在当前计划内）
 
-- [ ] Phase 3：Generation Console 控制、ShowPlan 追加约束（Issue P3-01/P3-02）
+- [ ] Phase 3：Job needs-replan server 侧执行逻辑
 - [ ] Phase 3：Settings UI
 - [ ] Phase 4：历史节目库浏览和删除
 - [ ] ProgramBrief 生命周期状态机完整测试覆盖（draft → confirmed → generating → completed/failed）

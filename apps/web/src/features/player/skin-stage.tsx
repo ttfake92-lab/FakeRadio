@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import type { NowResponse, Track, ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
+import type { NowResponse, ProductionLog, ProgramBrief, ShowJob, ShowPlan, ShowProject, Track } from "@fakeradio/shared";
 import type { OnAirThemeId } from "./player-view-model";
 import type { FavoriteTrack } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
@@ -14,7 +14,7 @@ import { SkinY2K } from "./skin-y2k";
 import { SKINS, PERSONAS, type Persona } from "./skin-config";
 import { useProductionPanels, type PanelId } from "../show/use-production-panels";
 import { ProductionBoard } from "../show/production-board";
-import { GenerationConsole } from "../show/generation-console";
+import { GenerationConsole, type GenerationLogEntry } from "../show/generation-console";
 import { ExportQueue, type ExportTask } from "../show/export-queue";
 
 export type SkinStageProps = {
@@ -53,7 +53,7 @@ export type SkinStageProps = {
   productionPlans?: ShowPlan[];
   productionJobs?: ShowJob[];
   productionProjects?: ShowProject[];
-  generationLogs?: { timestamp: number; level: string; phase?: string; message: string }[];
+  generationLogs?: ProductionLog[];
   isGenerating?: boolean;
   onOpenPanel?: (panelId: PanelId) => void;
   onSwitchBrief?: (briefId: string) => void | Promise<void> | undefined;
@@ -339,9 +339,11 @@ export function SkinStage({
 
       <GenerationConsole
         logs={(generationLogs ?? []).map((l) => ({
-          ...l,
+          timestamp: new Date(l.timestamp).getTime(),
           level: l.level as "info" | "warn" | "error" | "trace",
-        }))}
+          message: l.message,
+          ...(l.phase !== undefined ? { phase: l.phase } : {}),
+        })) as GenerationLogEntry[]}
         currentPhase={isGenerating ? "generating" : ""}
         isExpanded={panels.generationConsole.isExpanded}
         isOpen={panels.generationConsole.isOpen}
