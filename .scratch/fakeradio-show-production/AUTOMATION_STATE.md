@@ -1,6 +1,6 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新: 2026-05-14 13:31 CST，Phase 1-4 全部完成，所有测试通过**
+> **最后更新: 2026-05-14 14:04 CST，Issue 13 提交完成，工作区干净**
 
 ## Current Phase
 
@@ -20,6 +20,7 @@
 11. ShowPlan 追加约束生成新版本
 12. 多 brief 不串台（activeBriefId 隔离）
 13. 浏览器验收通过（320px/375px/1440px）
+14. Trace redaction 在所有写入/导出边界强制执行（Issue 13）
 
 ## Current Active Task
 
@@ -30,6 +31,19 @@ None - 所有已规划任务已完成。
 None - 所有 Phase 1-4 issues 已关闭。
 
 ## Done Log
+
+### Issue 13 完成 (2026-05-14 14:04 CST)
+
+Trace redaction 修复提交：
+- `fba9bbc` feat: Issue 13 - trace redaction enforcement on all write/export boundaries
+- `adb9bb6` docs: add Issue 13 audit reports and closed issue document
+
+修改文件：
+- `server/src/export/export-show-project.ts` - export 层 redaction 兜底
+- `server/src/show/production-trace.ts` - 新增 redactTechTraceEntry, redactProductionLog, redactArbitraryEntry
+- `server/src/show/production-trace.test.ts` - 22 个测试覆盖敏感信息
+- `server/src/show/show-generation-job.ts` - addTrace/addLog 写入前 redaction
+- `server/src/show/show-project-repository.ts` - appendTrace 写入前 redaction
 
 ### Phase 1-4 完成 (2026-05-14)
 
@@ -52,70 +66,15 @@ None - 所有 Phase 1-4 issues 已关闭。
 - p3-01: Generation Console 控制 - **completed**
 - p3-02: ShowPlan 追加约束 - **completed**
 
-### 定时任务确认 (2026-05-14 13:31 CST)
-
-- [x] `pnpm test`: 53 test files, 568 tests passed, 0 failed
-- [x] `pnpm typecheck`: packages/shared, apps/web, server 全部通过
-- [x] `pnpm vitest run server/src/show/production-trace.test.ts`: 22 个 trace redaction 测试全部通过
-- [x] `git status --short --branch`: ahead 8 commits 未丢失
-- [x] Dirty worktree 已整理（scratch 文档仅限 .scratch/ 目录）
-- [x] 测试失败门禁已清除（上一轮 prepared episode 超时问题已解决）
-
-### 定时任务确认 (2026-05-14 12:31 CST)
-
-- [x] `pnpm test`: 53 test files, 568 tests passed, 0 failed
-- [x] `pnpm typecheck`: packages/shared, apps/web, server 全部通过
-- [x] `pnpm vitest run server/src/show/production-trace.test.ts`: 22 个 trace redaction 测试全部通过
-- [x] `git status --short --branch`: ahead 8 commits 未丢失
-- [x] Dirty worktree 已整理（scratch 文档仅限 .scratch/ 目录）
-- [x] 测试失败门禁已清除（上一轮 prepared episode 超时问题已解决）
-
-### 验证结果 (2026-05-14 12:31 CST)
-
-```bash
-pnpm test
-```
-
-结果：568/568 测试全部通过。
-
-```bash
-pnpm typecheck
-```
-
-结果：通过。
-
-### 已确认仍然成立
-
-- [x] `GET /api/plans?briefId=...` 和 `GET /api/jobs?briefId=...` 支持 query filter
-- [x] `PlayerShell` 有 `activeBriefId`，按 active brief 拉取 plans/jobs
-- [x] `SkinStage` 按同一个 `briefId` 过滤 active plan、active job 和 export tasks
-- [x] `ProductionBoard` 提供 `BriefSelector` 组件
-- [x] `generate-now`、`scheduler integration`、`export incomplete job` 的 HTTP 注入级测试通过
-- [x] trace redaction 在所有关键写入/导出边界强制执行
-- [x] 多 brief 用户流不串台（已通过集成测试验证）
-
-### 待后续迭代（不在当前计划内）
-
-- [ ] 公开发布模式
-- [ ] 去版权版导出
-- [ ] 创作者授权导出
-- [ ] 复杂在线重排
-
 ## Last Known Verification
 
-### 2026-05-14 13:01 CST 验证结果
+### 2026-05-14 14:04 CST 验证结果
 
 ```bash
 pnpm test
 ```
 
 结果：53 test files, 568 tests passed, 0 failed。
-
-```bash
-pnpm typecheck
-```
-
-结果：通过（packages/shared, apps/web, server 全部通过）。
 
 ```bash
 pnpm vitest run server/src/show/production-trace.test.ts
@@ -128,36 +87,54 @@ git status --short --branch
 ```
 
 结果：
-- main...origin/main [ahead 8]
-- M 7 个文件（Ahead 8 的本地 commit 待用户确认，包括 AUTOMATION_STATE.md）
-- ?? 3 个 scratch 文件（新 audit 报告和 closed issue）
+- main...origin/main [ahead 10]
+- Working tree clean（无 modified/untracked 文件）
 
 ## Next Action
 
-**所有已规划任务已完成。** 用户可选择：
+**所有已规划任务已完成。** Ahead 10 commits 待用户确认提交。
 
-1. 继续后续 PRD（公开发布、去版权导出等）
-2. 优化现有功能
-3. 添加新的 Phase 5
-4. **用户本地验收并提交 ahead 的 commit**
-
-本次定时任务已验证所有测试通过，ahead commits 未丢失。待用户确认提交范围后可以 push。
+用户可选择：
+1. Push ahead commits 到 origin
+2. 继续后续 PRD（公开发布、去版权导出等）
+3. 优化现有功能
+4. 添加新的 Phase 5
 
 ## Blockers
 
 None - 所有 Phase 1-4 blocker 已清除。
 
-## 修改的文件
-
-本轮状态确认涉及的文件：
-- `.scratch/fakeradio-show-production/AUTOMATION_STATE.md` - 更新验证时间戳
-
 ## Ahead Commits (待用户确认提交)
 
-git status 显示 main...origin/main [ahead 8]，以下文件有本地修改待提交：
-- `server/src/export/export-show-project.ts`
-- `server/src/show/production-trace.test.ts`
-- `server/src/show/production-trace.ts`
-- `server/src/show/show-generation-job.ts`
-- `server/src/show/show-project-repository.ts`
-- `.scratch/fakeradio-show-production/AUTOMATION_STATE.md`
+```
+adb9bb6 docs: add Issue 13 audit reports and closed issue document
+fba9bbc feat: Issue 13 - trace redaction enforcement on all write/export boundaries
+1850e55 docs: add audit report 2026-05-14-0839
+9adca54 chore: ignore dogfood test artifacts and scripts
+4e47e04 docs: Issue 12 status update after Brief switching fix
+3b5fad2 docs: update automation state after Brief switching fix
+7aaa137 feat: add BriefSelector and active brief switching in Production Board
+099f900 Update automation state: Dev server running, waiting for user choice
+5e34139 Update automation state: Waiting for browser acceptance
+7104986 feat: Complete Issue 12 - Contract, versioning and verification regressions fix
+```
+
+## 已确认仍然成立
+
+- [x] `GET /api/plans?briefId=...` 和 `GET /api/jobs?briefId=...` 支持 query filter
+- [x] `PlayerShell` 有 `activeBriefId`，按 active brief 拉取 plans/jobs
+- [x] `SkinStage` 按同一个 `briefId` 过滤 active plan、active job 和 export tasks
+- [x] `ProductionBoard` 提供 `BriefSelector` 组件
+- [x] `generate-now`、`scheduler integration`、`export incomplete job` 的 HTTP 注入级测试通过
+- [x] trace redaction 在所有关键写入/导出边界强制执行
+- [x] 多 brief 用户流不串台（已通过集成测试验证）
+- [x] 工作区干净，无 dirty files
+
+## 待后续迭代（不在当前计划内）
+
+- [ ] 公开发布模式
+- [ ] 去版权版导出
+- [ ] 创作者授权导出
+- [ ] 复杂在线重排
+- [ ] 多 brief query filter HTTP 用户流测试
+- [ ] 前端 active brief 切换 UI 覆盖测试
