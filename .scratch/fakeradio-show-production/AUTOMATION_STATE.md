@@ -32,7 +32,7 @@ Issue 11 (post-completion audit regressions) 记录：
 ```bash
 git status
 ```
-- `main...origin/main [ahead 15]`
+- `main...origin/main [ahead 18]`
 - Worktree 干净
 
 ```bash
