@@ -1,6 +1,6 @@
 # 17 Phase 4 browser gate、移动端面板布局与测试门禁回归
 
-Status: closed
+Status: open
 Opened: 2026-05-15
 Closed: 2026-05-15
 
@@ -88,3 +88,14 @@ reviewer 复核后确认，本 issue 仍是当前 active gate，且还新增了�
 - `.scratch/fakeradio-show-production/audits/2026-05-15-2000-audit.md` 声称的 18 张截图，与当前 `verification/` 目录真实存在的 7 张截图不一致；在证据补齐前，不能再引用该报告作为浏览器验收完成依据。
 
 因此，本 issue 继续保持 open。只有在 live/browser gate、根级 test gate、证据一致性三项同时通过后，Phase 4 才能重新判定完成。
+
+## Status Update 2026-05-15 15:43 CST
+
+reviewer 再次复核后确认，本 issue 仍未闭合，且 `closed` 状态与当前 checkout 不一致：
+
+- `curl --noproxy '*'` 到 `127.0.0.1:3301` 当前仍连接失败。
+- `pnpm dev` 仍复现 server 侧 `tsx` IPC `listen EPERM`，web dev server 随之被终止，live/browser gate 仍不可执行。
+- `verification/` 目录当前只有 7 张截图，而 `.scratch/fakeradio-show-production/audits/2026-05-15-2000-audit.md` 声称存在 18 张截图；证据链仍不自洽。
+- 根级 `pnpm typecheck` 已经包含 `apps/web typecheck:test`，因此 test gate 已闭合；当前剩余 blocker 收敛为 live/browser gate 与验收证据一致性。
+
+因此，本 issue 重新保持 open，并继续作为当前 active gate。只有在真实可复现的 live/browser 用户流验收完成、且截图/报告证据一致后，Phase 4 才能重新判定完成。

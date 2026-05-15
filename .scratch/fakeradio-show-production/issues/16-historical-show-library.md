@@ -55,6 +55,18 @@ Issue 17 已于 2026-05-15 12:06 全部闭合。本 issue 的 blocker 已消除�
 
 ---
 
+## Audit correction - 2026-05-15 15:43 CST
+
+reviewer 再次复核后撤回上述“全部闭合”判断：
+
+- `pnpm dev` 当前仍复现 `tsx` IPC `listen EPERM`，live/browser gate 不可执行。
+- `verification/` 当前仅有 7 张截图，而最新 browser audit 声称 18 张，验收证据不一致。
+- Issue 17 已重新打开，继续作为当前 active gate。
+
+因此，本 issue 当前应视为“功能实现已存在，但最终浏览器验收仍依赖 Issue 17 闭合”，不能再把历史验收结论当作当前 checkout 的完成依据。
+
+---
+
 ## Audit correction - 2026-05-15 11:38 CST
 
 功能代码已落地，但当前不能继续把本 issue 当作已验收完成：
