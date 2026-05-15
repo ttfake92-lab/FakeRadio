@@ -16,6 +16,8 @@ import { useProductionPanels, type PanelId } from "../show/use-production-panels
 import { ProductionBoard } from "../show/production-board";
 import { GenerationConsole, type GenerationLogEntry } from "../show/generation-console";
 import { ExportQueue, type ExportTask } from "../show/export-queue";
+import { SettingsPanel } from "../show/settings-panel";
+import { ShowLibrary } from "../show/show-library";
 
 export type SkinStageProps = {
   theme: OnAirThemeId;
@@ -32,7 +34,6 @@ export type SkinStageProps = {
   mood: string;
   selectedPersona: Persona;
   avatarSrc: string | null;
-  showSettings: boolean;
   error?: string | null;
   djMessage?: string | null;
   agentMessages: AgentMessage[];
@@ -62,6 +63,7 @@ export type SkinStageProps = {
   onCancelJob?: () => void;
   onAddConstraint?: (constraints: { preferEra?: string; moodHint?: string; avoidExplicit?: boolean }) => void;
   onProjectsChanged?: () => void;
+  showSettings?: boolean;
 };
 
 function generateTone(id: string): [string, string, string] {
@@ -95,7 +97,6 @@ export function SkinStage({
   mood,
   selectedPersona,
   avatarSrc,
-  showSettings,
   error,
   djMessage,
   agentMessages,
@@ -125,6 +126,7 @@ export function SkinStage({
   onCancelJob,
   onAddConstraint,
   onProjectsChanged,
+  showSettings = false,
 }: SkinStageProps) {
   const liked = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -321,7 +323,7 @@ export function SkinStage({
         </div>
       )}
 
-      <ProductionToolbar panels={panels} onToggle={handlePanelToggle} />
+      <ProductionToolbar panels={panels} onToggle={handlePanelToggle} onAvatarClick={onAvatarClick} />
 
       <ProductionBoard
         brief={activeBrief}
@@ -365,8 +367,24 @@ export function SkinStage({
         onClose={() => panels.exportQueue.isOpen && handlePanelToggle("exportQueue")}
       />
 
+      <SettingsPanel
+        isExpanded={panels.settings.isExpanded}
+        isOpen={panels.settings.isOpen}
+        onToggleExpand={() => handlePanelToggle("settings")}
+        onClose={() => panels.settings.isOpen && handlePanelToggle("settings")}
+      />
+
+      <ShowLibrary
+        projects={productionProjects ?? []}
+        isExpanded={panels.showLibrary.isExpanded}
+        isOpen={panels.showLibrary.isOpen}
+        onToggleExpand={() => handlePanelToggle("showLibrary")}
+        onClose={() => panels.showLibrary.isOpen && handlePanelToggle("showLibrary")}
+        onRefresh={onProjectsChanged || (() => {})}
+      />
+
       {showSettings && (
-        <SettingsPanel
+        <PersonalizationPanel
           theme={theme}
           selectedPersona={selectedPersona}
           avatarSrc={avatarSrc}
@@ -374,7 +392,7 @@ export function SkinStage({
           onPersonaChange={onPersonaChange}
           onAvatarUpload={onAvatarUpload}
           onAvatarRemove={onAvatarRemove}
-          onClose={() => onAvatarClick()}
+          onClose={onAvatarClick}
         />
       )}
     </>
@@ -384,9 +402,11 @@ export function SkinStage({
 function ProductionToolbar({
   panels,
   onToggle,
+  onAvatarClick,
 }: {
   panels: ReturnType<typeof useProductionPanels>["panels"];
   onToggle: (id: PanelId) => void;
+  onAvatarClick: () => void;
 }) {
   return (
     <div
@@ -416,6 +436,24 @@ function ProductionToolbar({
         title="导出队列"
         isActive={panels.exportQueue.isOpen}
         onClick={() => onToggle("exportQueue")}
+      />
+      <ToolbarButton
+        label="⚙️"
+        title="设置"
+        isActive={panels.settings.isOpen}
+        onClick={() => onToggle("settings")}
+      />
+      <ToolbarButton
+        label="📚"
+        title="历史节目库"
+        isActive={panels.showLibrary.isOpen}
+        onClick={() => onToggle("showLibrary")}
+      />
+      <ToolbarButton
+        label="👤"
+        title="主题和头像"
+        isActive={false}
+        onClick={onAvatarClick}
       />
     </div>
   );
@@ -457,7 +495,7 @@ function ToolbarButton({
   );
 }
 
-function SettingsPanel({
+function PersonalizationPanel({
   theme,
   selectedPersona,
   avatarSrc,
@@ -502,7 +540,7 @@ function SettingsPanel({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600 }}>Settings</h3>
+        <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600 }}>Personalization</h3>
 
         {/* Theme selection */}
         <div style={{ marginBottom: 20 }}>

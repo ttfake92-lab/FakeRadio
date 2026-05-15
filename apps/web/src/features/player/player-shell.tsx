@@ -526,6 +526,15 @@ export function PlayerShell() {
     localStorage.setItem("fakeradio-persona", persona.short);
   }, []);
 
+  const handleProjectsChanged = useCallback(async () => {
+    try {
+      const response = await getShowProjects();
+      setProductionProjects(response.projects ?? []);
+    } catch {
+      // Ignore errors for now
+    }
+  }, []);
+
   return (
     <>
       {isNewSkin(theme) ? (
@@ -544,12 +553,11 @@ export function PlayerShell() {
           mood={mood}
           selectedPersona={selectedPersona}
           avatarSrc={avatarSrc}
-          showSettings={showSettings}
           error={playback.error}
           djMessage={skinDjMessage}
           agentMessages={agentMessages}
           onAgentMessage={(msg) => setAgentMessages((prev) => [...prev.slice(-19), msg])}
-          onChatSubmit={(text) => { void submitChatMessage(text); }}
+          onChatSubmit={submitChatMessage}
           onThemeChange={handleThemeChange}
           onAvatarClick={handleAvatarClick}
           onAvatarUpload={handleAvatarUpload}
@@ -571,6 +579,8 @@ export function PlayerShell() {
           onResumeJob={handleResumeJob}
           onCancelJob={handleCancelJob}
           onAddConstraint={handleAddConstraint}
+          onProjectsChanged={handleProjectsChanged}
+          showSettings={showSettings}
         />
       ) : (
       <OnAirTerminal

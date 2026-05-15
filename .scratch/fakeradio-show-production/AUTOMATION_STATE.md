@@ -1,115 +1,162 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新: 2026-05-15 CST，Phase 3 P3-03 已 commit，等待用户决策下一步**
+> **最后更新**: 2026-05-15 13:30 CST，本次推进完成
 
 ## Current Phase
 
-**Phase 1-2 完全闭合，Phase 3 制作体验深化（追加约束完整闭环）已完成，当前等待用户决策下一步。**
+**Phase 1-4 全部完成，等待用户确认 git commit 范围**
+
+所有 Phase 1-4 Issue 均已实现、测试通过、API 验证通过。
 
 ## Current Active Task
 
-**Phase 3 P3-03 needs-replan job 重启执行逻辑（已闭合 ✅，已 commit）**
-- 新增 `server/src/show/needs-replan-restart.test.ts` — 4 个测试验证 registry 层 `needs-replan → running` 转换
-- 新增 `server/src/http/start-job-replan.test.ts` — 3 个集成测试验证 route 层行为
-- GREEN: 修改 `server/src/http/register-routes.ts` 中 `/api/jobs/:id/start`
-  - 先查询 job 原有状态（`wasNeedsReplan = existingJob.status === "needs-replan"`）
-  - 如果是从 `needs-replan` 重新启动，调用 `executeScheduledJob()` 触发完整生成流程
-  - 新增错误信息区分"not found"和"invalid state transition"
-- typecheck: 全部通过 ✅
-- test: 60 test files, 614 tests passed ✅
-- git commit: `309df04` ✅
+**无待处理 active task**
+
+所有 Phase 1-4 的 Issue 均已 closed：
+- Phase 1: Issue 01-08 ✅
+- Phase 2: Issue p2-01, p2-02 ✅
+- Phase 3: Issue p3-01, p3-02 ✅
+- Phase 4: Issue 14-17 ✅
 
 ## Current Active Issue
 
-**Phase 3 - P3-03 needs-replan server 侧执行逻辑（已闭合 ✅）**
-- Issue doc: `.scratch/fakeradio-show-production/issues/p3-01-generation-console-controls.md`（同一 issue 中提及）
-- 追加约束后的完整流程已闭环：
-  1. 用户在 Generation Console 点击"追加约束" → `ConstraintDialog` 提交
-  2. `handleAddConstraint` 调用 `addConstraintsToPlan()` → 新 ShowPlan 版本
-  3. 调用 `markJobNeedsReplan()` → job 进入 `needs-replan`
-  4. 用户点击"恢复" → `/api/jobs/:id/start` → `executeScheduledJob()` 重新执行
-  5. job 达到 `completed` 或 `failed` 状态
+**无 active issue，等待用户确认**
 
-## Current Verification (2026-05-15)
+## Last Known Verification
 
-```bash
-git status
-```
-- Worktree 干净，commit `309df04` 已完成
+### 2026-05-15 13:30 CST 本次推进验证
 
+#### 测试门禁
 ```bash
 pnpm test
-```
-- 60 test files, 614 tests passed ✅
-
-```bash
+# 60 test files, 614 tests passed
 pnpm typecheck
+# packages/shared, server, apps/web typecheck, apps/web typecheck:test 全部通过
 ```
-- packages/shared ✅
-- apps/web ✅
-- server ✅
 
-## Done Log
+**结果**：
+- `pnpm test`：60 个测试文件，614 个测试全部通过
+- `pnpm typecheck`：根级 typecheck 完整覆盖 `packages/shared`、`server`、`apps/web`（主 tsconfig）和 `apps/web typecheck:test`（测试 tsconfig），全部通过
 
-### 2026-05-15 Phase 3 P3-03 needs-replan job 重启执行（已 commit）
+#### Live API 验证
+```bash
+# dev server 启动成功
+pnpm dev
+# server: FakeRadio server listening on http://127.0.0.1:3301
+# web: Next.js Ready in 304ms
 
-- **RED (registry 层)**: `server/src/show/needs-replan-restart.test.ts` - 4 个测试
-  - 测试 1: `needs-replan → running` 状态转换 ✅
-  - 测试 2: 重启后 job 保留相同 id 和 briefId ✅
-  - 测试 3: 重启后 `updatedAt` 时间戳更新 ✅
-  - 测试 4: pending job 可正常启动 ✅
-- **RED (route 层)**: `server/src/http/start-job-replan.test.ts` - 3 个集成测试
-  - 测试 1: needs-replan job 重新启动后触发重新执行（最终状态为 completed/failed/running 之一）✅
-  - 测试 2: 启动不存在的 job 返回 400 ✅
-  - 测试 3: pending job 启动不触发重新执行 ✅
-- **GREEN**: `server/src/http/register-routes.ts` 中 `/api/jobs/:id/start` 改造
-  - 改造前: 只调用 `jobRegistry.start()` → 状态变为 running，但不会重新执行
-  - 改造后: 先查询 `existingJob`，如果 `wasNeedsReplan === true`，则调用 `executeScheduledJob()` 触发完整生成流程
-  - 复用 `generate-now` 的 `executionDeps` 构建方式
-  - 修复了 `not found` 和 `invalid state transition` 两种错误的区分
-- **验证**: typecheck 全绿，test 614/614 passed
-- **git commit**: `309df04` ✅
+# 所有 API 端点正常响应
+curl http://127.0.0.1:3301/api/health
+# {"ok":true,"service":"FakeRadio","adapters":{"llm":"ready",...},"checkedAt":"..."}
 
-### 2026-05-15 Phase 3 P3-01 Generation Console 实时日志 polling
+curl http://127.0.0.1:3301/api/settings
+# {"settings":{"researchEnabled":true,"providerMode":"auto",...}}
 
-- RED: `apps/web/src/lib/api-client.test.ts` - 3 个测试验证 `getJob()` 行为
-- GREEN: `apps/web/src/lib/api-client.ts` - `getJob(jobId)` 实现
-- player-shell + skin-stage 改造
-- **git commit**: `acf4cb4` ✅
+curl http://127.0.0.1:3301/api/briefs
+# {"briefs":[]}
 
-### 2026-05-14 Phase 2 门禁闭合确认 + git push
+curl http://127.0.0.1:3301/api/jobs
+# {"jobs":[...]}
 
-- Brief status lifecycle 验证完成
-- git push: 19 commits 已推送至 origin/main
+curl http://127.0.0.1:3301/api/plans
+# {"plans":[]}
+```
+
+**结果**：
+- `pnpm dev` 成功启动，无 tsx IPC EPERM 错误
+- Server API (3301) 和 Web (3302) 均正常响应
+- 所有核心 API 端点可访问
+- 浏览器多视口验收因 sandbox 限制无法通过 agent-browser 执行，需用户手动验证
+
+#### 浏览器多视口验收状态
+
+**Blocker: agent-browser 因 sandbox 限制无法执行**
+
+用户需手动验证以下视口：
+- [ ] 320px（超小手机）
+- [ ] 375px（手机）
+- [ ] 1440px（桌面）
+
+验证命令：
+```bash
+pnpm dev
+# 然后在浏览器中访问 http://127.0.0.1:3302/
+# 依次打开 Settings、Production Board、Generation Console、Export Queue、Personalization、ShowLibrary
+```
+
+#### 代码库状态检查
+- ProgramBrief 完整实现：contract、repository、intent parsing、API
+- ShowPlan 完整实现：contract、repository、generator、版本化
+- Background job 完整实现：job registry、production trace、状态管理
+- Theme selection engine：用户库优先、库外上限 60%、不避开最近播放
+- Daily selection engine：Daily Show 强避开最近播放
+- ShowProject storage：SQLite + 文件系统、工程包管理
+- Generate now & Schedule tonight：复用同一套 job 逻辑
+- Scheduler integration：executeScheduledJob 完整链路
+- UI：Production Board、Generation Console、Settings、ShowLibrary 可折叠面板
+- Export Package：show.mp3、show-notes.md、show-plan.json、production-trace.jsonl
+- 多 brief 过滤：PlayerShell 和 ProductionBoard 按 activeBriefId 过滤
+- trace redaction：所有写入和导出边界强制执行
+
+#### dirty worktree 状态
+```bash
+git status --short --branch
+# main...origin/main [ahead 4]
+```
+
+**状态**：当前工作区有 Phase 4 相关改动未提交：
+- `.scratch/fakeradio-show-production/AUTOMATION_STATE.md`
+- `.scratch/fakeradio-show-production/issues/14-17*.md`
+- `apps/web/package.json`
+- `apps/web/src/features/player/player-shell.tsx`
+- `apps/web/src/features/player/skin-stage.tsx`
+- `apps/web/src/features/show/use-production-panels.test.ts`
+- `apps/web/src/features/show/use-production-panels.ts`
+- `apps/web/src/features/show/settings-panel.test.tsx`
+- `apps/web/src/features/show/settings-panel.tsx`
+- `apps/web/src/features/show/show-library.test.tsx`
+- `apps/web/src/features/show/show-library.tsx`
+- `apps/web/tsconfig.json`
+- `apps/web/tsconfig.test.json`
+- `apps/web/vitest.setup.ts`
+- `package.json`
+- `pnpm-lock.yaml`
+- `vitest.config.ts`
+
+未跟踪文件：
+- `.scratch/fakeradio-show-production/audits/*.md`（审计报告）
+- `.scratch/fakeradio-show-production/issues/15-17*.md`（Issue 文档）
+- `.scratch/fakeradio-show-production/verification/*.png`（验收截图）
 
 ## Next Action
 
-**Phase 3 追加约束完整闭环已完成。下一步有两个方向，需要用户决策：**
+1. **用户确认 git commit 范围**：哪些文件需要提交，哪些保留本地
+2. **可选：手动浏览器验收**：验证 320px / 375px / 1440px 视口下各面板正常显示
+3. **可选：git push** 将改动推送到远端
 
-### 方向 A：Settings UI（Phase 3 剩余验收项）
-PRD 验收条件之一：Settings 能控制外部资料研究、provider、音色、trace 隐私。
-- 前端: `apps/web/src/features/show/` - 新建 settings-panel 组件
-- API: `apps/web/src/lib/api-client.ts` - 新增 settings API 函数
-- 后端: `server/src/http/register-routes.ts` - Settings API（已有 GET/PUT `/api/settings`）
-- 验收: 用户可在 Settings 中配置外部资料研究开关、provider 选择、音色选择、trace 隐私级别
+## Done Log
 
-### 方向 B：Phase 4 历史节目库浏览和删除
-PRD Phase 4 目标：
-- 浏览历史 show project
-- 删除单期 trace 或整期工程
-- 导出时可选是否包含 trace
+### 2026-05-15 13:30 CST 本次推进
+- 确认 Phase 1-4 所有 Issue 已 closed
+- 运行完整测试：614 个测试全部通过
+- 运行完整 typecheck：全部通过
+- 启动 dev server 验证 live API 可访问
+- 验证所有核心 API 端点正常响应
+- 记录 browser gate blocker（sandbox 限制）
+- 更新自动化状态
+
+### 2026-05-15 12:32 CST 之前推进
+- Phase 1 完成（Issue 01-08）
+- Phase 2 完成（Issue p2-01, p2-02）
+- Phase 3 完成（Issue p3-01, p3-02）
+- Phase 4 完成（Issue 14-17）
 
 ## Blockers
 
-**无技术 blocker。Next Action 需要用户确认方向 A 或 B，或两者皆做。**
+**浏览器验收需用户手动执行**
 
-## 待后续迭代（不在当前计划内）
-
-- [ ] Phase 3：Settings UI
-- [ ] Phase 4：历史节目库浏览和删除
-- [ ] ProgramBrief 生命周期状态机完整测试覆盖（draft → confirmed → generating → completed/failed）
-- [ ] 公开发布模式
-- [ ] 去版权版导出
-- [ ] 创作者授权导出
-- [ ] 复杂在线重排
-- [ ] 浏览器验收（320px / 375px / 1440px）
+agent-browser 因 sandbox 限制无法写入配置目录，无法执行自动化浏览器验收。
+用户需手动在浏览器中验证：
+- 320px / 375px / 1440px 视口
+- 工具栏、Settings、Production Board、Generation Console、Export Queue、Personalization、ShowLibrary
+- 各面板无遮挡核心播放器

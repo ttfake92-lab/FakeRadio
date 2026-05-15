@@ -11,22 +11,24 @@ describe("PanelState types", () => {
     expect(state.isExpanded).toBe(false);
   });
 
-  it("PanelId can be any of the four panel types", () => {
-    const ids: PanelId[] = ["productionBoard", "generationConsole", "exportQueue", "settings"];
-    expect(ids).toHaveLength(4);
+  it("PanelId can be any of the five panel types", () => {
+    const ids: PanelId[] = ["productionBoard", "generationConsole", "exportQueue", "settings", "showLibrary"];
+    expect(ids).toHaveLength(5);
   });
 
-  it("ProductionPanelsState has all four panels", () => {
+  it("ProductionPanelsState has all five panels", () => {
     const state: ProductionPanelsState = {
       productionBoard: { isOpen: false, isExpanded: false },
       generationConsole: { isOpen: false, isExpanded: false },
       exportQueue: { isOpen: false, isExpanded: false },
       settings: { isOpen: false, isExpanded: false },
+      showLibrary: { isOpen: false, isExpanded: false },
     };
     expect(state.productionBoard.isOpen).toBe(false);
     expect(state.generationConsole.isOpen).toBe(false);
     expect(state.exportQueue.isOpen).toBe(false);
     expect(state.settings.isOpen).toBe(false);
+    expect(state.showLibrary.isOpen).toBe(false);
   });
 });
 
@@ -72,12 +74,14 @@ describe("Production panels isolation", () => {
       generationConsole: { isOpen: false, isExpanded: false },
       exportQueue: { isOpen: false, isExpanded: false },
       settings: { isOpen: false, isExpanded: false },
+      showLibrary: { isOpen: false, isExpanded: false },
     };
 
     expect(state.productionBoard.isOpen).toBe(true);
     expect(state.generationConsole.isOpen).toBe(false);
     expect(state.exportQueue.isOpen).toBe(false);
     expect(state.settings.isOpen).toBe(false);
+    expect(state.showLibrary.isOpen).toBe(false);
   });
 
   it("can have multiple panels open simultaneously", () => {
@@ -86,12 +90,14 @@ describe("Production panels isolation", () => {
       generationConsole: { isOpen: true, isExpanded: true },
       exportQueue: { isOpen: false, isExpanded: false },
       settings: { isOpen: true, isExpanded: false },
+      showLibrary: { isOpen: false, isExpanded: false },
     };
 
     const openPanels = [
       state.productionBoard,
       state.generationConsole,
       state.settings,
+      state.showLibrary,
     ].filter((p) => p.isOpen);
 
     expect(openPanels).toHaveLength(3);

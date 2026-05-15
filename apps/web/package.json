@@ -10,6 +10,7 @@
     "build": "next build",
     "pretypecheck": "pnpm --filter @fakeradio/shared build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "pretest": "pnpm --filter @fakeradio/shared build",
     "test": "cd ../.. && vitest run apps/web/src",
     "prelint": "pnpm --filter @fakeradio/shared build",
@@ -23,8 +24,12 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
     "playwright": "^1.59.1",
     "vitest": "^3.2.4"
   }

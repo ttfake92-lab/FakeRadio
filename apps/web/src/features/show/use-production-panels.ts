@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-export type PanelId = "productionBoard" | "generationConsole" | "exportQueue" | "settings";
+export type PanelId = "productionBoard" | "generationConsole" | "exportQueue" | "settings" | "showLibrary";
 
 export type PanelState = {
   isOpen: boolean;
@@ -12,6 +12,7 @@ export type ProductionPanelsState = {
   generationConsole: PanelState;
   exportQueue: PanelState;
   settings: PanelState;
+  showLibrary: PanelState;
 };
 
 const defaultPanelState: PanelState = {
@@ -24,6 +25,7 @@ const initialState: ProductionPanelsState = {
   generationConsole: { ...defaultPanelState },
   exportQueue: { ...defaultPanelState },
   settings: { ...defaultPanelState },
+  showLibrary: { ...defaultPanelState },
 };
 
 export function useProductionPanels() {
