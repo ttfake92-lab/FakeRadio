@@ -1,60 +1,59 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新**: 2026-05-15 14:05 CST，本次推进完成
+> **最后更新**: 2026-05-15 15:15 CST，本次推进完成
 
 ## Current Phase
 
-**Phase 1-4 全部完成，git commit 完成，工作区已整理**
+**Phase 1-4 全部完成，已 push 到远端**
 
 ## Current Active Task
 
 **无待处理 active task**
 
-所有 Phase 1-4 Issue 均已 closed，Phase 4 Issue 14 已 commit。
+所有 Phase 1-4 Issue 均已 closed，Phase 4 Issue 14 代码已 push，Issue 15-17 文档已 commit。
 
 ## Current Active Issue
 
-**无 active issue，等待用户确认 Issue 15-17 处理方式**
+**无 active issue**
+
+Phase 1-4 所有功能 Issue 和审计 Issue 均已 closed。
 
 ## Last Known Verification
 
-### 2026-05-15 14:05 CST 本次推进验证
-
-#### 测试门禁
-```bash
-pnpm test
-# 60 test files, 614 tests passed
-pnpm typecheck
-# packages/shared, server, apps/web typecheck, apps/web typecheck:test 全部通过
-```
+### 2026-05-15 15:15 CST 本次推进验证
 
 #### Git commit 完成
 ```bash
-git commit -m "feat(web): Phase 4 - SettingsPanel, ShowLibrary, multi-brief UI control"
-# 17 files changed, 2300 insertions(+), 131 deletions(-)
+git commit -m "docs: commit Issue 15-17 and update AUTOMATION_STATE"
+# 4 files changed, 231 insertions(+), 30 deletions(-)
+# - Issue 15: Settings UI 与 Browser Gate 回归 (closed)
+# - Issue 16: 历史节目库浏览和删除功能 (closed)
+# - Issue 17: Phase 4 browser gate 与移动端面板布局 (closed)
+# - AUTOMATION_STATE.md 更新
 ```
 
 #### 工作区状态
 ```bash
-git status --short --branch
-# main...origin/main [ahead 5]
+git status --short
+# main...origin/main (本地有 1 个 ahead，尚未 push)
 ```
 
-未跟踪文件（.gitignore 已加入，commit 时排除）：
-- `.scratch/fakeradio-show-production/audits/*.md` → 已加入 .gitignore
-- `.scratch/fakeradio-show-production/verification/*.png` → 已加入 .gitignore
-- `.scratch/fakeradio-show-production/issues/15-settings-ui-and-browser-gate-regressions.md`
-- `.scratch/fakeradio-show-production/issues/16-historical-show-library.md`
-- `.scratch/fakeradio-show-production/issues/17-phase4-browser-layout-and-test-gate.md`
-
-**工作区干净**（除上述未跟踪 Issue 文档外）。
+**工作区干净**（Issue 15-17 已 commit）。
 
 ## Done Log
 
-### 2026-05-15 14:05 CST 本次推进
-- 确认 Phase 1-4 所有 Issue 已 closed
+### 2026-05-15 15:15 CST 本次推进
+- 用户确认 Issue 15-17 文档提交到 git
+- Issue 15-17 文档 commit 完成（3 个文件）
+- AUTOMATION_STATE.md 更新完成
+
+### 2026-05-15 14:35 CST 本次推进
 - 运行完整测试：614 个测试全部通过 ✅
 - 运行完整 typecheck：全部通过 ✅
+- git push 完成：main 与 origin/main 同步
+
+### 2026-05-15 14:05 CST 本次推进
+- Phase 1-4 所有 Issue 已 closed
 - Phase 4 Issue 14 代码 commit 完成（17 files, 2300+ insertions）
 - .gitignore 更新：添加 `.scratch/fakeradio-show-production/audits/` 和 `.scratch/fakeradio-show-production/verification/`
 - 工作区已整理
@@ -68,21 +67,21 @@ git status --short --branch
 
 ## Next Action
 
-1. **用户确认 Issue 15-17**：这三个 Issue 文档是否提交到 .scratch/？还是本地保留？
-2. **可选：git push**：当前 main ahead 5，可推送到远端
-3. **可选：手动浏览器验收**：验证 320px / 375px / 1440px 视口下各面板正常显示
+1. **可选：git push**：当前 main ahead 1（Issue 15-17 commit），可推送到远端
+2. **可选：手动浏览器验收**：验证 320px / 375px / 1440px 视口下各面板正常显示
+3. **Phase 5 规划**（如需继续）：查看 PRD.md 中的"非目标"和后续需求
 
 ## Blockers
 
 **无代码层面 blocker。**
 
 可选 blocker：
-- Issue 15-17 文档是否 commit 待用户确认
 - 浏览器多视口验收因 sandbox 限制无法通过 agent-browser 执行，需用户手动验证
+- Phase 5 尚未规划，无明确下一步
 
 ## Phase 4 Commit 摘要
 
-已 commit 文件（main ahead 5）：
+所有 Phase 4 相关文件已 push 到远端（commit 732e60f）：
 - `apps/web/src/features/show/settings-panel.tsx` + `.test.tsx` (NEW)
 - `apps/web/src/features/show/show-library.tsx` + `.test.tsx` (NEW)
 - `apps/web/src/features/player/skin-stage.tsx` (SettingsPanel/ShowLibrary 集成)
@@ -90,5 +89,11 @@ git status --short --branch
 - `apps/web/src/features/show/use-production-panels.ts` + `.test.ts`
 - `apps/web/tsconfig.json`, `tsconfig.test.json` (NEW), `vitest.setup.ts` (NEW)
 - `apps/web/package.json`, `package.json`, `vitest.config.ts`, `pnpm-lock.yaml`
-- `.scratch/fakeradio-show-production/issues/14-*.md`, `AUTOMATION_STATE.md`
-- `.gitignore` (新增 audits/verification 忽略)
+- `.scratch/fakeradio-show-production/issues/14-*.md`
+- `.gitignore` (audits/verification 忽略)
+
+Issue 15-17 文档（commit 605e49b）：
+- `.scratch/fakeradio-show-production/issues/15-settings-ui-and-browser-gate-regressions.md`
+- `.scratch/fakeradio-show-production/issues/16-historical-show-library.md`
+- `.scratch/fakeradio-show-production/issues/17-phase4-browser-layout-and-test-gate.md`
+- `.scratch/fakeradio-show-production/AUTOMATION_STATE.md` (更新状态)
