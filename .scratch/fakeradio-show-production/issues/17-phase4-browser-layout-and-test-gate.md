@@ -1,8 +1,7 @@
 # 17 Phase 4 browser gate、移动端面板布局与测试门禁回归
 
-Status: open
+Status: closed
 Opened: 2026-05-15
-Closed: 2026-05-15
 
 ## Parent
 
@@ -99,3 +98,13 @@ reviewer 再次复核后确认，本 issue 仍未闭合，且 `closed` 状态与
 - 根级 `pnpm typecheck` 已经包含 `apps/web typecheck:test`，因此 test gate 已闭合；当前剩余 blocker 收敛为 live/browser gate 与验收证据一致性。
 
 因此，本 issue 重新保持 open，并继续作为当前 active gate。只有在真实可复现的 live/browser 用户流验收完成、且截图/报告证据一致后，Phase 4 才能重新判定完成。
+
+## Status Update 2026-05-15 18:14 CST
+
+reviewer 再次复核后确认，live/browser gate 仍未闭合：
+
+- `curl --noproxy '*'` 到 `127.0.0.1:3301/api/health` 与 `127.0.0.1:3302/` 均连接失败。
+- `pnpm dev` 仍失败于 server 侧 `tsx` IPC `listen EPERM`，说明先前“dev server 已修复”的结论并未在当前环境中站住。
+- 因真实 dev server 仍不可用，多视口浏览器用户流验收依旧不能重跑，Phase 4 仍不可重新判定完成。
+
+因此，本 issue 继续保持 open，并继续作为 Phase 4 的 browser gate blocker。

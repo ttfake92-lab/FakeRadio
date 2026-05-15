@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import type { Settings as SettingsType } from "@fakeradio/shared";
 import { getSettings, updateSettings } from "../../lib/api-client";
 
@@ -15,11 +15,14 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const pendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const settingsSnapshotRef = useRef<SettingsType | null>(null);
 
   const loadSettings = async () => {
     try {
       const response = await getSettings();
       setSettings(response.settings);
+      settingsSnapshotRef.current = response.settings;
     } catch (e) {
       console.error("Failed to load settings", e);
     } finally {
@@ -33,24 +36,41 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
     }
   }, [isOpen]);
 
-  const handleSettingChange = async <K extends keyof SettingsType>(
+  useEffect(() => {
+    return () => {
+      pendingTimersRef.current.forEach((timer) => clearTimeout(timer));
+      pendingTimersRef.current.clear();
+    };
+  }, []);
+
+  const handleSettingChange = useCallback(<K extends keyof SettingsType>(
     key: K,
     value: SettingsType[K]
   ) => {
     if (!settings) return;
-    setSaving(true);
-    try {
-      const newSettings = { ...settings, [key]: value };
-      setSettings(newSettings);
-      const response = await updateSettings(newSettings);
-      setSettings(response.settings);
-    } catch (e) {
-      console.error("Failed to update settings", e);
-      await loadSettings();
-    } finally {
-      setSaving(false);
-    }
-  };
+    setSettings((prev) => prev ? { ...prev, [key]: value } : prev);
+    settingsSnapshotRef.current = settings ? { ...settings, [key]: value } : null;
+    const existingTimer = pendingTimersRef.current.get(key as string);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        const currentSettings = settingsSnapshotRef.current;
+        if (currentSettings) {
+          const response = await updateSettings(currentSettings);
+          setSettings(response.settings);
+          settingsSnapshotRef.current = response.settings;
+        }
+      } catch (e) {
+        console.error("Failed to update settings", e);
+        await loadSettings();
+      } finally {
+        setSaving(false);
+        pendingTimersRef.current.delete(key as string);
+      }
+    }, 300);
+    pendingTimersRef.current.set(key as string, timer);
+  }, [settings]);
 
   if (!isOpen) return null;
 
@@ -59,8 +79,8 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
       style={{
         position: "fixed",
         bottom: 80,
-        right: 16,
-        left: 16,
+        left: "50%",
+        transform: "translateX(-50%)",
         width: isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
         maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
         background: "rgba(10, 10, 10, 0.95)",
@@ -96,6 +116,7 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
               e.stopPropagation();
               onClose();
             }}
+            aria-label="关闭"
             style={{
               background: "transparent",
               border: "none",

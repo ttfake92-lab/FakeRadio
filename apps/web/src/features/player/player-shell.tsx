@@ -530,8 +530,8 @@ export function PlayerShell() {
     try {
       const response = await getShowProjects();
       setProductionProjects(response.projects ?? []);
-    } catch {
-      // Ignore errors for now
+    } catch (error) {
+      console.error("Failed to load show projects:", error);
     }
   }, []);
 

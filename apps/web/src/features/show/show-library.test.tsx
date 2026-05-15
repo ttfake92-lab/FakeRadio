@@ -178,10 +178,10 @@ describe("ShowLibrary 历史节目库", () => {
     render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={handleRefresh} />);
     
     await waitFor(() => {
-      expect(screen.getByText("↻")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     });
 
-    const refreshButton = screen.getByText("↻");
+    const refreshButton = screen.getByRole("button", { name: "刷新" });
     fireEvent.click(refreshButton);
 
     expect(handleRefresh).toHaveBeenCalledTimes(1);
@@ -192,10 +192,10 @@ describe("ShowLibrary 历史节目库", () => {
     render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={handleClose} onRefresh={() => {}} />);
     
     await waitFor(() => {
-      expect(screen.getByText("✕")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
     });
 
-    const closeButton = screen.getByText("✕");
+    const closeButton = screen.getByRole("button", { name: "关闭" });
     fireEvent.click(closeButton);
 
     expect(handleClose).toHaveBeenCalledTimes(1);

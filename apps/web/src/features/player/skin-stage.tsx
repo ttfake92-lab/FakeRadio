@@ -19,6 +19,8 @@ import { ExportQueue, type ExportTask } from "../show/export-queue";
 import { SettingsPanel } from "../show/settings-panel";
 import { ShowLibrary } from "../show/show-library";
 
+const ACTIVE_JOB_STATUSES: string[] = ["pending", "running", "paused", "needs-replan"];
+
 export type SkinStageProps = {
   theme: OnAirThemeId;
   now: NowResponse | null;
@@ -262,7 +264,7 @@ export function SkinStage({
     if (!activeBrief) return null;
     const jobsForBrief = productionJobs?.filter((j) => j.briefId === activeBrief.id) ?? [];
     return jobsForBrief.find(job => 
-      ["pending", "running", "paused", "needs-replan"].includes(job.status)
+      ACTIVE_JOB_STATUSES.includes(job.status)
     ) ?? jobsForBrief[0] ?? null;
   }, [activeBrief, productionJobs]);
 

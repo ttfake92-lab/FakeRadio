@@ -214,10 +214,10 @@ describe("SettingsPanel 用户流", () => {
       />
     );
     await waitFor(() => {
-      expect(screen.getByText("✕")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("✕"));
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
 });

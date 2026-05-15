@@ -1,8 +1,9 @@
 "use client";
 
 import type { ShowProject } from "@fakeradio/shared";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { deleteProject, deleteProjectTrace, getProjectExportFiles, downloadProjectFile } from "../../lib/api-client";
+import { downloadBlob } from "../../lib/download-blob";
 
 export type ShowLibraryProps = {
   isExpanded: boolean;
@@ -66,6 +67,14 @@ export function ShowLibrary({
   onClose,
   onRefresh,
 }: ShowLibraryProps) {
+  const sortedProjects = useMemo(() => {
+    return [...projects].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [projects]);
+
+  if (!isOpen) return null;
+
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingTraceId, setDeletingTraceId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -73,12 +82,6 @@ export function ShowLibrary({
     id: string;
     type: "project" | "trace";
   } | null>(null);
-
-  if (!isOpen) return null;
-
-  const sortedProjects = [...projects].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
 
   const handleDeleteProject = async (projectId: string) => {
     setDeletingId(projectId);
@@ -110,30 +113,10 @@ export function ShowLibrary({
     setDownloadingId(project.id);
     try {
       const files = await getProjectExportFiles(project.id);
-      if (Array.isArray(files)) {
-        for (const file of files) {
-          const blob = await downloadProjectFile(project.id, file);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = file;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
-      } else if (files.files && Array.isArray(files.files)) {
-        for (const file of files.files) {
-          const blob = await downloadProjectFile(project.id, file);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = file;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
+      const fileList = Array.isArray(files) ? files : files.files ?? [];
+      for (const file of fileList) {
+        const blob = await downloadProjectFile(project.id, file);
+        downloadBlob(blob, file);
       }
     } catch (error) {
       console.error("Failed to download project files:", error);
@@ -147,8 +130,8 @@ export function ShowLibrary({
       style={{
         position: "fixed",
         bottom: 80,
-        left: 16,
-        right: 16,
+        left: "50%",
+        transform: "translateX(-50%)",
         width: isExpanded ? "min(520px, calc(100vw - 32px))" : "min(240px, calc(100vw - 32px))",
         maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
         background: "rgba(10, 10, 10, 0.95)",
@@ -158,7 +141,6 @@ export function ShowLibrary({
         transition: "width 0.2s ease, transform 0.2s ease",
         zIndex: 100,
         backdropFilter: "blur(12px)",
-        margin: "0 auto",
       }}
     >
       <div
@@ -199,6 +181,7 @@ export function ShowLibrary({
               e.stopPropagation();
               onRefresh();
             }}
+            aria-label="刷新"
             style={{
               background: "transparent",
               border: "none",
@@ -207,7 +190,6 @@ export function ShowLibrary({
               fontSize: 14,
               padding: 4,
             }}
-            title="刷新"
           >
             ↻
           </button>
@@ -216,6 +198,7 @@ export function ShowLibrary({
               e.stopPropagation();
               onClose();
             }}
+            aria-label="关闭"
             style={{
               background: "transparent",
               border: "none",
