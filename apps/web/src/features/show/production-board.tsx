@@ -112,7 +112,7 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
         position: "fixed",
         bottom: 80,
         left: 16,
-        width: isExpanded ? 400 : 200,
+        width: isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
         maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
         background: "rgba(0, 0, 0, 0.85)",
         border: "1px solid rgba(255, 255, 255, 0.1)",

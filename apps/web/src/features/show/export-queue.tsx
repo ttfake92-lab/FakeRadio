@@ -68,7 +68,7 @@ export function ExportQueue({
         bottom: 80,
         left: "50%",
         transform: "translateX(-50%)",
-        width: isExpanded ? 500 : 240,
+        width: isExpanded ? "min(500px, calc(100vw - 32px))" : "min(240px, calc(100vw - 32px))",
         maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
         background: "rgba(10, 10, 10, 0.95)",
         border: "1px solid rgba(255, 255, 255, 0.15)",
