@@ -1,6 +1,6 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新**: 2026-05-15 20:45 CST，Git commit 完成
+> **最后更新**: 2026-05-15 23:30 CST，Issue 18 代码审查修复完成
 
 ## Current Phase
 
@@ -8,13 +8,24 @@
 
 ## Current Active Task
 
-**无 - Phase 4 所有任务已完成**
+**无 - Issue 18 所有修复已完成**
 
 ## Current Active Issue
 
-**无 - 所有 Issue 已关闭**
+**无 - Issue 18 已完成**
 
 ## Last Known Verification
+
+### 2026-05-15 23:30 CST 本次推进 - Issue 18 代码审查修复完成
+
+#### 测试 & Typecheck - ✅ 全部通过
+```bash
+pnpm test
+# 614 tests passed ✅
+
+pnpm typecheck
+# all passed ✅
+```
 
 ### 2026-05-15 20:45 CST 本次推进 - Git commit 完成
 
@@ -76,6 +87,23 @@ pnpm typecheck
 ```
 
 ## Done Log
+
+### 2026-05-15 23:30 CST 本次推进 - Issue 18 代码审查修复全部完成
+- **修复 CSS layout 冲突**：`settings-panel.tsx` 和 `show-library.tsx` 使用 `left: 50% + transform: translateX(-50%)` 替代 `left/right + width`
+- **修复 TextSetting debounce**：添加 300ms debounce，避免每按键都发 API
+- **提取 `downloadBlob` 共享工具函数**：创建 `apps/web/src/lib/download-blob.ts`，消除重复代码
+- **修复 `handleProjectsChanged` 错误静默处理**：添加 `console.error` 日志输出
+- **修复测试选择器**：给刷新和关闭按钮添加 `aria-label`，测试改用 `getByRole("button", { name: "xxx" })`
+- **修复 Minor 问题**：
+  - `show-library.tsx` 添加 `useMemo` 优化排序性能
+  - `skin-stage.tsx` 提取 `ACTIVE_JOB_STATUSES` 常量
+- **验证结果**：614 个测试全部通过 ✅，typecheck 全部通过 ✅
+
+### 2026-05-15 22:00 CST 本次推进 - Phase 4 代码审查完成
+- 对 commit `44e01df`（Phase 4 代码）执行代码审查
+- 发现 5 个 Important 问题 + 3 个 Minor 问题，无 Critical
+- 创建 Issue 18：`18-phase4-code-review-fixes.md`
+- 更新 AUTOMATION_STATE.md 记录审查结果和下一步行动
 
 ### 2026-05-15 20:45 CST 本次推进 - Git commit 完成
 - 将当前状态变更提交到 git（commit 082e4ae）
@@ -145,9 +173,8 @@ pnpm typecheck
 
 ## Next Action
 
-- Phase 1-4 全部完成，无 active issue
-- 等待后续 Phase 5 计划或新需求
-- 可选：提交当前状态变更到 git
+- **完成后步骤**：将 Issue 18 修复提交到 git，关闭 Issue 18
+- Phase 4 全部完成，可进入下一阶段或等待用户新的指令
 
 ## Blockers
 
@@ -155,6 +182,7 @@ pnpm typecheck
   - live/browser gate ✅
   - 测试 & typecheck ✅
   - 证据一致性 ✅
+  - Issue 18 代码审查修复 ✅
 
 ## Phase 4 Commit 摘要
 
@@ -174,3 +202,12 @@ Issue 15-17 文档（commit 605e49b）：
 - `.scratch/fakeradio-show-production/issues/16-historical-show-library.md`
 - `.scratch/fakeradio-show-production/issues/17-phase4-browser-layout-and-test-gate.md`
 - `.scratch/fakeradio-show-production/AUTOMATION_STATE.md` (更新状态)
+
+Issue 18 修复文件：
+- `apps/web/src/features/show/settings-panel.tsx` (CSS 修复、debounce)
+- `apps/web/src/features/show/show-library.tsx` (CSS 修复、useMemo、aria-label)
+- `apps/web/src/features/show/show-library.test.tsx` (测试选择器修复)
+- `apps/web/src/features/show/settings-panel.test.tsx` (测试选择器修复)
+- `apps/web/src/features/player/skin-stage.tsx` (ACTIVE_JOB_STATUSES 常量)
+- `apps/web/src/features/player/player-shell.tsx` (错误处理)
+- `apps/web/src/lib/download-blob.ts` (新增共享工具函数)
