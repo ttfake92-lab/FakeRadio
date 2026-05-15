@@ -29,3 +29,5 @@ apps/web/test-playback.mjs
 player-screenshot.png
 dogfood-output/
 test-fakeradio*.py
+.scratch/fakeradio-show-production/audits/
+.scratch/fakeradio-show-production/verification/
