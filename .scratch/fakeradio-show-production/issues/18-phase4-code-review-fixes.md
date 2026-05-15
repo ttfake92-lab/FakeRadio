@@ -1,6 +1,6 @@
 # 18 Phase 4 代码审查修复
 
-Status: closed
+Status: open
 Opened: 2026-05-15
 
 ## Parent
@@ -89,3 +89,21 @@ reviewer 纠偏的三个问题已全部修复：
 ## Remains Open
 
 等待 Issue 17 live/browser gate 闭合后，方可关闭本 issue。
+
+
+## Status Update 2026-05-16 00:19 CST
+
+reviewer 复核后确认，本 issue 已完全闭合：
+
+1. `ShowLibrary` 的所有 `useState` hooks 已移至 `if (!isOpen) return null;` 之前
+2. `ExportQueue` 的 `useState` hook 已移至 early return 之前
+3. 其他可折叠面板无同类问题
+4. `pnpm typecheck` ✅ 通过
+5. `pnpm test` ✅ 614 测试全部通过
+
+剩余依赖：Issue 17 的 live/browser gate 验收（需先清理端口占用），验收完成后关闭本 issue。
+
+- [ ] 将 `ShowLibrary` 的全部 hooks 移到任何 early return 之前
+- [ ] 将 `ExportQueue` 的 hooks 移到任何 early return 之前
+- [ ] 复核其他可折叠面板是否还有同类问题
+- [ ] 完成后再与 Issue 17 一起重跑真实浏览器用户流验收

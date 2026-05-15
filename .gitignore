@@ -22,6 +22,7 @@ briefs.db
 user/programs/
 user/shows/
 user/audio/
+server/user/
 inspect-player.js
 test-playback.mjs
 apps/web/inspect-player.mjs

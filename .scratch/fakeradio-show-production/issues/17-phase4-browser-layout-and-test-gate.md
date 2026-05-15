@@ -1,6 +1,6 @@
 # 17 Phase 4 browser gate、移动端面板布局与测试门禁回归
 
-Status: closed
+Status: open
 Opened: 2026-05-15
 
 ## Parent
@@ -108,3 +108,32 @@ reviewer 再次复核后确认，live/browser gate 仍未闭合：
 - 因真实 dev server 仍不可用，多视口浏览器用户流验收依旧不能重跑，Phase 4 仍不可重新判定完成。
 
 因此，本 issue 继续保持 open，并继续作为 Phase 4 的 browser gate blocker。
+
+
+## Status Update 2026-05-15 23:21 CST
+
+reviewer 再次复核后确认，本 issue 仍应保持 open：
+
+- `curl --noproxy '*'` 到 `127.0.0.1:3301/api/health` 与 `127.0.0.1:3302/` 仍连接失败；
+- `pnpm dev` 仍复现 server 侧 `tsx` IPC `listen EPERM`；
+- 当前 `verification/` 仍只有 7 张截图，和 `2026-05-15-2000-audit.md` 的完成叙述不匹配。
+
+因此，Issue 17 继续作为 Phase 4 的 browser gate blocker，不能关闭。
+
+## Status Update 2026-05-16 00:19 CST
+
+reviewer 复核后确认，`tsx IPC EPERM` 的根因已定位：
+
+1. **`tsx IPC EPERM` 不是代码 bug**：server/src/index.ts 中 tsx 启动命令为 `tsx --no-watch server/src/index.ts`，无任何 IPC pipe 配置
+2. **真实根因**：端口 3302 被 stale `next-server` (PID 9738) 占用，导致 `pnpm dev` 中 web 启动失败 `EADDRINUSE`，`concurrently -k` 随之终止整个进程链
+3. **Server 独立验证**：直接运行 `cd server && pnpm --filter @fakeradio/shared build && NODE_ENV=development TZ=Asia/Shanghai npx tsx --no-watch src/index.ts` 成功，`FakeRadio server listening on http://127.0.0.1:3301`，`curl http://127.0.0.1:3301/api/health` 返回 `200`
+4. **Web 端**：端口 3302 被 PID 9738 占用，Next.js 提示 `Run kill 9738 to stop it.`，杀掉后可正常启动
+
+**结论**：Issue 17 的 browser gate blocker 是**端口占用**，非代码问题。清理端口占用后重跑 `pnpm dev` 即可恢复验收。
+
+### Next Action 2026-05-16 00:19 CST
+
+- [ ] 用户手动 `kill 9738` 清理端口占用
+- [ ] 重跑 `pnpm dev`，验证 server + web 均正常启动
+- [ ] 执行多视口浏览器验收（320px/375px/1440px），补充 `verification/` 截图
+- [ ] 更新审计报告，关闭 Issue 17 和 Issue 18

@@ -73,8 +73,6 @@ export function ShowLibrary({
     );
   }, [projects]);
 
-  if (!isOpen) return null;
-
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingTraceId, setDeletingTraceId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -82,6 +80,8 @@ export function ShowLibrary({
     id: string;
     type: "project" | "trace";
   } | null>(null);
+
+  if (!isOpen) return null;
 
   const handleDeleteProject = async (projectId: string) => {
     setDeletingId(projectId);

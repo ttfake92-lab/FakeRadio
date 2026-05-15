@@ -32,11 +32,11 @@ export function ExportQueue({
   onRetry,
   onDelete,
 }: ExportQueueProps) {
-  if (!isOpen) return null;
-
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
 
   const pendingTasks = tasks.filter((t) => t.status === "pending" || t.status === "running");
+
+  if (!isOpen) return null;
   const completedTasks = tasks.filter((t) => t.status === "completed" || t.status === "failed");
 
   const handleDownload = async (task: ExportTask) => {
