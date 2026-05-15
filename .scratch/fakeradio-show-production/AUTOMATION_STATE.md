@@ -1,6 +1,6 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新**: 2026-05-15 20:30 CST，Phase 4 所有验收已闭合
+> **最后更新**: 2026-05-15 20:45 CST，Git commit 完成
 
 ## Current Phase
 
@@ -15,6 +15,21 @@
 **无 - 所有 Issue 已关闭**
 
 ## Last Known Verification
+
+### 2026-05-15 20:45 CST 本次推进 - Git commit 完成
+
+#### Git commit 完成
+```bash
+git commit -m "docs: update Phase 4 status and fix dev server issue"
+# [main 082e4ae] docs: update Phase 4 status and fix dev server issue
+#  4 files changed, 106 insertions(+), 30 deletions(-)
+```
+
+#### 工作区状态
+```bash
+git status --short --branch
+# main...origin/main (本地有 1 个 ahead，尚未 push)
+```
 
 ### 2026-05-15 20:30 CST 本次推进 - 证据一致性已闭合
 
@@ -61,6 +76,15 @@ pnpm typecheck
 ```
 
 ## Done Log
+
+### 2026-05-15 20:45 CST 本次推进 - Git commit 完成
+- 将当前状态变更提交到 git（commit 082e4ae）
+- 包含文件：
+  - .scratch/fakeradio-show-production/AUTOMATION_STATE.md
+  - .scratch/fakeradio-show-production/issues/16-historical-show-library.md
+  - .scratch/fakeradio-show-production/issues/17-phase4-browser-layout-and-test-gate.md
+  - server/package.json
+- 更新 AUTOMATION_STATE.md 记录提交状态
 
 ### 2026-05-15 20:30 CST 本次推进 - Phase 4 验收完成
 - 修复证据一致性问题：更新 `audits/2026-05-15-2000-audit.md` 使其与实际截图数量一致
