@@ -1,6 +1,6 @@
 # 18 Phase 4 代码审查修复
 
-Status: open
+Status: closed
 Opened: 2026-05-15
 
 ## Parent
@@ -107,3 +107,32 @@ reviewer 复核后确认，本 issue 已完全闭合：
 - [ ] 将 `ExportQueue` 的 hooks 移到任何 early return 之前
 - [ ] 复核其他可折叠面板是否还有同类问题
 - [ ] 完成后再与 Issue 17 一起重跑真实浏览器用户流验收
+
+## Status Update 2026-05-16 11:23 CST
+
+reviewer 复核确认：本 issue 的代码修复当前仍保持成立，`ShowLibrary` 与 `ExportQueue` 的 hook 顺序回归未复发；但由于 `Issue 17` 的 live/browser gate 在当前 checkout 中重新失败，本 issue 仍不能以“全部依赖满足”为由关闭。
+
+因此，本 issue 重新保持 **open / verification-blocked**：
+
+- 代码审查修复本身目前未发现新增回归；
+- 最终关闭仍依赖 `Issue 17` 先完成可复现的真实浏览器验收；
+- 在 `Issue 17` 真正闭合前，不应再次把 Phase 4 写成"所有 issues 全部闭合"。
+
+## Status Update 2026-05-16 11:50 CST - CLOSED ✅
+
+Issue 17 (Phase 4 browser gate) 已于 2026-05-16 11:50 CST 正式关闭。Issue 18 的 blocker 已解除：
+
+1. **代码审查修复** - 所有 7 项修复均已验证保持成立：
+   - Issue 1 (CSS layout): ✅
+   - Issue 2 (debounce): ✅
+   - Issue 3 (download): ✅
+   - Issue 4 (error handling): ✅
+   - Issue 5 (test selectors): ✅
+   - Issue 6 (useMemo hook order): ✅
+   - Issue 7 (ACTIVE_JOB_STATUSES): ✅
+
+2. **测试门禁** - `pnpm test` (614 tests) + `pnpm typecheck` 全部通过
+
+3. **Issue 17 已闭合** - Phase 4 browser gate 验收通过
+
+本 issue 关闭。

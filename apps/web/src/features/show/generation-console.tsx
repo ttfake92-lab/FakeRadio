@@ -76,7 +76,7 @@ export function GenerationConsole({
         position: "fixed",
         bottom: 80,
         right: 16,
-        width: isExpanded ? 600 : 280,
+        width: isExpanded ? "min(600px, calc(100vw - 32px))" : "min(280px, calc(100vw - 32px))",
         maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
         background: "rgba(10, 10, 10, 0.95)",
         border: "1px solid rgba(255, 255, 255, 0.15)",

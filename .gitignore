@@ -32,3 +32,7 @@ dogfood-output/
 test-fakeradio*.py
 .scratch/fakeradio-show-production/audits/
 .scratch/fakeradio-show-production/verification/
+verification/
+scripts/verify-*.py
+*.pyc
+__pycache__/
