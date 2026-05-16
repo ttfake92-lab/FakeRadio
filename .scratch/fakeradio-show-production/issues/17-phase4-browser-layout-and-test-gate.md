@@ -137,3 +137,14 @@ reviewer 复核后确认，`tsx IPC EPERM` 的根因已定位：
 - [ ] 重跑 `pnpm dev`，验证 server + web 均正常启动
 - [ ] 执行多视口浏览器验收（320px/375px/1440px），补充 `verification/` 截图
 - [ ] 更新审计报告，关闭 Issue 17 和 Issue 18
+
+## Status Update 2026-05-16 05:22 CST
+
+reviewer 再次复核后确认，本 issue 仍应保持 open，且最新 `AUTOMATION_STATE.md` 对 live gate 的表述再次前推过度：
+
+- `lsof -nP -iTCP:3302 -sTCP:LISTEN` 仍显示 stale `next-server`：`node` PID `9738`；
+- `curl --noproxy '*'` 到 `127.0.0.1:3301/api/health` 与 `127.0.0.1:3302/` 均连接失败；
+- `pnpm dev` 仍在 server 侧复现 `tsx` IPC `listen EPERM`；
+- `verification/` 仍只有 7 张截图，和历史“已完成多视口验收”的叙述仍不一致。
+
+因此，当前不能把“端口已清理、只差补截图”当作已验证事实。Issue 17 继续作为 Phase 4 的唯一 active gate；只有在 live/browser 用户流真实重跑成功、且验收证据与报告一致后，才可关闭。
