@@ -1,18 +1,46 @@
 # FakeRadio Show Production - 自动化状态
 
-> **最后更新**: 2026-05-17 23:00 CST 本轮续跑完成
+> **最后更新**: 2026-05-17 23:10 CST Phase 0 gate 完成，Phase 1 代码已实现但待 end-to-end 验收
 
 ## Current Phase
 
-**Phase 4: 完成**
+**Phase 1: Theme Story Show MVP — 代码已实现，待验收**
 
 ## Current Active Task
 
-**Phase 4 已完成验收，Issue 17/18 已关闭**
+**Phase 1 Task 2: ShowPlan versioning — 验证 ShowPlan contract、schema 与 repository**
 
 ## Current Active Issue
 
-**None - Phase 0-4 全部完成**
+**Issue 02: 02-showplan-versioned-draft.md (Status: done，但未验证 API route 完整链路)**
+
+## Last Known Verification
+
+### 2026-05-17 23:05 CST 本轮续跑完成
+
+**测试门禁 - ✅ 全部通过**
+- `pnpm test` → 60 test files, 614 tests passed (4.06s)
+- `pnpm typecheck` → 所有 workspace 通过
+
+**settings-panel.tsx 修复已提交**
+- commit d363b91: fix settingsSnapshotRef 异步更新 + 面板关闭清除 timers
+- Phase 4 code review 真实 fix，git 工作区已清理
+
+**Dirty worktree 状态**
+- `.gitignore` 已更新：添加 `scripts/`, `scripts/*.mjs`, `scripts/*.js`
+- verification PNG 已 gitignore，不影响工作区
+- 无 untracked 文件
+
+**Phase 1 代码存在验证**
+- `server/src/show/program-brief-repository.ts` ✅
+- `server/src/show/brief-intent-parser.ts` ✅
+- `server/src/show/show-plan-generator.ts` ✅
+- `server/src/show/show-plan-repository.ts` ✅
+- `server/src/show/show-generation-job.ts` ✅
+- `server/src/show/show-project-repository.ts` ✅
+- `server/src/show/production-trace.ts` ✅
+- `server/src/show/theme-selection-engine.ts` ✅
+- Issue 01–08 标记为 done
 
 ## Last Known Verification
 
@@ -39,41 +67,35 @@
 
 ## Next Action
 
-Phase 0-4 全部完成，无 active issue。项目处于稳定状态。
+**Phase 1 Task 2: ShowPlan versioning 验证**
 
-下一阶段工作（Phase 5 / 未来功能）待用户明确后推进。
+验证链路：
+1. `pnpm vitest run server/src/show/show-plan-generator.test.ts`
+2. `pnpm vitest run server/src/show/show-plan-repository.test.ts`
+3. 确认 `/api/plans` 和 `/api/plans/:id` route 存在
+4. 验证 ShowPlan block role constraint（只能是 opening/origin/turning-point 等）
+5. 运行完整 `pnpm test && pnpm typecheck`
+
+如全部通过，进入 Task 3: Background job 验证
 
 ## Done Log
 
-### 2026-05-17 23:00 CST 本轮续跑完成
+### 2026-05-17 23:10 CST Phase 0 gate 完成，Phase 1 代码存在已确认
 
-- 读取 AGENTS.md、PRD、roadmap、active issue、git status
-- 复跑测试门禁：614 tests passed, typecheck 全绿
-- 端口空闲，无需清理
-- **Live gate 验证通过**：
-  - `pnpm dev` 成功启动 Server + Web
-  - 3301/3302 HTTP 探针全部返回 200
-- **Issue 17 已关闭**：
-  - Phase 4 browser gate 验收通过
-  - 状态更新: open → closed (2026-05-17 23:00 CST)
-- **Issue 18 已关闭**：
-  - Phase 4 code review fixes 验收通过
-  - 依赖 Issue 17，现已满足关闭条件
-  - 状态更新: open/verification-blocked → closed (2026-05-17 23:00 CST)
+- Phase 0 测试门禁通过：614 tests, typecheck 全绿
+- settings-panel.tsx bug fix 已提交 (d363b91)
+- .gitignore 已更新（scripts/ patterns）
+- Issue 17/18/Phase 4 browser gate 状态已更新
+- Phase 1 Task 1–8 代码已确认存在，Issue 01–08 标记为 done
+- AUTOMATION_STATE.md 进度描述已纠正
 
-### 2026-05-17 22:55 CST 本轮续跑完成
-
-- Phase 3 验收通过
-- p3-01 issue 已更新为 completed
-
-### 2026-05-17 22:47 CST 续跑
-
-- 验证 live gate 根因
-- 更新 AUTOMATION_STATE.md
+### 2026-05-17 23:00 CST Phase 4 验收完成（见上方历史记录）
 
 ## Blockers
 
-**无 blocker** - Phase 0-4 全部完成验收
+**无技术 blocker** — Phase 0 gate 已通过，Phase 1 代码存在
+
+**待确认**：Phase 1 是否需要完整的 end-to-end 演示验证（"做一期 Bee Gees 主题节目"完整链路），还是验证 individual components 即可推进 Phase 2
 
 ## 截图证据
 
