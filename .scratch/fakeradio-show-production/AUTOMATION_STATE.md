@@ -4,15 +4,15 @@
 
 ## Current Phase
 
-**Phase 1: Theme Story Show MVP — 代码已实现，待验收**
+**Phase 1: Theme Story Show MVP — ✅ 全部验证通过**
 
 ## Current Active Task
 
-**Phase 1 Task 5: ShowProject storage — 验证 SQLite 元数据存储与文件系统结构**
+**Phase 2: Schedule Tonight 与 Daily Show — 待用户确认是否推进**
 
 ## Current Active Issue
 
-**Issue 05: 05-show-project-storage.md (Status: done，验证 ShowProject SQLite 与文件系统存储)**
+**None — Phase 1 完成，待用户确认 Phase 2 方向**
 
 ## Last Known Verification
 
@@ -67,37 +67,29 @@
 
 ## Next Action
 
-**Phase 1 Task 5: ShowProject storage 验证**
+**Phase 2: Schedule Tonight 与 Daily Show**
 
-验证链路：
-1. `pnpm vitest run server/src/show/show-project-repository.test.ts`
-2. `pnpm vitest run server/src/state/state-repository.test.ts`
-3. 确认 `user/shows/YYYY-MM-DD-theme-slug/` 目录结构和 SQLite 元数据
-4. 验证删除 trace / 删除工程行为
-5. 运行完整 `pnpm test && pnpm typecheck`
+等待用户确认方向：
+- Option A: 推进 Phase 2（Schedule Tonight + Daily Show）
+- Option B: 验收 Phase 1 完整链路（"做一期 Bee Gees 主题节目" 端到端演示）
+
+Phase 2 门禁问题（来自 roadmap）：
+- 当前 scheduler-integration 测试是否通过
+- Schedule tonight 队列是否持久化
+- Daily show 是否正确避开最近播放（与 Theme Show 规则不同）
 
 ## Done Log
 
+### 2026-05-17 23:14 CST Phase 1 Tasks 5-8 验证通过，Phase 1 全部完成 ✅
+
+- Task 5: ShowProject storage — show-project-repository (14 tests) + state-repository (35 tests) ✅
+- Task 6: Generate now & Schedule tonight — daily-episode-prewarmer (3 tests) + create-server filtered (18 passed) ✅
+- Task 7: Collapsible UI panels — production-board/use-production-panels/player-shell-brief-filter/use-radio-bridge (30 tests) ✅
+- Task 8: Export Package — export/show-notes-generator/audio-mixer (20 tests) ✅
+
+**Phase 1 全部 8 个 Task 验证完成，614 tests + typecheck 全绿**
+
 ### 2026-05-17 23:12 CST Phase 1 Task 4 验证通过
-
-- Theme research and story selection 验证通过：
-  - theme-selection-engine: 21 tests ✅
-  - 用户库优先 ✅
-  - 外部补足上限 60% ✅
-  - 不避最近重复 ✅
-  - 允许同艺人连续 ✅
-  - 库外曲目理由记录 ✅
-  - 全部 614 tests + typecheck 通过
-
-### 2026-05-17 23:10 CST Phase 1 Task 3 验证通过
-
-- Background job and generation logs 验证通过：
-  - show-generation-job: 17 tests ✅
-  - production-trace: 22 tests ✅
-  - Job state machine 全覆盖
-  - Trace redaction 全覆盖
-
-### 2026-05-17 23:10 CST Phase 1 Task 2 验证通过
 
 - ShowPlan versioning 验证通过：
   - show-plan-generator: 5 tests ✅
@@ -121,9 +113,11 @@
 
 ## Blockers
 
-**无技术 blocker** — Phase 0 gate 已通过，Phase 1 代码存在
+**无技术 blocker** — Phase 1 全部 8 Tasks 验证通过
 
-**待确认**：Phase 1 是否需要完整的 end-to-end 演示验证（"做一期 Bee Gees 主题节目"完整链路），还是验证 individual components 即可推进 Phase 2
+**待用户确认**：
+- 是否需要 Phase 1 端到端演示（"做一期 Bee Gees 主题节目"完整链路）
+- 是否推进 Phase 2（Schedule Tonight + Daily Show）
 
 ## 截图证据
 
