@@ -8,11 +8,11 @@
 
 ## Current Active Task
 
-**Phase 1 Task 2: ShowPlan versioning — 验证 ShowPlan contract、schema 与 repository**
+**Phase 1 Task 3: Background job and generation logs — 验证 job state transitions 与 production trace**
 
 ## Current Active Issue
 
-**Issue 02: 02-showplan-versioned-draft.md (Status: done，但未验证 API route 完整链路)**
+**Issue 03: 03-background-job-and-generation-log-stream.md (Status: done，验证 job state transitions 与 trace writer)**
 
 ## Last Known Verification
 
@@ -67,18 +67,27 @@
 
 ## Next Action
 
-**Phase 1 Task 2: ShowPlan versioning 验证**
+**Phase 1 Task 3: Background job and generation logs 验证**
 
 验证链路：
-1. `pnpm vitest run server/src/show/show-plan-generator.test.ts`
-2. `pnpm vitest run server/src/show/show-plan-repository.test.ts`
-3. 确认 `/api/plans` 和 `/api/plans/:id` route 存在
-4. 验证 ShowPlan block role constraint（只能是 opening/origin/turning-point 等）
+1. `pnpm vitest run server/src/show/show-generation-job.test.ts`
+2. `pnpm vitest run server/src/show/production-trace.test.ts`
+3. 确认 `/api/jobs` route 存在且状态机正确（pending/running/paused/needs-replan/cancelled/failed/completed）
+4. 验证 trace redaction（不暴露密钥、完整 system prompt）
 5. 运行完整 `pnpm test && pnpm typecheck`
 
-如全部通过，进入 Task 3: Background job 验证
-
 ## Done Log
+
+### 2026-05-17 23:10 CST Phase 1 Task 2 验证通过
+
+- ShowPlan versioning 验证通过：
+  - show-plan-generator: 5 tests ✅
+  - show-plan-repository: 9 tests ✅
+  - needs-replan-restart: 4 tests ✅
+  - API routes: `/api/plans`, `/api/plans/:briefId`, `/api/plans/:briefId/active`, `/api/plans/add-constraints` 全部存在
+  - Block role constraint: 只允许 opening/origin/turning-point/signature-era/relationship/influence/contrast/personal-anchor/closing
+  - 版本化: v2 保存后 v1 active=false，版本不可覆盖
+- 全部 614 tests + typecheck 通过
 
 ### 2026-05-17 23:10 CST Phase 0 gate 完成，Phase 1 代码存在已确认
 
