@@ -8,7 +8,7 @@
 
 ## Current Active Task
 
-**Phase 2: Schedule Tonight 与 Daily Show — 待用户确认是否推进**
+**Phase 2: Schedule Tonight 与 Daily Show — 并行推进中**
 
 ## Current Active Issue
 
@@ -67,16 +67,9 @@
 
 ## Next Action
 
-**Phase 2: Schedule Tonight 与 Daily Show**
+**Phase 2: Schedule Tonight 与 Daily Show — 正在推进**
 
-等待用户确认方向：
-- Option A: 推进 Phase 2（Schedule Tonight + Daily Show）
-- Option B: 验收 Phase 1 完整链路（"做一期 Bee Gees 主题节目" 端到端演示）
-
-Phase 2 门禁问题（来自 roadmap）：
-- 当前 scheduler-integration 测试是否通过
-- Schedule tonight 队列是否持久化
-- Daily show 是否正确避开最近播放（与 Theme Show 规则不同）
+Subagent 并行验收 Phase 1 端到端演示（"做一期 Bee Gees 主题节目"）
 
 ## Done Log
 
