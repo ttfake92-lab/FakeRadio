@@ -48,8 +48,11 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
     value: SettingsType[K]
   ) => {
     if (!settings) return;
-    setSettings((prev) => prev ? { ...prev, [key]: value } : prev);
-    settingsSnapshotRef.current = settings ? { ...settings, [key]: value } : null;
+    setSettings((prev) => {
+      const updated = prev ? { ...prev, [key]: value } : prev;
+      settingsSnapshotRef.current = updated;
+      return updated;
+    });
     const existingTimer = pendingTimersRef.current.get(key as string);
     if (existingTimer) clearTimeout(existingTimer);
     const timer = setTimeout(async () => {
@@ -70,7 +73,14 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
       }
     }, 300);
     pendingTimersRef.current.set(key as string, timer);
-  }, [settings]);
+  }, [settings, loadSettings]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      pendingTimersRef.current.forEach((timer) => clearTimeout(timer));
+      pendingTimersRef.current.clear();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
