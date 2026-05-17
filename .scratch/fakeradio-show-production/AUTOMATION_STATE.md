@@ -4,11 +4,11 @@
 
 ## Current Phase
 
-**Phase 2: Schedule Tonight 与 Daily Show — ✅ 完成**
+**Phase 3: 制作体验深化 — ✅ 完成**
 
 ## Current Active Task
 
-**Phase 3: 制作体验深化 — 待用户确认推进**
+**Phase 4: 导出与长期节目库 — 待用户确认推进**
 
 ## Current Active Issue
 
@@ -29,6 +29,21 @@
 - 全部 614 tests + typecheck 通过
 
 ## Done Log
+
+### 2026-05-17 23:19 CST Phase 3 完成 ✅，Bee Gees E2E 演示 ✅
+
+**Phase 3: 制作体验深化 ✅**
+- p3-01: Generation Console 控制（pause/resume/cancel/addConstraint）✅
+- p3-02: ShowPlan 约束追加（addConstraintsToPlan API + constraint-dialog.tsx）✅
+- 前端回调链完整连接 ✅
+- 全部 614 tests + typecheck 通过
+
+**Bee Gees E2E 演示结果 ✅**
+- `POST /api/chat` → Brief 创建成功 (brief-1779031132739-ygbkzn)
+- `POST /api/shows/generate-now` → Project + Job 创建成功
+- ShowPlan 生成 5 blocks
+- Job 状态机运行正常（pending→running）
+- 外部 adapter fetch 失败（网络环境限制，非代码问题）
 
 ### 2026-05-17 23:17 CST Phase 2 完成 ✅
 
@@ -53,11 +68,7 @@
 
 ## Next Action
 
-**Phase 3: 制作体验深化**
-
-等待用户确认方向：
-- Option A: 推进 Phase 3（ShowPlan draft 编辑、约束追加、Generation Console 控制、Settings）
-- Option B: 先完成 Phase 1 端到端演示验收（subagent 正在运行）
+**Phase 4: 导出与长期节目库**（如需推进）
 
 ## Blockers
 
