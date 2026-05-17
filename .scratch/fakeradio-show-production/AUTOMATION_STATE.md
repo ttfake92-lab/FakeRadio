@@ -8,11 +8,11 @@
 
 ## Current Active Task
 
-**Phase 1 Task 3: Background job and generation logs — 验证 job state transitions 与 production trace**
+**Phase 1 Task 4: Theme research and story selection — 验证 theme-selection-engine 选歌规则**
 
 ## Current Active Issue
 
-**Issue 03: 03-background-job-and-generation-log-stream.md (Status: done，验证 job state transitions 与 trace writer)**
+**Issue 04: 04-theme-research-and-story-selection.md (Status: done，验证 theme-selection-engine 选歌规则)**
 
 ## Last Known Verification
 
@@ -67,16 +67,23 @@
 
 ## Next Action
 
-**Phase 1 Task 3: Background job and generation logs 验证**
+**Phase 1 Task 4: Theme research and story selection 验证**
 
 验证链路：
-1. `pnpm vitest run server/src/show/show-generation-job.test.ts`
-2. `pnpm vitest run server/src/show/production-trace.test.ts`
-3. 确认 `/api/jobs` route 存在且状态机正确（pending/running/paused/needs-replan/cancelled/failed/completed）
-4. 验证 trace redaction（不暴露密钥、完整 system prompt）
-5. 运行完整 `pnpm test && pnpm typecheck`
+1. `pnpm vitest run server/src/show/theme-selection-engine.test.ts`
+2. 确认用户库优先、外部补足上限 60%、不避开最近重复、允许同艺人连续
+3. 运行完整 `pnpm test && pnpm typecheck`
 
 ## Done Log
+
+### 2026-05-17 23:10 CST Phase 1 Task 3 验证通过
+
+- Background job and generation logs 验证通过：
+  - show-generation-job: 17 tests ✅
+  - production-trace: 22 tests ✅
+  - Job state machine: pending→running→paused/completed/failed/cancelled/needs-replan 全部覆盖
+  - Trace redaction: API keys, Bearer tokens, system prompt, cookie, private memory 全部覆盖
+  - 全部 614 tests + typecheck 通过
 
 ### 2026-05-17 23:10 CST Phase 1 Task 2 验证通过
 
