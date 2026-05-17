@@ -42,7 +42,8 @@ export function ExportQueue({
   const handleDownload = async (task: ExportTask) => {
     setDownloadingProjectId(task.projectId);
     try {
-      const files = await getProjectExportFiles(task.projectId);
+      const result = await getProjectExportFiles(task.projectId);
+      const files = result.files ?? [];
       for (const file of files) {
         const blob = await downloadProjectFile(task.projectId, file);
         const url = URL.createObjectURL(blob);

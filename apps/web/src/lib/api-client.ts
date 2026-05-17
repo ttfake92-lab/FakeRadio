@@ -198,7 +198,7 @@ export async function exportProject(projectId: string, options?: { includeTrace?
   return response.json();
 }
 
-export async function getProjectExportFiles(projectId: string) {
+export async function getProjectExportFiles(projectId: string): Promise<{ projectId: string; files: string[] }> {
   const response = await fetch(buildApiUrl(`/api/export/project/${projectId}/download`));
   if (!response.ok) {
     throw new Error(`Failed to get export files: ${response.status}`);
