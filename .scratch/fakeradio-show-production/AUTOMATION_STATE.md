@@ -8,11 +8,11 @@
 
 ## Current Active Task
 
-**Phase 1 Task 4: Theme research and story selection — 验证 theme-selection-engine 选歌规则**
+**Phase 1 Task 5: ShowProject storage — 验证 SQLite 元数据存储与文件系统结构**
 
 ## Current Active Issue
 
-**Issue 04: 04-theme-research-and-story-selection.md (Status: done，验证 theme-selection-engine 选歌规则)**
+**Issue 05: 05-show-project-storage.md (Status: done，验证 ShowProject SQLite 与文件系统存储)**
 
 ## Last Known Verification
 
@@ -67,23 +67,35 @@
 
 ## Next Action
 
-**Phase 1 Task 4: Theme research and story selection 验证**
+**Phase 1 Task 5: ShowProject storage 验证**
 
 验证链路：
-1. `pnpm vitest run server/src/show/theme-selection-engine.test.ts`
-2. 确认用户库优先、外部补足上限 60%、不避开最近重复、允许同艺人连续
-3. 运行完整 `pnpm test && pnpm typecheck`
+1. `pnpm vitest run server/src/show/show-project-repository.test.ts`
+2. `pnpm vitest run server/src/state/state-repository.test.ts`
+3. 确认 `user/shows/YYYY-MM-DD-theme-slug/` 目录结构和 SQLite 元数据
+4. 验证删除 trace / 删除工程行为
+5. 运行完整 `pnpm test && pnpm typecheck`
 
 ## Done Log
+
+### 2026-05-17 23:12 CST Phase 1 Task 4 验证通过
+
+- Theme research and story selection 验证通过：
+  - theme-selection-engine: 21 tests ✅
+  - 用户库优先 ✅
+  - 外部补足上限 60% ✅
+  - 不避最近重复 ✅
+  - 允许同艺人连续 ✅
+  - 库外曲目理由记录 ✅
+  - 全部 614 tests + typecheck 通过
 
 ### 2026-05-17 23:10 CST Phase 1 Task 3 验证通过
 
 - Background job and generation logs 验证通过：
   - show-generation-job: 17 tests ✅
   - production-trace: 22 tests ✅
-  - Job state machine: pending→running→paused/completed/failed/cancelled/needs-replan 全部覆盖
-  - Trace redaction: API keys, Bearer tokens, system prompt, cookie, private memory 全部覆盖
-  - 全部 614 tests + typecheck 通过
+  - Job state machine 全覆盖
+  - Trace redaction 全覆盖
 
 ### 2026-05-17 23:10 CST Phase 1 Task 2 验证通过
 
