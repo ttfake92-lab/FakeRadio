@@ -16,6 +16,61 @@
 - `GET /api/export/download/:date`：下载指定日期（`YYYY-MM-DD`）的导出 ZIP。返回 `application/zip` 附件。
 - `GET /api/episode/next`：story-first 电台接口。返回 `RadioEpisode`，包含 `track`（下一首曲目）、`story`（故事文案、TTS 音频、故事类型）、`sources[]`（资料来源与证据摘要）、`playback`（crossfade 与音量参数）和 `fallbackReason`（TTS 或资料源回退原因）。故事类型按证据门槛分级：`background`（有公开元数据或网页研究支撑）→ `lyric-theme`（有歌词支撑）→ `mood-reading`（资料不足时的情绪解读）。
 
+## 预热与调度
+
+- `GET /api/prewarm/status`：返回预热状态。字段包括 `enabled`、`targetDate`、`lastRun`、`nextRunAt`、`blocks[]`（各时段 `ready`/`consumed`/`failed` 计数）。详见 `docs/local-runbook.md` 的预热章节。
+
+## 收藏管理
+
+- `GET /api/favorites`：返回收藏曲目列表。
+- `POST /api/favorites`：添加收藏。请求体 `{ trackId: string }`。
+- `DELETE /api/favorites/:trackId`：取消收藏。
+- `GET /api/favorites/diagnostics`：返回收藏库加载诊断。字段包括 `loaded`（是否已加载）、`count`（曲目数）、`samples`（样本数据）。
+
+## 音频代理
+
+- `GET /api/audio/:trackId`：代理歌曲音频。优先读取本地 `user/audio/<trackId>.mp3` 缓存；本地缺失时自动代理远端音频并流式返回。
+
+## 网易云认证
+
+- `GET /api/netease/login/status`：查看当前网易云 cookie 登录状态。
+- `POST /api/netease/logout`：清除当前网易云登录 cookie。
+
+## Show Production（节目制作）
+
+### ProgramBrief（节目构思）
+
+- `GET /api/briefs`：返回所有 ProgramBrief 列表。
+- `GET /api/briefs/:id`：返回指定 ProgramBrief 详情。
+
+### ShowPlan（节目计划）
+
+- `GET /api/plans`：返回所有 ShowPlan 列表。支持 `?briefId=` 过滤。
+- `GET /api/plans/:briefId`：返回指定 brief 关联的 ShowPlan 列表。
+- `GET /api/plans/:briefId/active`：返回指定 brief 当前活跃的 ShowPlan。
+- `POST /api/plans/add-constraints`：向已有 ShowPlan 追加约束条件。请求体 `{ planId: string, constraints: object }`。触发重新规划，生成新版本 ShowPlan。
+
+### GenerationJob（生成任务）
+
+- `POST /api/jobs`：创建生成任务。请求体 `{ planId: string }`。
+- `GET /api/jobs`：返回所有生成任务列表。
+- `GET /api/jobs/:id`：返回指定任务详情。状态包括 `pending`/`running`/`paused`/`needs-replan`/`completed`/`cancelled`/`failed`。
+- `POST /api/jobs/:id/start`：启动任务。
+- `POST /api/jobs/:id/pause`：暂停任务。状态从 `running` 变为 `paused`。
+- `POST /api/jobs/:id/resume`：恢复暂停的任务。状态从 `paused` 变为 `running`。
+- `POST /api/jobs/:id/cancel`：取消任务。
+- `POST /api/jobs/:id/needs-replan`：标记任务需要重新规划。通常在追加约束后触发，任务进入 `needs-replan` 状态等待新 ShowPlan。
+
+### ShowProject（节目成品）
+
+- `GET /api/shows`：返回所有已完成节目列表。
+- `GET /api/shows/:id`：返回指定节目详情。
+- `DELETE /api/shows/:id`：删除指定节目。
+- `DELETE /api/shows/:id/trace`：清除指定节目的生成追踪数据。
+- `POST /api/shows/generate-now`：立即生成节目。请求体 `{ briefId: string }`，同步完成从 brief 到 show 的全流程。
+- `POST /api/projects/:id/export`：异步导出指定节目为 ZIP。立即返回 `202 { taskId, status: "pending" }`。
+- `GET /api/export/project/:id/download`：下载指定节目导出的 ZIP 文件。
+
 ## WebSocket
 
 - `WS /stream`：发送 `now-playing`、`queue-updated`、`dj-speech`、`diagnostic` 事件。

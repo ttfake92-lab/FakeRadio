@@ -52,15 +52,33 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 
 ## 当前已实现
 
+### 电台播放
+
 - 前端展示当前曲目、队列、DJ 口播、今日计划和 provider 状态。
 - `/api/next` 先生成选歌 query，再用真实 music adapter 搜索并回填 grounded DJ 文案。
 - `/api/next` 会尽量避开当前正在播放的曲目；当真实搜索结果为空时会单次回退到 mock 曲目。
-- TTS 合成失败时会回退到 mock TTS，不阻断“生成下一首”的主流程。
+- TTS 合成失败时会回退到 mock TTS，不阻断”生成下一首”的主流程。
 - 初始队列会按当前 daypart 的 `moodHint` 生成，不再固定使用单一 mood。
 - server 会记录近期播放历史，后续 DJ 文案可引用上一首歌，形成连续感。
 - 前端音量淡入淡出会限制在浏览器允许的 `[0, 1]` 区间内。
 - **用户偏好接入**：server 启动时读取 `user/taste.md`、`user/routines.md`、`user/mood-rules.md` 和 `user/playlists.json`，注入 DJ 决策与选歌流程。
 - **播放稳定性**：story audio 播放失败时不再自动回退到纯音乐，而是进入错误状态并提示用户。
+- **收藏与推荐**：支持导入网易云收藏歌曲，选歌时优先从收藏列表候选，LLM 可从候选中指定曲目。
+
+### Show Production（节目制作）
+
+- 支持从构思到成品的完整节目制作流水线：ProgramBrief → ShowPlan → GenerationJob → ShowProject → Export ZIP。
+- ShowPlan 支持版本化，追加约束自动生成新版本。
+- Generation Console 提供任务的暂停/恢复/追加约束/取消控制，支持 320px–1440px 多视口。
+- `POST /api/shows/generate-now` 提供一键端到端生成。
+- 详细规划见 `.scratch/fakeradio-show-production/`。
+
+### 预热与调度
+
+- 支持夜间预热：每日凌晨自动为各时段 block 生成 episode，减少实时生成延迟。
+- 预热 episode 存储在本地 SQLite，播放时优先领取。
+- 预热后自动下载歌曲音频到本地缓存。
+- `/schedule` 页面展示各时段 episode 准备状态，供人工审计。
 
 ## Story Episode（已实现）
 
@@ -75,9 +93,10 @@ FakeRadio 已实现 story-first 电台播放闭环：
 
 ## 结构
 
-- `apps/web`：Next.js PWA 播放器。
-- `server`：Fastify 本地服务中枢。
+- `apps/web`：Next.js PWA 播放器，含 5 套皮肤和 4 套 DJ Persona。
+- `server`：Fastify 本地服务中枢，含 SQLite 持久层。
 - `packages/shared`：前后端共享 contract。
-- `user`：用户品味、日程、歌单和 mood rules。
+- `user`：用户品味、日程、歌单、收藏和 mood rules。
 - `prompts`：DJ persona 和 context window 说明。
 - `docs`：架构、接口、adapter 和运行说明。
+- `.scratch/`：功能规划与 issue 跟踪。

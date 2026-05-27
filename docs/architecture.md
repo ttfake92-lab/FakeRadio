@@ -136,3 +136,62 @@ FakeRadio 前端播放器支持 7 套主题（`terminal-fm`、`morning-console` 
 | `cool` | 极简冷淡 | STATIC | 冷淡、克制、一两句 |
 
 人格选择通过 Settings 面板（皮肤组件内）持久化到 `localStorage("fakeradio-persona")`。
+
+## Show Production 链路
+
+FakeRadio 支持从「构思」到「成品」的完整节目制作流水线：
+
+### 数据流
+
+```
+ProgramBrief → ShowPlan → GenerationJob → ShowProject → Export ZIP
+```
+
+1. **ProgramBrief**：节目构思描述（主题、风格、时长等），存储在 `program_briefs` 表。
+2. **ShowPlan**：由 LLM 基于 ProgramBrief 生成的结构化节目计划，支持版本化（追加约束生成新版本）。存储在 `show_plans` 表。
+3. **GenerationJob**：后台生成任务，状态机为 `pending → running → completed`（含 `paused`、`needs-replan`、`cancelled`、`failed` 中间态）。每个 job 绑定一个 ShowPlan。存储在 `generation_jobs` 表。
+4. **ShowProject**：已完成的节目成品，包含音频、文案和元数据。存储在 `show_projects` 表。
+
+### Generation Console
+
+前端 Generation Console（`/` 主页的可折叠面板）提供对 active job 的实时控制：
+
+- 启动/暂停/恢复/取消任务
+- 追加约束（如 `preferEra=1990s`、`moodHint=focused`）触发 `needs-replan`，生成新版 ShowPlan
+- 320px / 375px / 1440px 多视口适配
+
+### 一键生成
+
+`POST /api/shows/generate-now` 提供同步端到端生成：从 brief 创建 → plan 生成 → job 执行 → show 成品，单次请求完成全流程。
+
+## 预热与调度
+
+FakeRadio 支持夜间预热，提前生成次日节目：
+
+- `FAKERADIO_PREWARM_ENABLED=true` 启用
+- `FAKERADIO_PREWARM_TIME` 控制触发时间（默认 `02:00`）
+- 每个 daypart block 生成 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 个 episode
+- 预热结果存入 `prepared_episodes` 表
+- `/api/episode/next` 优先领取 prepared episode（`source: "prepared"`），无可用时走实时生成（`source: "live"`）
+- 预热后自动尝试下载歌曲音频到 `user/audio/` 目录
+
+## 导出管道
+
+导出采用异步任务模式：
+
+1. `POST /api/export/today` 或 `POST /api/projects/:id/export` 创建任务，立即返回 `202 { taskId }`
+2. 后台执行：音频混音 → 生成 show notes → 打包 ZIP
+3. `GET /api/export/status/:taskId` 轮询状态（`pending/running/completed/failed`）
+4. `GET /api/export/download/:date` 或 `GET /api/export/project/:id/download` 下载 ZIP
+
+任务状态通过 module-level Map 管理，不持久化（server 重启后任务丢失）。
+
+## 收藏与推荐
+
+收藏歌曲参与选歌候选：
+
+- `user/netease-liked-songs.raw.json` 存储网易云「我喜欢的音乐」导出数据
+- `liked-songs-repository.ts` 提供加载、诊断和随机采样
+- `/api/next` 的候选选择优先从收藏列表采样，收藏为空时走 search
+- LLM 可从候选列表中指定曲目（`rerankSource: "llm-pick"`），否则走确定性兜底
+- `/api/next` 的 `diagnostics` 字段暴露 `candidateSource`、`rerankSource`、`favoritesAvailable` 等诊断信息
