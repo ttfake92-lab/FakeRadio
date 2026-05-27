@@ -115,6 +115,7 @@ export function ExportQueue({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             onClick={(e) => { e.stopPropagation(); onClose(); }}
+            aria-label="关闭导出队列"
             style={{
               background: "transparent",
               border: "none",

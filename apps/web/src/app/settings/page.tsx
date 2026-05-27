@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { getSettings, updateSettings } from "../../lib/api-client";
 import type { Settings, UpdateSettingsRequest } from "@fakeradio/shared";
