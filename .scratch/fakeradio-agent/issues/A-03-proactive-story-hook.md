@@ -1,6 +1,6 @@
 # A-03 换歌时 Agent 主动在聊天框发故事钩子
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

@@ -1,6 +1,6 @@
 # A-11 Show notes 生成器 — 有互动歌曲的文字文档
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

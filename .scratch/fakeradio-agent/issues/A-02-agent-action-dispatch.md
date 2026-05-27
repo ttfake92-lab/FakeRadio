@@ -1,6 +1,6 @@
 # A-02 Agent 动作派发 — 通过对话触发「下一首」和「收藏」
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

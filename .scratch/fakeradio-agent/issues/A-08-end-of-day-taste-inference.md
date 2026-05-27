@@ -1,7 +1,9 @@
 # A-08 日终品味推断 — 分析当天对话汇总写回 taste.md
 
-Status: needs-triage
+Status: open
 Type: AFK
+
+> **当前状态**：`/api/taste/infer` 端点和 chat intent 已实现（`taste-inferer.ts`），手动触发可用。缺少 scheduler 自动触发（每日定时执行）。
 
 ## Parent
 

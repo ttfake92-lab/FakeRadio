@@ -1,6 +1,6 @@
 # A-01 本地收藏系统
 
-Status: needs-triage
+Status: done (2026-05-08)
 Type: AFK
 
 ## Parent

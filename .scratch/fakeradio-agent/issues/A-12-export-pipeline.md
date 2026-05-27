@@ -1,6 +1,6 @@
 # A-12 导出流水线 — 混音 + show notes → 文件包
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

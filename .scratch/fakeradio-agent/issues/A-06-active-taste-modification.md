@@ -1,6 +1,6 @@
 # A-06 主动品味修改 — 对话即时更新 taste.md
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

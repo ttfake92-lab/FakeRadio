@@ -1,6 +1,6 @@
 # A-04 歌曲背景故事生成 — 通过对话触发
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

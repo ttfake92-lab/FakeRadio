@@ -1,6 +1,6 @@
 # A-09 播放时服务端录制音频流（架构决策）
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: HITL
 
 ## Parent

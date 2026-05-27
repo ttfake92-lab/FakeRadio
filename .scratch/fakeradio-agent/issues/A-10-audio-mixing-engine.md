@@ -1,6 +1,6 @@
 # A-10 音频混音引擎 — TTS + 压低配乐 + 完整歌曲
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

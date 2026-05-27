@@ -1,6 +1,6 @@
 # A-07 对话会话持久化 — 保存当天聊天记录供导出使用
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent

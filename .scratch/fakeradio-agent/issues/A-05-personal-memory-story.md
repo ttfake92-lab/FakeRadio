@@ -1,6 +1,6 @@
 # A-05 私人回忆故事 — 用户讲，Agent 编织成故事
 
-Status: needs-triage
+Status: done (2026-05-27)
 Type: AFK
 
 ## Parent
