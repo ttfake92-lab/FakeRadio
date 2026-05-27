@@ -30,8 +30,8 @@ apps/web/test-playback.mjs
 player-screenshot.png
 dogfood-output/
 test-fakeradio*.py
-.scratch/fakeradio-show-production/audits/
-.scratch/fakeradio-show-production/verification/
+.scratch/_archived/fakeradio-show-production/audits/
+.scratch/_archived/fakeradio-show-production/verification/
 verification/
 scripts/
 scripts/verify-*.py
