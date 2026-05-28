@@ -32,6 +32,7 @@ import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
 import { createFavoritesRepository } from "../user/favorites-repository.js";
+import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import { createLikedSongsRepository } from "../user/liked-songs-repository.js";
 import { createSessionRepository } from "../user/session-repository.js";
 import { createTrackRegistry } from "../audio/track-registry.js";
@@ -218,6 +219,25 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     nowProvider,
     onPrewarmTick: async () => {
       if (!env.FAKERADIO_PREWARM_ENABLED) return;
+
+      // 日终品味推断
+      try {
+        const todaySession = await sessionRepo.getToday();
+        if (todaySession.length >= 3) {
+          const sessionSummary = todaySession
+            .map((e) => `[${e.role}] ${e.text}${e.storyType ? ` (${e.storyType})` : ""}`)
+            .join("\n");
+          const favList = (await favorites.list()).map((f) => `${f.title} - ${f.artist}`).join(", ");
+          await inferAndSaveTaste({
+            baseDir, llm, userPreferences, sessionSummary, favList, userMessage: "日终品味推断"
+          });
+          console.log(`[prewarm] End-of-day taste inference completed.`);
+        } else {
+          console.log(`[prewarm] Skipped taste inference: not enough session entries (${todaySession.length} < 3).`);
+        }
+      } catch (err) {
+        console.error(`[prewarm] End-of-day taste inference failed:`, err);
+      }
 
       const todayDate = formatRadioDate(nowProvider());
       const tomorrow = new Date(nowProvider());
