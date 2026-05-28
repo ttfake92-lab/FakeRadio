@@ -7,10 +7,6 @@ import type { FavoriteTrack } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useRadioBridge } from "./use-radio-bridge";
 import { SkinAmber } from "./skin-amber";
-import { SkinPixel } from "./skin-pixel";
-import { SkinTerminal } from "./skin-terminal";
-import { SkinBento } from "./skin-bento";
-import { SkinY2K } from "./skin-y2k";
 import { SKINS, PERSONAS, type Persona } from "./skin-config";
 import { useProductionPanels, type PanelId } from "../show/use-production-panels";
 import { ProductionBoard } from "../show/production-board";
@@ -234,14 +230,7 @@ export function SkinStage({
   };
 
   const renderSkin = () => {
-    switch (theme) {
-      case "amber": return <SkinAmber {...skinProps} />;
-      case "pixel": return <SkinPixel {...skinProps} />;
-      case "terminal": return <SkinTerminal {...skinProps} />;
-      case "bento": return <SkinBento {...skinProps} />;
-      case "y2k": return <SkinY2K {...skinProps} />;
-      default: return <SkinAmber {...skinProps} />;
-    }
+    return <SkinAmber {...skinProps} />;
   };
 
   // 首先确定 activeBrief

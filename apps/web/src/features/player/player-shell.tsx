@@ -17,13 +17,6 @@ import {
 import { useAudioEngine } from "./use-audio-engine";
 import { usePlaybackState } from "./use-playback-state";
 import { useStreamConnection } from "./use-stream-connection";
-import { OnAirTerminal } from "./on-air-terminal";
-import { useRadioBridge } from "./use-radio-bridge";
-import { SkinAmber } from "./skin-amber";
-import { SkinPixel } from "./skin-pixel";
-import { SkinTerminal } from "./skin-terminal";
-import { SkinBento } from "./skin-bento";
-import { SkinY2K } from "./skin-y2k";
 import { SkinStage } from "./skin-stage";
 import { ON_AIR_THEMES, type OnAirThemeId } from "./player-view-model";
 import { PERSONAS, SKINS, type Persona } from "./skin-config";
@@ -130,9 +123,6 @@ export function PlayerShell() {
   const nowPlayingLabel = `Now playing: ${currentTrackTitle} · ${currentTrackArtist}`;
   const durationMs = playback.episodeData?.track.durationMs ?? track?.durationMs ?? 0;
   const progress = durationMs > 0 ? currentTime / (durationMs / 1000) : 0;
-
-  const isNewSkin = (t: OnAirThemeId): boolean =>
-    t === "amber" || t === "pixel" || t === "terminal" || t === "bento" || t === "y2k";
 
   const mood = onAirModeLabel;
 
@@ -537,89 +527,50 @@ export function PlayerShell() {
 
   return (
     <>
-      {isNewSkin(theme) ? (
-        <SkinStage
-          theme={theme}
-          now={now}
-          track={track}
-          currentTrackTitle={currentTrackTitle}
-          currentTrackArtist={currentTrackArtist}
-          isPlaying={isPlaying}
-          isLoadingEpisode={playback.isLoadingEpisode}
-          currentTime={currentTime}
-          durationMs={durationMs}
-          volume={volume}
-          favorites={favorites}
-          mood={mood}
-          selectedPersona={selectedPersona}
-          avatarSrc={avatarSrc}
-          error={playback.error}
-          djMessage={skinDjMessage}
-          agentMessages={agentMessages}
-          onAgentMessage={(msg) => setAgentMessages((prev) => [...prev.slice(-19), msg])}
-          onChatSubmit={submitChatMessage}
-          onThemeChange={handleThemeChange}
-          onAvatarClick={handleAvatarClick}
-          onAvatarUpload={handleAvatarUpload}
-          onAvatarRemove={handleAvatarRemove}
-          onPersonaChange={handlePersonaChange}
-          onPlayPause={handlePlayPause}
-          onVolumeChange={handleVolumeChange}
-          onSeek={handleSeek}
-          onToggleFavorite={handleToggleFavorite}
-          onNext={handleNext}
-          productionBriefs={productionBriefs}
-          activeBriefId={activeBriefId}
-          productionPlans={productionPlans}
-          productionJobs={productionJobs}
-          productionProjects={productionProjects}
-          generationLogs={generationLogs}
-          onSwitchBrief={handleSwitchBrief}
-          onPauseJob={handlePauseJob}
-          onResumeJob={handleResumeJob}
-          onCancelJob={handleCancelJob}
-          onAddConstraint={handleAddConstraint}
-          onProjectsChanged={handleProjectsChanged}
-          showSettings={showSettings}
-        />
-      ) : (
-      <OnAirTerminal
+      <SkinStage
         theme={theme}
-        clock={onAirClock}
-        modeLabel={onAirModeLabel}
-        connectionLabel={onAirConnectionLabel}
+        now={now}
+        track={track}
         currentTrackTitle={currentTrackTitle}
         currentTrackArtist={currentTrackArtist}
-        playbackLabel={currentPlaybackLabel}
-        progressLabel={`${Math.floor(currentTime / 60)}:${String(Math.floor(currentTime % 60)).padStart(2, "0")}`}
-        durationLabel={durationMs > 0 ? formatDuration(durationMs) : "--:--"}
-        djName="Claudio"
-        djMessage={playback.error ?? (shouldWarn ? "当前音乐来源已回退到 mock，本地真实 provider 暂不可用。" : djMessage)}
-        connectionDescription={connectionDescription}
-        nowPlayingLabel={nowPlayingLabel}
-        chatMessage={chatMessage}
-        isActing={isActing || isLoading}
-        isFavorited={isFavorited}
         isPlaying={isPlaying}
-        progress={progress}
-        queueCountLabel={queueCountLabel}
-        prewarmStatus={prewarmStatus}
-        agentMessages={agentMessages}
-        userMessages={userChatHistory}
-        episodeSource={playback.episodeSource}
+        isLoadingEpisode={playback.isLoadingEpisode}
+        currentTime={currentTime}
+        durationMs={durationMs}
         volume={volume}
-        onPlay={playback.playEpisode}
-        onPlayPause={handlePlayPause}
-        onPrevious={() => {}}
-        onNext={handleNext}
-        onVolumeChange={handleVolumeChange}
-        onToggleFavorite={handleToggleFavorite}
+        favorites={favorites}
+        mood={mood}
+        selectedPersona={selectedPersona}
+        avatarSrc={avatarSrc}
+        error={playback.error}
+        djMessage={skinDjMessage}
+        agentMessages={agentMessages}
+        onAgentMessage={(msg) => setAgentMessages((prev) => [...prev.slice(-19), msg])}
+        onChatSubmit={submitChatMessage}
         onThemeChange={handleThemeChange}
-        onReplay={handleReplay}
-        onChatMessageChange={setChatMessage}
-        onSubmitChat={handleChat}
+        onAvatarClick={handleAvatarClick}
+        onAvatarUpload={handleAvatarUpload}
+        onAvatarRemove={handleAvatarRemove}
+        onPersonaChange={handlePersonaChange}
+        onPlayPause={handlePlayPause}
+        onVolumeChange={handleVolumeChange}
+        onSeek={handleSeek}
+        onToggleFavorite={handleToggleFavorite}
+        onNext={handleNext}
+        productionBriefs={productionBriefs}
+        activeBriefId={activeBriefId}
+        productionPlans={productionPlans}
+        productionJobs={productionJobs}
+        productionProjects={productionProjects}
+        generationLogs={generationLogs}
+        onSwitchBrief={handleSwitchBrief}
+        onPauseJob={handlePauseJob}
+        onResumeJob={handleResumeJob}
+        onCancelJob={handleCancelJob}
+        onAddConstraint={handleAddConstraint}
+        onProjectsChanged={handleProjectsChanged}
+        showSettings={showSettings}
       />
-      )}
       <audio
         ref={audio.musicRef}
         className="audio-control-hidden"
