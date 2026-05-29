@@ -951,6 +951,34 @@ describe("createRadioServer", () => {
     expect(health.json().adapters.webResearch).toBe("ready");
   });
 
+  it("reports calendar adapter status as mock when no real adapter is provided", async () => {
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter()
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.calendar).toBe("mock");
+  });
+
+  it("reports calendar adapter status as ready when a real adapter is injected", async () => {
+    const mockCalendarAdapter = {
+      async upcoming() {
+        return [{ title: "Team sync", start: "10:00", end: "11:00" }];
+      }
+    };
+
+    app = await createTestRadioServer({
+      musicAdapterResult: createMockMusicAdapterResult(),
+      ttsAdapter: createMockTtsAdapter(),
+      calendarAdapter: mockCalendarAdapter
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().adapters.calendar).toBe("ready");
+  });
 
   it("uses injected user preferences for DJ decisions", async () => {
     app = await createTestRadioServer({

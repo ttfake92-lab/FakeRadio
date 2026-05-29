@@ -26,7 +26,9 @@ const EnvSchema = z.object({
   FAKERADIO_PREWARM_TIME: z.string().min(1).default("23:30"),
   FAKERADIO_PREWARM_EPISODES_PER_BLOCK: z.coerce.number().int().positive().default(3),
   FAKERADIO_OPENWEATHER_API_KEY: z.string().optional(),
-  FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai")
+  FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai"),
+  FAKERADIO_LARK_CALENDAR_CLIENT_ID: z.string().optional(),
+  FAKERADIO_LARK_CALENDAR_CLIENT_SECRET: z.string().optional()
 });
 
 export function parseEnv(input: Record<string, string | undefined>) {

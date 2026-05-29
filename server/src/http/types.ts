@@ -42,6 +42,7 @@ export type RegisterRoutesDeps = {
   weather: WeatherAdapter;
   weatherStatus: string;
   calendar: CalendarAdapter;
+  calendarStatus: string;
   devices: DeviceAdapter;
   storySource: StorySourceAdapter;
   publicMetadataAdapter?: StorySourceAdapter | undefined;

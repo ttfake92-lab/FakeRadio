@@ -18,6 +18,7 @@ import {
   createNeteaseCookieStore,
   createNeteaseAuthService,
   createNeteaseHttpClient,
+  createLarkCalendarAdapter,
   type NeteaseAuthService
 } from "../adapters/index.js";
 import { createDeepSeekAdapter } from "../adapters/llm/deepseek-llm-adapter.js";
@@ -130,7 +131,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     ? createWeatherAdapter({ apiKey: env.FAKERADIO_OPENWEATHER_API_KEY, city: env.FAKERADIO_WEATHER_CITY })
     : createMockWeatherAdapter());
   const weatherStatus = options.weatherAdapter ? "ready" : env.FAKERADIO_OPENWEATHER_API_KEY ? "ready" : "mock";
-  const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
+  const calendar = options.calendarAdapter ?? (env.FAKERADIO_LARK_CALENDAR_CLIENT_ID && env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET
+    ? createLarkCalendarAdapter({ clientId: env.FAKERADIO_LARK_CALENDAR_CLIENT_ID, clientSecret: env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET })
+    : createMockCalendarAdapter());
+  const calendarStatus = options.calendarAdapter ? "ready" : (env.FAKERADIO_LARK_CALENDAR_CLIENT_ID && env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET) ? "ready" : "mock";
   const devices = options.deviceAdapter ?? createMockDeviceAdapter();
   const storySource = options.storySourceAdapter ?? createMockStorySourceAdapter();
   const stream = createStreamBroadcaster();
@@ -171,7 +175,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   registerRoutes({
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus,
     ttsStatus: effectiveTtsStatus, tts, ttsCacheDir,
-    systemPrompt, userPreferences, weather, weatherStatus, calendar, devices, storySource,
+    systemPrompt, userPreferences, weather, weatherStatus, calendar, calendarStatus, devices, storySource,
     publicMetadataAdapter: options.publicMetadataAdapter,
     webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
     currentMoodHint, nowProvider,
