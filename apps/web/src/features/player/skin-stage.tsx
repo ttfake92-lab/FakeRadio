@@ -7,7 +7,7 @@ import type { FavoriteTrack } from "@fakeradio/shared";
 import type { AgentMessage } from "./use-stream-connection";
 import { useRadioBridge } from "./use-radio-bridge";
 import { SkinAmber } from "./skin-amber";
-import { SKINS, PERSONAS, type Persona } from "./skin-config";
+import { PERSONAS, type Persona } from "./skin-config";
 import { useProductionPanels, type PanelId } from "../show/use-production-panels";
 import { ProductionBoard } from "../show/production-board";
 import { GenerationConsole, type GenerationLogEntry } from "../show/generation-console";
@@ -533,27 +533,11 @@ function PersonalizationPanel({
       >
         <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600 }}>Personalization</h3>
 
-        {/* Theme selection */}
+        {/* Theme — single theme only */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>THEME</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {Object.entries(SKINS).map(([id, s]) => (
-              <button
-                key={id}
-                onClick={() => onThemeChange(id as OnAirThemeId)}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: theme === id ? "2px solid #e8a04a" : "1px solid rgba(255,255,255,0.15)",
-                  background: theme === id ? "rgba(232,160,74,0.15)" : "rgba(255,255,255,0.05)",
-                  color: "#fff",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
+          <div style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 12, display: "inline-block" }}>
+            Amber
           </div>
         </div>
 

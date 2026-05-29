@@ -19,7 +19,7 @@ import { usePlaybackState } from "./use-playback-state";
 import { useStreamConnection } from "./use-stream-connection";
 import { SkinStage } from "./skin-stage";
 import { ON_AIR_THEMES, type OnAirThemeId } from "./player-view-model";
-import { PERSONAS, SKINS, type Persona } from "./skin-config";
+import { PERSONAS, type Persona } from "./skin-config";
 import "./skins.css";
 
 function getErrorMessage(error: unknown) {
@@ -240,7 +240,7 @@ export function PlayerShell() {
       if (savedTheme && ON_AIR_THEMES.includes(savedTheme)) {
         setTheme(savedTheme);
       } else {
-        setTheme(hour >= 7 && hour < 9 ? "morning-console" : "amber");
+        setTheme("amber");
       }
       // Load saved persona
       const savedPersonaId = localStorage.getItem("fakeradio-persona");

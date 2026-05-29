@@ -1,5 +1,3 @@
-export type SkinId = "amber" | "pixel" | "terminal" | "bento" | "y2k";
-
 // Visual track type used by skin components for cover art gradients
 // The backend Track type (from @fakeradio/shared) doesn't include tone
 export type VisualTrack = {
@@ -55,14 +53,6 @@ export const PERSONAS: Record<PersonaId, Persona> = {
       "你是一档极简电台的 DJ。一两句话即可，冷淡、克制、留白。中文，不超过 30 字，不用 emoji，不要前缀。",
     moodWords: ["低噪", "极简", "白光", "无人", "电流"],
   },
-};
-
-export const SKINS: Record<SkinId, { label: string }> = {
-  amber: { label: "暖橙胶片 (默认)" },
-  pixel: { label: "像素 Game Boy" },
-  terminal: { label: "终端 TUI" },
-  bento: { label: "Bento 玻璃" },
-  y2k: { label: "Y2K / Win98" },
 };
 
 export const QUICK_PROMPTS = [

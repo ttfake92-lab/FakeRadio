@@ -192,13 +192,7 @@ export function shouldStartCrossfade(
 }
 
 export const ON_AIR_THEMES = [
-  "terminal-fm",
-  "morning-console",
   "amber",
-  "pixel",
-  "terminal",
-  "bento",
-  "y2k",
 ] as const;
 
 export type OnAirThemeId = (typeof ON_AIR_THEMES)[number];
@@ -213,13 +207,7 @@ export type StreamConnectionState = "connected" | "connecting" | "disconnected";
 
 export function getThemeLabel(theme: OnAirThemeId): string {
   const labels: Record<OnAirThemeId, string> = {
-    "terminal-fm": "Terminal FM",
-    "morning-console": "Morning Console",
     amber: "Amber",
-    pixel: "Pixel",
-    terminal: "Terminal",
-    bento: "Bento",
-    y2k: "Y2K",
   };
   return labels[theme];
 }

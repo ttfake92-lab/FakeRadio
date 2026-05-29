@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PERSONAS, QUICK_PROMPTS, SKINS, fmt, type Persona, type VisualTrack } from "./skin-config";
+import { PERSONAS, QUICK_PROMPTS, fmt, type Persona, type VisualTrack } from "./skin-config";
 
 describe("skin-config", () => {
   it("PERSONAS has 4 entries", () => {
@@ -18,15 +18,6 @@ describe("skin-config", () => {
     expect(p).toHaveProperty("sysPrompt");
     expect(p).toHaveProperty("moodWords");
     expect(p.moodWords.length).toBeGreaterThan(0);
-  });
-
-  it("SKINS has 5 entries", () => {
-    expect(Object.keys(SKINS)).toHaveLength(5);
-    expect(SKINS.amber).toBeDefined();
-    expect(SKINS.pixel).toBeDefined();
-    expect(SKINS.terminal).toBeDefined();
-    expect(SKINS.bento).toBeDefined();
-    expect(SKINS.y2k).toBeDefined();
   });
 
   it("QUICK_PROMPTS has 5 entries", () => {
