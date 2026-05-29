@@ -24,7 +24,9 @@ const EnvSchema = z.object({
   FAKERADIO_DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com/v1"),
   FAKERADIO_PREWARM_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   FAKERADIO_PREWARM_TIME: z.string().min(1).default("23:30"),
-  FAKERADIO_PREWARM_EPISODES_PER_BLOCK: z.coerce.number().int().positive().default(3)
+  FAKERADIO_PREWARM_EPISODES_PER_BLOCK: z.coerce.number().int().positive().default(3),
+  FAKERADIO_OPENWEATHER_API_KEY: z.string().optional(),
+  FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai")
 });
 
 export function parseEnv(input: Record<string, string | undefined>) {

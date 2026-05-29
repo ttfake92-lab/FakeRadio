@@ -40,6 +40,7 @@ export type RegisterRoutesDeps = {
   systemPrompt: string;
   userPreferences: UserPreferences;
   weather: WeatherAdapter;
+  weatherStatus: string;
   calendar: CalendarAdapter;
   devices: DeviceAdapter;
   storySource: StorySourceAdapter;

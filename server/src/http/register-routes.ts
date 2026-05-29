@@ -52,7 +52,7 @@ import { createMockStorySourceAdapter } from "../adapters/story-source/mock-stor
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
-    systemPrompt, userPreferences, weather, calendar, devices, storySource,
+    systemPrompt, userPreferences, weather, weatherStatus, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
     storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo,
     showPlanRepo, showPlanGenerator, dailyShowPlanGenerator, jobRegistry, showProjectRepo
@@ -98,7 +98,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         llm: llmStatus,
         music: musicStatus,
         tts: ttsStatus,
-        weather: "mock",
+        weather: weatherStatus,
         calendar: "mock",
         upnp: "mock",
         storySource: storySourceStatus,

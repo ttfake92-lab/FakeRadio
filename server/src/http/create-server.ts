@@ -11,6 +11,7 @@ import {
   createMockLlmAdapter,
   createMockStorySourceAdapter,
   createMockWeatherAdapter,
+  createWeatherAdapter,
   createEdgeTtsAdapter,
   createPublicMetadataAdapter,
   createWebResearchAdapter,
@@ -125,7 +126,10 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     return createEdgeTtsAdapter({ cacheDir: ttsCacheDir, voice: env.FAKERADIO_TTS_VOICE });
   })();
 
-  const weather = options.weatherAdapter ?? createMockWeatherAdapter();
+  const weather = options.weatherAdapter ?? (env.FAKERADIO_OPENWEATHER_API_KEY
+    ? createWeatherAdapter({ apiKey: env.FAKERADIO_OPENWEATHER_API_KEY, city: env.FAKERADIO_WEATHER_CITY })
+    : createMockWeatherAdapter());
+  const weatherStatus = options.weatherAdapter ? "ready" : env.FAKERADIO_OPENWEATHER_API_KEY ? "ready" : "mock";
   const calendar = options.calendarAdapter ?? createMockCalendarAdapter();
   const devices = options.deviceAdapter ?? createMockDeviceAdapter();
   const storySource = options.storySourceAdapter ?? createMockStorySourceAdapter();
@@ -167,7 +171,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   registerRoutes({
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus,
     ttsStatus: effectiveTtsStatus, tts, ttsCacheDir,
-    systemPrompt, userPreferences, weather, calendar, devices, storySource,
+    systemPrompt, userPreferences, weather, weatherStatus, calendar, devices, storySource,
     publicMetadataAdapter: options.publicMetadataAdapter,
     webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
     currentMoodHint, nowProvider,

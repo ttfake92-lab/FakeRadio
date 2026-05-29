@@ -14,7 +14,7 @@ function mapWeatherToMood(data: OpenWeatherMapResponse): string {
   return "温暖而明亮";
 }
 
-export function createWeatherAdapter({ apiKey }: { apiKey: string }): WeatherAdapter {
+export function createWeatherAdapter({ apiKey, city = "Shanghai" }: { apiKey: string; city?: string }): WeatherAdapter {
   if (!apiKey || apiKey.trim() === "") {
     throw new Error("[WeatherAdapter] apiKey is required");
   }
@@ -22,7 +22,7 @@ export function createWeatherAdapter({ apiKey }: { apiKey: string }): WeatherAda
     async current(): Promise<WeatherSnapshot> {
       try {
         const response = await fetch(
-          `https://api.openweathermap.org/data/2.5/weather?q=Shanghai&units=metric&appid=${apiKey}`
+          `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${apiKey}`
         );
         if (!response.ok) {
           throw new Error(`[WeatherAdapter] API request failed with status ${response.status}`);
