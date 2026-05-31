@@ -90,13 +90,15 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   const currentTrack = state.getCurrentTrack();
   const excludedTrackIds = new Set([
     ...state.getRecentlySelectedTrackIds(),
-    ...(currentTrack ? [currentTrack.id] : [])
+    ...(currentTrack ? [currentTrack.id] : []),
+    ...state.getQueue().map(t => t.id)
   ]);
 
   // Collect candidates: favorites + search results, deduplicated, up to 20
   const favoritesTracks = await likedSongs.list();
+  const queueIds = new Set(state.getQueue().map(t => t.id));
   const uniqueCandidates = favoritesTracks
-    .filter((track) => !excludedTrackIds.has(track.id))
+    .filter((track) => !excludedTrackIds.has(track.id) && !queueIds.has(track.id))
     .slice(0, 20);
 
   const draftDecision = await computeDjDecision({
@@ -156,7 +158,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     if (!track) {
       const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
       const candidate = state.selectCandidate(candidates);
-      const queueCandidate = state.selectCandidate(queue);
+      const queueCandidate = queue.find(t => !excludedTrackIds.has(t.id)) ?? queue[0];
 
       if (candidate) {
         track = await music.resolve(candidate);
@@ -295,6 +297,23 @@ function formatSourcesForLLM(sources: RadioEpisode["sources"]): string {
   return sources.map((s) => `[${s.kind}] ${s.title}\n${s.content}`).join("\n---\n");
 }
 
+function narrationMentionsTrack(narration: string, track: Track): boolean {
+  const haystack = normalizeForMatch(narration);
+  const title = normalizeForMatch(track.title);
+  const artist = normalizeForMatch(track.artist);
+  return haystack.includes(title) || haystack.includes(artist);
+}
+
+function buildGroundedFallbackNarration(track: Track, storyType: RadioEpisode["story"]["type"]): string {
+  if (storyType === "lyric-theme") {
+    return `${track.title}，来自 ${track.artist}。这首歌的旋律里藏着一些说不出口的情绪，让音乐替你说完吧。`;
+  }
+  if (storyType === "background") {
+    return `接下来是 ${track.artist} 的 ${track.title}。这首歌背后有一段值得停下来听的故事。`;
+  }
+  return `${track.title}，${track.artist}。在这个时刻，这首歌刚好合适。`;
+}
+
 export async function narrateStoryWithSources(
   llm: LlmAdapter,
   track: Track,
@@ -323,5 +342,8 @@ export async function narrateStoryWithSources(
   });
 
   const decision = await llm.compute(fragments);
-  return { narration: decision.say, storyType: effectiveType };
+  const narration = narrationMentionsTrack(decision.say, track)
+    ? decision.say
+    : buildGroundedFallbackNarration(track, effectiveType);
+  return { narration, storyType: effectiveType };
 }

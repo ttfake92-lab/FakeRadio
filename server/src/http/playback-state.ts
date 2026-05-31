@@ -20,7 +20,7 @@ export type PlaybackState = {
 export function createPlaybackState(initialQueue: Track[] = [], initialRecentlySelectedTrackIds: string[] = []): PlaybackState {
   let currentTrack: Track | null = null;
   let currentDj: NowResponse["dj"] = { say: "FakeRadio 准备好了。" };
-  let recentlySelectedTrackIds: string[] = [...new Set(initialRecentlySelectedTrackIds)].slice(0, 30);
+  let recentlySelectedTrackIds: string[] = [...new Set(initialRecentlySelectedTrackIds)].slice(0, 50);
   let queue: Track[] = initialQueue;
   let lastPlanBlockAt: string | null = null;
 
@@ -56,12 +56,13 @@ export function createPlaybackState(initialQueue: Track[] = [], initialRecentlyS
       recentlySelectedTrackIds = [
         track.id,
         ...recentlySelectedTrackIds.filter((id) => id !== track.id)
-      ].slice(0, 30);
+      ].slice(0, 50);
     },
     selectCandidate(tracks) {
       const excludedTrackIds = new Set([
         ...recentlySelectedTrackIds,
-        ...(currentTrack ? [currentTrack.id] : [])
+        ...(currentTrack ? [currentTrack.id] : []),
+        ...queue.map(t => t.id)
       ]);
       return tracks.find((track) => !excludedTrackIds.has(track.id));
     },

@@ -72,7 +72,7 @@ export const NextResponseSchema = z.object({
 });
 
 export const ChatRequestSchema = z.object({
-  message: z.string().min(1)
+  message: z.string().min(1).max(2000)
 });
 
 export const ProgramBriefTypeSchema = z.enum(["theme-show", "block-theme", "daily-show"]);
@@ -108,10 +108,11 @@ export const ChatResponseSchema = z.object({
   message: z.string().min(1),
   decision: DjDecisionSchema,
   action: z.object({
-    type: z.enum(["next-track", "add-favorite"]),
+    type: z.enum(["next-track", "add-favorite", "show-brief-created", "show-plan-refined", "show-confirmed", "show-cancelled"]),
     trackId: z.string().optional(),
     title: z.string().optional(),
-    artist: z.string().optional()
+    artist: z.string().optional(),
+    briefId: z.string().optional()
   }).optional(),
   brief: ProgramBriefSchema.optional()
 });

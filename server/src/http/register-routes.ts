@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   EpisodeNextResponseSchema,
   FavoriteRequestSchema,
@@ -22,6 +23,7 @@ import {
   GenerateNowResponseSchema,
   ScheduleTonightRequestSchema,
   ScheduleTonightResponseSchema,
+  AddConstraintsRequestSchema,
   ShowProjectsListResponseSchema,
   ShowProjectResponseSchema,
   SettingsSchema,
@@ -48,6 +50,12 @@ import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSourc
 import { handleChat } from "./chat-intent-router.js";
 import type { RegisterRoutesDeps } from "./types.js";
 import { createMockStorySourceAdapter } from "../adapters/story-source/mock-story-source-adapter.js";
+
+/** Strip server-internal fields (directoryPath) before sending to frontend. */
+function sanitizeProject<T extends { directoryPath?: string }>(project: T): Omit<T, "directoryPath"> {
+  const { directoryPath: _, ...rest } = project;
+  return rest;
+}
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
@@ -162,7 +170,10 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     const blockAt = currentBlock?.at ?? null;
     if (blockAt !== null && blockAt !== state.getLastPlanBlockAt()) {
       state.setLastPlanBlockAt(blockAt);
-      const newQueue = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 3 });
+      const newQueueRaw = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 5 });
+      const excludedForQueue = await refreshRecentPlaybackMemory();
+      const currentQueueIds = new Set(state.getQueue().map(t => t.id));
+      const newQueue = newQueueRaw.filter(t => !excludedForQueue.includes(t.id) && !currentQueueIds.has(t.id)).slice(0, 3);
       state.setQueue(newQueue);
       stream.broadcast({ type: "queue-updated", payload: { queue: newQueue } });
       if (snapshotTimer) clearTimeout(snapshotTimer);
@@ -179,7 +190,14 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
     if (state.queueSize() < 2) {
-      const refill = await deps.music.recommend({ mood: currentMoodHint, limit: 3 });
+      const refillRaw = await deps.music.recommend({ mood: currentMoodHint, limit: 5 });
+      const existingQueueIds = new Set(state.getQueue().map(t => t.id));
+      const excludedForRefill = new Set([
+        ...state.getRecentlySelectedTrackIds(),
+        track.id,
+        ...existingQueueIds
+      ]);
+      const refill = refillRaw.filter(t => !excludedForRefill.has(t.id)).slice(0, 3);
       const queue = [...state.getQueue(), ...refill];
       state.setQueue(queue);
       if (snapshotTimer) clearTimeout(snapshotTimer);
@@ -226,7 +244,15 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     });
   });
 
-  app.post("/api/chat", async (request) => handleChat(request.body, deps));
+  app.post("/api/chat", async (request, reply) => {
+    try {
+      return await handleChat(request.body, deps);
+    } catch (err) {
+      request.log.error({ err }, "chat handler failed");
+      reply.status(500);
+      return { message: "信号断了。再说一次？", decision: null };
+    }
+  });
 
   app.post("/api/chat/stream", async (request, reply) => {
     const { buildChatSSEHandler } = await import("./chat-sse-handler.js");
@@ -292,6 +318,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (relativePath.startsWith("..") || isAbsolute(relativePath) || !fileExists) {
       return reply.status(404).send("Not found");
     }
+    if (!filePath.endsWith(".wav") && !filePath.endsWith(".mp3")) {
+      return reply.status(404).send("Not found");
+    }
 
     const mimeType = filePath.endsWith(".wav") ? "audio/wav" : "audio/mpeg";
     return reply.type(mimeType).send(createReadStream(filePath));
@@ -313,7 +342,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           trackRegistry.register(episode.track);
           state.setTrack(episode.track);
           state.rememberSelectedTrack(episode.track);
+          state.setDj({ say: episode.story.text, audioUrl: episode.story.audioUrl });
           stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
+          stream.broadcast({ type: "dj-speech", payload: { text: episode.story.text, audioUrl: episode.story.audioUrl } });
+          const hookText = episode.story.text.split(/[。！？.!?]/)[0]?.trim();
+          if (hookText && hookText.length > 0) {
+            stream.broadcast({ type: "agent-message", payload: { role: "agent", text: hookText, trackId: episode.track.id } });
+          }
           await stateRepo.recordPlayedTrack({
             id: randomUUID(),
             trackId: episode.track.id,
@@ -385,7 +420,65 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
         fallbackReason
       };
+      state.setDj({ say: narration, audioUrl: storyTtsResult.audioUrl });
+      stream.broadcast({ type: "dj-speech", payload: { text: narration, audioUrl: storyTtsResult.audioUrl } });
+      const hookText2 = narration.split(/[。！？.!?]/)[0]?.trim();
+      if (hookText2 && hookText2.length > 0) {
+        stream.broadcast({ type: "agent-message", payload: { role: "agent", text: hookText2, trackId: track.id } });
+      }
       await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
+
+      return EpisodeNextResponseSchema.parse({ episode, source: "live" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  // Prefetch endpoint: generates episode without updating playback state
+  app.get("/api/episode/prefetch", async (request, reply) => {
+    try {
+      await refreshRecentPlaybackMemory();
+      const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+      if (!track) {
+        throw new Error("No track available");
+      }
+      // Register track for audio proxying but don't update playback state
+      trackRegistry.register(track);
+
+      const sources = await gatherEpisodeSources(
+        storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
+      );
+
+      const [weatherSnapshot, calendarItems, playbackDevices, recentMemoryEntries] = await Promise.all([
+        weather.current(),
+        calendar.upcoming(),
+        devices.list(),
+        memory.recent(5)
+      ]);
+      const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
+
+      const { narration, storyType } = await narrateStoryWithSources(
+        llm,
+        track,
+        sources,
+        systemPrompt,
+        recentMemoryEntries.map((entry) => entry.content),
+        contextEnv,
+        userPreferences.taste,
+        userPreferences.routines,
+        userPreferences.moodRules
+      );
+
+      const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
+
+      const episode: RadioEpisode = {
+        track,
+        story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
+        sources,
+        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
+        fallbackReason
+      };
 
       return EpisodeNextResponseSchema.parse({ episode, source: "live" });
     } catch (err) {
@@ -422,7 +515,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   app.get("/api/audio/:trackId", async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
     try {
-      const result = await proxyAndRecord({ registry: trackRegistry, audioDir }, trackId);
+      const result = await proxyAndRecord({ registry: trackRegistry, audioDir, music }, trackId);
       if (!result) return reply.status(404).send({ error: "track not found or no audio URL" });
       return reply
         .header("content-type", result.response.headers.get("content-type") ?? "audio/mpeg")
@@ -460,9 +553,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       .send(createReadStream(filePath));
   });
 
+  const ProjectExportBodySchema = z.object({
+    includeTrace: z.boolean().optional()
+  }).strict();
+
   app.post("/api/projects/:id/export", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { includeTrace?: boolean } | undefined;
+    const body = ProjectExportBodySchema.parse(request.body ?? {});
 
     const project = await showProjectRepo.get(id);
     if (!project) {
@@ -581,13 +678,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   });
 
   app.post("/api/plans/add-constraints", async (request, reply) => {
-    const body = request.body as { planId?: string; constraints?: Record<string, unknown> };
-    const planId = body?.planId;
-    const constraints = body?.constraints;
-
-    if (!planId) {
-      return reply.status(400).send({ error: "planId is required" });
-    }
+    const body = AddConstraintsRequestSchema.parse(request.body);
+    const planId = body.planId;
+    const constraints = body.constraints;
 
     const existingPlan = await showPlanRepo.get(planId);
     if (!existingPlan) {
@@ -659,7 +752,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         publicMetadataAdapter,
         webResearchAdapter,
         likedSongs,
-        systemPrompt
+        systemPrompt,
+        userPreferences
       };
 
       await programBriefRepo.updateStatus(job.briefId, "generating");
@@ -706,10 +800,14 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.send(ShowJobResponseSchema.parse({ job }));
   });
 
+  const NeedsReplanBodySchema = z.object({
+    reason: z.string().optional()
+  }).strict();
+
   app.post("/api/jobs/:id/needs-replan", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { reason?: string };
-    const reason = body?.reason ?? "User requested replan";
+    const body = NeedsReplanBodySchema.parse(request.body ?? {});
+    const reason = body.reason ?? "User requested replan";
     const job = await jobRegistry.markNeedsReplan(id, reason);
     if (!job) {
       return reply.status(400).send({ error: "cannot mark job as needs-replan (invalid state transition or not found)" });
@@ -721,7 +819,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   // Show Projects API
   app.get("/api/shows", async (_request, reply) => {
     const projects = await showProjectRepo.list();
-    return reply.send(ShowProjectsListResponseSchema.parse({ projects }));
+    return reply.send(ShowProjectsListResponseSchema.parse({ projects: projects.map(sanitizeProject) }));
   });
 
   app.get("/api/shows/:id", async (request, reply) => {
@@ -730,7 +828,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (!project) {
       return reply.status(404).send({ error: "project not found" });
     }
-    return reply.send(ShowProjectResponseSchema.parse({ project }));
+    return reply.send(ShowProjectResponseSchema.parse({ project: sanitizeProject(project) }));
   });
 
   app.delete("/api/shows/:id", async (request, reply) => {
@@ -775,7 +873,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (!activePlan) {
       const draftPlan = brief.type === "daily-show" 
         ? await dailyShowPlanGenerator.generate(brief) 
-        : await showPlanGenerator.generate(brief);
+        : await showPlanGenerator.generate(brief, userPreferences.taste);
       activePlan = await showPlanRepo.save(draftPlan);
     }
 
@@ -829,7 +927,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         publicMetadataAdapter: publicMetadataAdapter,
         webResearchAdapter: webResearchAdapter,
         likedSongs,
-        systemPrompt
+        systemPrompt,
+        userPreferences
       };
 
       await programBriefRepo.updateStatus(brief.id, "generating");
@@ -892,7 +991,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (!activePlan) {
       const draftPlan = brief.type === "daily-show" 
         ? await dailyShowPlanGenerator.generate(brief) 
-        : await showPlanGenerator.generate(brief);
+        : await showPlanGenerator.generate(brief, userPreferences.taste);
       activePlan = await showPlanRepo.save(draftPlan);
     }
 

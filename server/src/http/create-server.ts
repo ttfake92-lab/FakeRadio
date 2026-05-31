@@ -15,12 +15,14 @@ import {
   createEdgeTtsAdapter,
   createPublicMetadataAdapter,
   createWebResearchAdapter,
+  createLarkCalendarAdapter,
+} from "../adapters/index.js";
+import {
   createNeteaseCookieStore,
   createNeteaseAuthService,
-  createNeteaseHttpClient,
-  createLarkCalendarAdapter,
-  type NeteaseAuthService
-} from "../adapters/index.js";
+  type NeteaseAuthService,
+} from "../adapters/music/netease-auth.js";
+import { createNeteaseHttpClient } from "../adapters/music/netease-http-client.js";
 import { createDeepSeekAdapter } from "../adapters/llm/deepseek-llm-adapter.js";
 import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
 import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
@@ -89,6 +91,13 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     origin: allowedOrigins
   });
   await app.register(websocket);
+
+  // Security headers
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    return payload;
+  });
 
   // Adapters
   const llm = options.llmAdapter ??
@@ -168,7 +177,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const showsDir = resolve(baseDir, "user", "shows");
   const programBriefRepo = createProgramBriefRepository(programsDir);
   const showPlanRepo = createShowPlanRepository(programsDir);
-  const showPlanGenerator = createShowPlanGenerator();
+  const showPlanGenerator = createShowPlanGenerator(llm);
   const dailyShowPlanGenerator = createDailyShowPlanGenerator();
   const jobRegistry = createJobRegistry(programsDir);
   const showProjectRepo = createShowProjectRepository(showsDir);
