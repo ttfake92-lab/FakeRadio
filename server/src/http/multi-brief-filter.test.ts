@@ -3,16 +3,16 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMockMusicAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
 
 let app: FastifyInstance | undefined;
 let isolatedBaseDirs: string[] = [];
 
-function createMockMusicAdapterResult() {
+function createFakeMusicAdapterResult() {
   return {
-    music: createMockMusicAdapter(),
-    status: "mock" as const
+    music: createFakeMusicAdapter(),
+    status: "ready" as const
   };
 }
 
@@ -27,6 +27,7 @@ function createEmptyLikedSongsBaseDir() {
 function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });
 }
@@ -43,8 +44,8 @@ afterEach(async () => {
 describe("Multi-brief API filtering", () => {
   it("GET /api/plans?briefId=X returns only plans for that brief", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const briefAResponse = await app.inject({
@@ -89,8 +90,8 @@ describe("Multi-brief API filtering", () => {
 
   it("GET /api/jobs?briefId=X returns only jobs for that brief", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const briefAResponse = await app.inject({
@@ -138,8 +139,8 @@ describe("Multi-brief API filtering", () => {
 
   it("switching briefId filters returns correct data for each brief", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const brief1Response = await app.inject({
@@ -188,8 +189,8 @@ describe("Multi-brief API filtering", () => {
 
   it("GET /api/plans without briefId returns all plans", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     await app.inject({
@@ -212,8 +213,8 @@ describe("Multi-brief API filtering", () => {
 
   it("GET /api/jobs without briefId returns all jobs", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const briefAResponse = await app.inject({

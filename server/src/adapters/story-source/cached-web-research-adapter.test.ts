@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createCachedStorySourceAdapter } from "./cached-web-research-adapter.js";
 import type { StorySourceAdapter } from "../types.js";
 import type { Track, StorySourceNote } from "@fakeradio/shared";
 
 function makeTrack(id: string, title: string, artist: string): Track {
-  return { id, title, artist, source: "mock" };
+  return { id, title, artist, source: "local" };
 }
 
 function makeNotes(title: string): StorySourceNote[] {
@@ -42,13 +42,15 @@ describe("createCachedStorySourceAdapter", () => {
   });
 
   it("refetches after TTL expires", async () => {
+    vi.useFakeTimers();
     const inner: StorySourceAdapter = { gather: vi.fn().mockResolvedValue(makeNotes("result")) };
-    const cached = createCachedStorySourceAdapter(inner, 1); // 1ms TTL
+    const cached = createCachedStorySourceAdapter(inner, 1000); // 1s TTL
 
     await cached.gather(makeTrack("t1", "Song A", "Artist A"));
-    await new Promise((r) => setTimeout(r, 5));
+    vi.advanceTimersByTime(1001); // past TTL
     await cached.gather(makeTrack("t1", "Song A", "Artist A"));
 
     expect(inner.gather).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });

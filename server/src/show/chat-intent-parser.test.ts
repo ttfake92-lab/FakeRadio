@@ -42,8 +42,8 @@ describe("parseChatIntent", () => {
   });
 
   describe("block-theme intent", () => {
-    it("recognizes '今晚想听 Bee Gees 相关的东西'", () => {
-      const result = parseChatIntent("今晚想听 Bee Gees 相关的东西");
+    it("recognizes '今晚安排一期 Bee Gees 相关节目'", () => {
+      const result = parseChatIntent("今晚安排一期 Bee Gees 相关节目");
       expect(result.isProductionIntent).toBe(true);
       if (result.isProductionIntent) {
         expect(result.type).toBe("block-theme");
@@ -53,8 +53,8 @@ describe("parseChatIntent", () => {
       }
     });
 
-    it("recognizes '明早听爵士'", () => {
-      const result = parseChatIntent("明早听爵士");
+    it("recognizes '明早安排一期爵士节目'", () => {
+      const result = parseChatIntent("明早安排一期爵士节目");
       expect(result.isProductionIntent).toBe(true);
       if (result.isProductionIntent) {
         expect(result.type).toBe("block-theme");
@@ -63,8 +63,8 @@ describe("parseChatIntent", () => {
       }
     });
 
-    it("recognizes '下午听电子'", () => {
-      const result = parseChatIntent("下午听电子");
+    it("recognizes '下午做一期电子节目'", () => {
+      const result = parseChatIntent("下午做一期电子节目");
       expect(result.isProductionIntent).toBe(true);
       if (result.isProductionIntent) {
         expect(result.type).toBe("block-theme");
@@ -92,6 +92,12 @@ describe("parseChatIntent", () => {
     it("does not create brief for '想听点轻松的'", () => {
       const result = parseChatIntent("想听点轻松的");
       expect(result.isProductionIntent).toBe(false);
+    });
+
+    it("does not create brief for ordinary time-scoped music requests", () => {
+      expect(parseChatIntent("今晚想听 Bee Gees 相关的东西").isProductionIntent).toBe(false);
+      expect(parseChatIntent("明早听爵士").isProductionIntent).toBe(false);
+      expect(parseChatIntent("下午听电子").isProductionIntent).toBe(false);
     });
 
     it("does not create brief for '随便来点音乐'", () => {

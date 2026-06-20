@@ -22,11 +22,19 @@ describe("FakeRadio shared contracts", () => {
       id: "mock-001",
       title: "Morning Signal",
       artist: "FakeRadio",
-      source: "mock",
+      source: "local",
       audioUrl: "https://example.com/audio/morning-signal.mp3"
     });
 
     expect(track.id).toBe("mock-001");
+    expect(() =>
+      TrackSchema.parse({
+        id: "mock-runtime",
+        title: "Old Mock",
+        artist: "FakeRadio",
+        source: "mock"
+      })
+    ).toThrow();
   });
 
   it("requires a DJ decision to contain either a query or a track id", () => {
@@ -76,9 +84,9 @@ describe("FakeRadio shared contracts", () => {
         ok: true,
         service: "FakeRadio",
         adapters: {
-          llm: "mock",
-          music: "mock",
-          tts: "mock"
+          llm: "ready",
+          music: "disabled",
+          tts: "error"
         },
         checkedAt: "2026-04-29T00:00:00.000Z"
       }).ok
@@ -106,11 +114,18 @@ describe("FakeRadio shared contracts", () => {
 
   it("validates a story source note with optional fields", () => {
     const minimal = StorySourceNoteSchema.parse({
-      kind: "mock",
+      kind: "metadata",
       title: "mock source",
       content: "This is a placeholder source note."
     });
-    expect(minimal.kind).toBe("mock");
+    expect(minimal.kind).toBe("metadata");
+    expect(() =>
+      StorySourceNoteSchema.parse({
+        kind: "mock",
+        title: "mock source",
+        content: "This is a placeholder source note."
+      })
+    ).toThrow();
 
     const full = StorySourceNoteSchema.parse({
       kind: "web",
@@ -139,7 +154,7 @@ describe("FakeRadio shared contracts", () => {
         id: "mock-001",
         title: "Morning Signal",
         artist: "FakeRadio",
-        source: "mock",
+        source: "local",
         audioUrl: "https://example.com/audio/morning-signal.mp3"
       },
       story: {
@@ -150,7 +165,7 @@ describe("FakeRadio shared contracts", () => {
       },
       sources: [
         {
-          kind: "mock",
+          kind: "metadata",
           title: "mock source",
           content: "placeholder"
         }
@@ -172,7 +187,7 @@ describe("FakeRadio shared contracts", () => {
           id: "mock-002",
           title: "Quiet Compiler",
           artist: "FakeRadio",
-          source: "mock",
+          source: "local",
           audioUrl: "https://example.com/audio/quiet-compiler.mp3"
         },
         story: {
@@ -200,7 +215,7 @@ describe("FakeRadio shared contracts", () => {
           id: "mock-001",
           title: "Morning Signal",
           artist: "FakeRadio",
-          source: "mock"
+          source: "local"
         },
         story: {
           text: "...",

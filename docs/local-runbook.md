@@ -17,6 +17,10 @@ pnpm dev
 - Web: `http://localhost:3302`
 - Server: `http://localhost:3301`
 
+### 局域网访问（iPad / 手机）
+
+Server 和 Web dev server 都监听 `0.0.0.0`，局域网设备可通过 `http://<本机IP>:3302` 访问。前端 `getServerBaseUrl()` 自动用当前页面 hostname + 3301，无需配置。CORS 允许任意来源。改前端后需升 `apps/web/public/sw.js` 的 `CACHE_NAME` 版本号，否则旧 JS 会被 Service Worker 缓存、新代码到不了设备。
+
 如果你希望 FakeRadio 优先使用真实网易云来源，还需要单独启动本地 `NeteaseCloudMusicApi` 服务。
 
 根据 `NeteaseCloudMusicApi` README，默认端口是 `3000`，也支持通过 `PORT` 环境变量改端口。FakeRadio 默认约定把它启动在 `3300`，避免占用已有端口。

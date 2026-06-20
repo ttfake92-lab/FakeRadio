@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "pnpm --filter @fakeradio/shared build",
-    "dev": "next dev -p 3302",
+    "dev": "next dev -H 0.0.0.0 -p 3302",
     "prebuild": "pnpm --filter @fakeradio/shared build",
     "build": "next build",
     "pretypecheck": "pnpm --filter @fakeradio/shared build",

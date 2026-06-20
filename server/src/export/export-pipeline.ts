@@ -18,6 +18,10 @@ export type ExportPipelineDeps = {
   audioDir: string;
   exportDir: string;
   ttsCacheDir: string;
+  /** 当日播放记录（时间正序）。设计默认：无编排要求时把当日节目串成素材；缺省时回退收藏列表 */
+  getTodayPlayed?: () => Promise<Array<{ trackId: string; title: string; artist: string; album?: string | null }>>;
+  /** 当日 DJ 口播记录，用于填充 show notes 故事文案 + 混音口播音频 */
+  getTodayDjStories?: () => Promise<Array<{ trackId: string | null; text: string; storyType: "background" | "lyric-theme" | "mood-reading" | null; audioUrl?: string | null }>>;
 };
 
 export type ExportProgress = {
@@ -43,9 +47,6 @@ export type ExportTask = {
 
 const tasks = new Map<string, ExportTask>();
 
-function formatDate(date: Date): string {
-  return formatRadioDate(date);
-}
 
 async function concatAudioFiles(inputs: string[], outputPath: string): Promise<void> {
   const { execFile } = await import("node:child_process");
@@ -89,23 +90,62 @@ export async function exportToday(
   const hasFfmpeg = await checkFfmpegAvailable();
   if (!hasFfmpeg) throw new Error("FFmpeg not available — cannot export audio");
 
-  const date = formatDate(new Date());
+  const date = formatRadioDate(new Date());
   const exportDateDir = resolve(deps.exportDir, date);
   await mkdir(exportDateDir, { recursive: true });
 
-  // Collect interactive tracks
+  // 收集当日素材：默认把当日播放过的节目按时间串起来（设计默认行为），
+  // 没有播放记录时回退到收藏列表
   onProgress?.({ phase: "collecting" });
-  const favorites = await deps.favorites.list();
-  if (favorites.length === 0) {
-    throw new Error("今天还没有收藏或故事内容，先和电台互动一下吧");
+  let sourceTracks: Array<{ trackId: string; title: string; artist: string; album?: string | null }> = [];
+  if (deps.getTodayPlayed) {
+    const played = await deps.getTodayPlayed();
+    const seen = new Set<string>();
+    for (const p of played) {
+      if (seen.has(p.trackId)) continue;
+      seen.add(p.trackId);
+      sourceTracks.push(p);
+    }
   }
+  if (sourceTracks.length === 0) {
+    const favorites = await deps.favorites.list();
+    sourceTracks = favorites.map((f) => ({
+      trackId: f.trackId,
+      title: f.title,
+      artist: f.artist,
+      album: f.album ?? null
+    }));
+  }
+  if (sourceTracks.length === 0) {
+    throw new Error("今天还没有播放或收藏记录，先听一会儿电台吧");
+  }
+
+  // 当日 DJ 口播按 trackId 对应：文案进 show notes，音频参与混音
+  const storyByTrack = new Map<string, { text: string; storyType: ShowNotesTrack["storyType"]; audioUrl: string | null }>();
+  if (deps.getTodayDjStories) {
+    for (const msg of await deps.getTodayDjStories()) {
+      if (msg.trackId) {
+        storyByTrack.set(msg.trackId, {
+          text: msg.text,
+          storyType: msg.storyType ?? "mood-reading",
+          audioUrl: msg.audioUrl ?? null
+        });
+      }
+    }
+  }
+
+  // /cache/tts/<file> → ttsCacheDir 下的实际文件路径
+  const resolveTtsPath = (audioUrl: string | null): string | null => {
+    if (!audioUrl || !audioUrl.startsWith("/cache/tts/")) return null;
+    return join(deps.ttsCacheDir, audioUrl.slice("/cache/tts/".length));
+  };
 
   // Build show notes data and collect audio paths
   const showTracks: ShowNotesTrack[] = [];
   const mixedPaths: string[] = [];
 
-  for (let i = 0; i < favorites.length; i++) {
-    const fav = favorites[i]!;
+  for (let i = 0; i < sourceTracks.length; i++) {
+    const fav = sourceTracks[i]!;
     const track = deps.trackRegistry.get(fav.trackId);
     const musicPath = track ? getAudioFilePath(deps.audioDir, track.id) : null;
 
@@ -116,28 +156,46 @@ export async function exportToday(
       continue;
     }
 
-    onProgress?.({ phase: "mixing", current: i + 1, total: favorites.length, trackTitle: fav.title });
+    onProgress?.({ phase: "mixing", current: i + 1, total: sourceTracks.length, trackTitle: fav.title });
 
-    // For now, use music directly (TTS stories not yet persisted — A-07)
     const outputPath = resolve(exportDateDir, `track-${i}.mp3`);
+    const story = storyByTrack.get(fav.trackId);
 
-    // Normalize music to consistent format for concat
-    const { execFile } = await import("node:child_process");
-    await new Promise<void>((resolveNorm, rejectNorm) => {
-      execFile("ffmpeg", [
-        "-y", "-i", musicPath,
-        "-codec:a", "libmp3lame", "-b:a", "192k",
-        "-ar", "44100", "-ac", "2",
-        outputPath
-      ], (err) => err ? rejectNorm(err) : resolveNorm());
-    });
+    // 有口播音频就做电台感混音（口播压在歌曲前奏上，垫乐渐入）；
+    // 没有或混音失败时退回纯歌曲
+    let mixed = false;
+    const ttsPath = resolveTtsPath(story?.audioUrl ?? null);
+    if (ttsPath) {
+      const ttsExists = await access(ttsPath).then(() => true, () => false);
+      if (ttsExists) {
+        try {
+          await mixEpisodeAudio({ ttsPath, musicPath, outputPath });
+          mixed = true;
+        } catch (err) {
+          console.warn(`Mix failed for ${fav.title}, falling back to music only:`, err);
+        }
+      }
+    }
+
+    if (!mixed) {
+      // Normalize music to consistent format for concat
+      const { execFile } = await import("node:child_process");
+      await new Promise<void>((resolveNorm, rejectNorm) => {
+        execFile("ffmpeg", [
+          "-y", "-i", musicPath,
+          "-codec:a", "libmp3lame", "-b:a", "192k",
+          "-ar", "44100", "-ac", "2",
+          outputPath
+        ], (err) => err ? rejectNorm(err) : resolveNorm());
+      });
+    }
 
     mixedPaths.push(outputPath);
     showTracks.push({
       title: fav.title,
       artist: fav.artist,
-      djStory: "（故事内容将在对话持久化后可用）",
-      storyType: "mood-reading"
+      djStory: story?.text ?? "（当天没有为这首歌生成口播）",
+      storyType: story?.storyType ?? "mood-reading"
     });
   }
 

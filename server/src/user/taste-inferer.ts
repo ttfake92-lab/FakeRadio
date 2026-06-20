@@ -1,6 +1,5 @@
 import { buildContextWindow } from "../context/context-builder.js";
 import { readTaste, writeTaste } from "./taste-writer.js";
-import { buildMockEnvironment } from "../utils/mock-environment.js";
 import type { LlmAdapter } from "../adapters/types.js";
 import type { UserPreferences } from "./load-user-preference.js";
 
@@ -25,7 +24,11 @@ export async function inferAndSaveTaste(options: {
     userMessage,
     toolResults: [],
     executionState: "taste inference",
-    environment: buildMockEnvironment()
+    environment: {
+      weather: { summary: "weather provider disabled", moodHint: "" },
+      calendar: [],
+      devices: [{ id: "local-browser", name: "Local Browser", kind: "browser", status: "available" }]
+    }
   });
 
   const inferredTaste = await llm.computeRaw(inferFragments);

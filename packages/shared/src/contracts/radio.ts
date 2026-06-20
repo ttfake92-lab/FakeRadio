@@ -8,7 +8,7 @@ export const TrackSchema = z.object({
   durationMs: z.number().int().positive().optional(),
   artworkUrl: z.string().url().optional(),
   audioUrl: z.string().url().optional(),
-  source: z.enum(["mock", "netease", "local"])
+  source: z.enum(["netease", "local"])
 });
 
 export const ContextFragmentSchema = z.object({
@@ -55,7 +55,7 @@ export const NowResponseSchema = z.object({
 });
 
 export const RecommendationDiagnosticsSchema = z.object({
-  candidateSource: z.enum(["favorites", "search", "queue", "mock"]),
+  candidateSource: z.enum(["favorites", "search", "queue"]),
   rerankSource: z.enum(["llm-pick", "fallback"]),
   favoritesAvailable: z.number().int().nonnegative(),
   candidatesCount: z.number().int().nonnegative(),
@@ -108,7 +108,7 @@ export const ChatResponseSchema = z.object({
   message: z.string().min(1),
   decision: DjDecisionSchema,
   action: z.object({
-    type: z.enum(["next-track", "add-favorite", "show-brief-created", "show-plan-refined", "show-confirmed", "show-cancelled"]),
+    type: z.enum(["next-track", "add-favorite", "queue-updated", "show-brief-created", "show-plan-refined", "show-confirmed", "show-cancelled"]),
     trackId: z.string().optional(),
     title: z.string().optional(),
     artist: z.string().optional(),
@@ -148,8 +148,8 @@ export const HealthResponseSchema = z.object({
   adapters: z.record(
     z.string(),
     z.union([
-      z.enum(["mock", "ready", "disabled"]),
-      z.record(z.string(), z.enum(["mock", "ready", "disabled"]))
+      z.enum(["ready", "disabled", "error"]),
+      z.record(z.string(), z.enum(["ready", "disabled", "error"]))
     ])
   ),
   checkedAt: z.string().datetime()
@@ -158,7 +158,7 @@ export const HealthResponseSchema = z.object({
 export const StoryTypeSchema = z.enum(["background", "lyric-theme", "mood-reading"]);
 
 export const StorySourceNoteSchema = z.object({
-  kind: z.enum(["lyric", "metadata", "web", "mock"]),
+  kind: z.enum(["lyric", "metadata", "web"]),
   title: z.string().min(1),
   content: z.string().min(1),
   url: z.string().url().optional(),
@@ -189,6 +189,12 @@ export const EpisodeNextResponseSchema = z.object({
   episode: RadioEpisodeSchema,
   source: z.enum(["prepared", "live"]).default("live")
 });
+
+// 前端开始播放预取 episode 时上报，服务端据此同步"当前播放"真相
+export const EpisodePlayingRequestSchema = z.object({
+  trackId: z.string().min(1)
+});
+export type EpisodePlayingRequest = z.infer<typeof EpisodePlayingRequestSchema>;
 
 export const PreparedEpisodeRecordSchema = z.object({
   id: z.string().min(1),
@@ -238,6 +244,7 @@ export const FavoritesResponseSchema = z.object({
 });
 
 export const NeteaseLoginStatusSchema = z.object({
+  status: z.enum(["logged-in", "cookie-invalid", "logged-out", "service-error"]),
   loggedIn: z.boolean(),
   cookieStored: z.boolean(),
   nickname: z.string().optional(),
@@ -541,7 +548,10 @@ export type ScheduleTonightResponse = z.infer<typeof ScheduleTonightResponseSche
 
 export const SettingsSchema = z.object({
   researchEnabled: z.boolean().default(true),
-  providerMode: z.enum(["auto", "mock", "netease"]).default("auto"),
+  providerMode: z.enum(["netease"]).default("netease"),
+  neteaseBaseUrl: z.string().url().default("http://127.0.0.1:3300"),
+  neteaseTimeoutMs: z.number().int().positive().default(2500),
+  neteaseAudioLevel: z.enum(["standard", "higher", "exhigh", "lossless", "hires"]).default("exhigh"),
   ttsProvider: z.enum(["edge", "mimo"]).default("edge"),
   ttsVoice: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
   mimoVoice: z.string().min(1).default("茉莉"),
@@ -559,7 +569,10 @@ export type SettingsResponse = z.infer<typeof SettingsResponseSchema>;
 
 export const UpdateSettingsRequestSchema = z.object({
   researchEnabled: z.boolean().optional(),
-  providerMode: z.enum(["auto", "mock", "netease"]).optional(),
+  providerMode: z.enum(["netease"]).optional(),
+  neteaseBaseUrl: z.string().url().optional(),
+  neteaseTimeoutMs: z.number().int().positive().optional(),
+  neteaseAudioLevel: z.enum(["standard", "higher", "exhigh", "lossless", "hires"]).optional(),
   ttsProvider: z.enum(["edge", "mimo"]).optional(),
   ttsVoice: z.string().min(1).optional(),
   mimoVoice: z.string().min(1).optional(),

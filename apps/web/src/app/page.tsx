@@ -1,5 +1,5 @@
-import { PlayerShell } from "../features/player/player-shell";
+import { EditorialRadio } from "../features/studio/editorial-radio";
 
 export default function HomePage() {
-  return <PlayerShell />;
+  return <EditorialRadio />;
 }

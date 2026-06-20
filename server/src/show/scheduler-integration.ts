@@ -41,6 +41,7 @@ export type SchedulerExecutionDeps = {
   webResearchAdapter: StorySourceAdapter | undefined;
   likedSongs: LikedSongsRepository;
   systemPrompt: string;
+  userPreferences?: { taste: string; routines: string; moodRules: string };
   dailySelectionEngine?: DailySelectionEngine;
 };
 
@@ -90,12 +91,16 @@ async function generateEpisodeForBlock(
   }
 
   if (!track) {
-    const candidates = await music.search(draftDecision.play.query ?? block.selectionGoal);
-    const first = candidates.find((t) => !excludedTrackIds.has(t.id));
-    if (first) {
-      try {
-        track = await music.resolve(first);
-      } catch { /* fall through */ }
+    const searchQueries = buildBlockSearchQueries(block, draftDecision.play.query);
+    for (const query of searchQueries) {
+      const candidates = await music.search(query);
+      const first = candidates.find((t) => !excludedTrackIds.has(t.id));
+      if (first) {
+        try {
+          track = await music.resolve(first);
+          break;
+        } catch { /* try next query */ }
+      }
     }
   }
 
@@ -128,9 +133,9 @@ async function generateEpisodeForBlock(
     systemPrompt,
     [],
     { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
-    block.storyGoal,
-    block.selectionGoal,
-    block.constraints.moodHint ?? ""
+    deps.userPreferences?.taste ?? "",
+    deps.userPreferences?.routines ?? "",
+    deps.userPreferences?.moodRules ?? ""
   );
 
   const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
@@ -144,6 +149,34 @@ async function generateEpisodeForBlock(
   };
 
   return { episode, track };
+}
+
+function cleanArtistCandidate(raw: string): string {
+  return raw
+    .replace(/^.*[如选荐：:，,；;]/u, "")
+    .replace(/^(一首|多首|标志性|代表性|经典|作品|曲目)\s*/u, "")
+    .trim();
+}
+
+function buildBlockSearchQueries(block: ShowPlanBlock, draftQuery: string | undefined): string[] {
+  const text = [block.selectionGoal, block.title, block.storyGoal].filter(Boolean).join("\n");
+  const queries: string[] = [];
+  const quotedPattern = /([\p{L}\p{N}\s.'’&+\-]+?)?的?《([^》]+)》/gu;
+
+  for (const match of text.matchAll(quotedPattern)) {
+    const artist = match[1] ? cleanArtistCandidate(match[1]) : "";
+    const title = match[2]?.trim();
+    if (!title) continue;
+    queries.push(artist ? `${title} ${artist}` : title);
+    queries.push(title);
+  }
+
+  queries.push(`${block.title} ${block.selectionGoal}`);
+  queries.push(block.selectionGoal);
+  if (block.constraints.moodHint) queries.push(`${block.constraints.moodHint} ${block.selectionGoal}`);
+  if (draftQuery) queries.push(draftQuery);
+
+  return Array.from(new Set(queries.map((query) => query.replace(/\s+/g, " ").trim()).filter(Boolean)));
 }
 
 async function saveEpisodeToProject(

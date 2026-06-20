@@ -1,7 +1,7 @@
 import type { DjDecision, RadioEpisode, Track, TtsResult } from "@fakeradio/shared";
 import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
 import { buildContextWindow, type ContextEnvironment } from "../context/context-builder.js";
-import { createMockMusicAdapter, createMockTtsAdapter, createMockStorySourceAdapter } from "../adapters/index.js";
+import { createMacOsSayTtsAdapter } from "../adapters/index.js";
 import type { MemoryRepository } from "../state/memory-repository.js";
 import type { PlaybackState } from "./playback-state.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
@@ -36,7 +36,7 @@ export type ResolveResult = {
   decision: Awaited<ReturnType<typeof computeDjDecision>>;
   isFallback: boolean;
   candidates: Track[];
-  candidateSource: "favorites" | "search" | "queue" | "mock";
+  candidateSource: "favorites" | "search" | "queue";
   rerankSource: "llm-pick" | "fallback";
 };
 
@@ -58,6 +58,20 @@ function decisionMentionsTrack(decision: DjDecision, track: Track): boolean {
   return haystack.includes(title) || haystack.includes(artist) || haystack.includes(normalizeForMatch(track.id));
 }
 
+const FORBIDDEN_DJ_PHRASES = [
+  "这首歌背后有一个动人的故事",
+  "让我们一起聆听",
+  "希望你喜欢",
+  "这首歌讲述了",
+  "藏着说不出的情绪",
+  "治愈",
+  "岁月静好"
+];
+
+function respectsPersonaRules(text: string): boolean {
+  return !FORBIDDEN_DJ_PHRASES.some((phrase) => text.includes(phrase));
+}
+
 function buildGroundedFallbackDecision(
   track: Track,
   candidateSource: ResolveResult["candidateSource"]
@@ -65,8 +79,7 @@ function buildGroundedFallbackDecision(
   const sourceLabel: Record<ResolveResult["candidateSource"], string> = {
     favorites: "你的收藏库",
     search: "网易云搜索结果",
-    queue: "当前队列",
-    mock: "本地兜底曲库"
+    queue: "当前队列"
   };
   const source = sourceLabel[candidateSource];
   return {
@@ -88,17 +101,16 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   const playbackDevices = await devices.list();
   const recentMemoryEntries = await memory.recent(5);
   const currentTrack = state.getCurrentTrack();
-  const excludedTrackIds = new Set([
+  const recentOrCurrentTrackIds = new Set([
     ...state.getRecentlySelectedTrackIds(),
-    ...(currentTrack ? [currentTrack.id] : []),
-    ...state.getQueue().map(t => t.id)
+    ...(currentTrack ? [currentTrack.id] : [])
   ]);
+  const queueIds = new Set(state.getQueue().map(t => t.id));
 
   // Collect candidates: favorites + search results, deduplicated, up to 20
   const favoritesTracks = await likedSongs.list();
-  const queueIds = new Set(state.getQueue().map(t => t.id));
   const uniqueCandidates = favoritesTracks
-    .filter((track) => !excludedTrackIds.has(track.id) && !queueIds.has(track.id))
+    .filter((track) => !recentOrCurrentTrackIds.has(track.id) && !queueIds.has(track.id))
     .slice(0, 20);
 
   const draftDecision = await computeDjDecision({
@@ -156,9 +168,10 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
 
     // Step 2: If no favorite track resolved, fall back to search
     if (!track) {
-      const candidates = await music.search(draftDecision.play.query ?? currentMoodHint);
-      const candidate = state.selectCandidate(candidates);
-      const queueCandidate = queue.find(t => !excludedTrackIds.has(t.id)) ?? queue[0];
+      const candidates = (await music.search(draftDecision.play.query ?? currentMoodHint))
+        .filter((candidate) => !recentOrCurrentTrackIds.has(candidate.id));
+      const candidate = candidates[0];
+      const queueCandidate = queue.find(t => !recentOrCurrentTrackIds.has(t.id));
 
       if (candidate) {
         track = await music.resolve(candidate);
@@ -167,19 +180,12 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
         track = await music.resolve(queueCandidate);
         candidateSource = "queue";
       } else {
-        const mockMusic = createMockMusicAdapter();
-        const fallbackTracks = await mockMusic.search(currentMoodHint);
-        const fallbackTrack = state.selectCandidate(fallbackTracks) ?? fallbackTracks[0];
-        if (!fallbackTrack) {
-          throw new Error("No track available");
-        }
-        track = await mockMusic.resolve(fallbackTrack);
-        candidateSource = "mock";
+        throw new Error("No track available from configured music provider");
       }
     }
   }
 
-  const isFallback = candidateSource === "mock";
+  const isFallback = false;
 
   const rawDecision = await computeDjDecision({
     llm,
@@ -193,10 +199,9 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       `music.provider: ${musicStatus}`,
       `favorites.available: ${favoritesTracks.length}`,
       `candidates.count: ${uniqueCandidates.length}`,
-      `recentlySelected.count: ${excludedTrackIds.size}`,
+      `recentlySelected.count: ${recentOrCurrentTrackIds.size}`,
       `candidates.source: ${candidateSource}`,
       `candidates.rerankSource: ${rerankSource}`,
-      ...(isFallback ? ["music.fallback: used mock adapter due to empty results"] : []),
       `music.selectedTrack: ${track.title} - ${track.artist}`,
       ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
     ],
@@ -208,6 +213,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     }
   });
   const decision = decisionMentionsTrack(rawDecision, track)
+    && respectsPersonaRules(rawDecision.say)
     ? rawDecision
     : buildGroundedFallbackDecision(track, candidateSource);
 
@@ -217,17 +223,25 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
 export async function synthesizeWithFallback(
   tts: TtsAdapter,
   ttsCacheDir: string,
-  text: string
+  text: string,
+  options: {
+    audibleFallback?: TtsAdapter;
+  } = {}
 ): Promise<{ result: TtsResult; fallbackReason?: string }> {
   try {
     return { result: await tts.synthesize(text) };
   } catch (error) {
-    console.error("TTS synthesis failed, falling back to mock:", error);
-    const mockTts = createMockTtsAdapter({ cacheDir: ttsCacheDir });
-    return {
-      result: await mockTts.synthesize(text),
-      fallbackReason: "TTS synthesis failed; fell back to mock TTS"
-    };
+    console.error("TTS synthesis failed, falling back to local audible TTS:", error);
+    try {
+      const audibleFallback = options.audibleFallback ?? createMacOsSayTtsAdapter({ cacheDir: ttsCacheDir });
+      return {
+        result: await audibleFallback.synthesize(text),
+        fallbackReason: "TTS synthesis failed; fell back to local audible TTS"
+      };
+    } catch (fallbackError) {
+      console.error("Local audible TTS fallback failed:", fallbackError);
+      throw new Error("TTS synthesis failed and local audible fallback failed");
+    }
   }
 }
 
@@ -269,14 +283,7 @@ export async function gatherEpisodeSources(
     }
   }
 
-  const combinedSources = [...lyricSources, ...metadataSources, ...webSources];
-  return combinedSources.length > 0 ? combinedSources : [
-    {
-      kind: "mock",
-      title: "mock source",
-      content: "Placeholder source note for story generation."
-    }
-  ];
+  return [...lyricSources, ...metadataSources, ...webSources];
 }
 
 export function determineStoryType(sources: RadioEpisode["sources"]): RadioEpisode["story"]["type"] {
@@ -306,12 +313,12 @@ function narrationMentionsTrack(narration: string, track: Track): boolean {
 
 function buildGroundedFallbackNarration(track: Track, storyType: RadioEpisode["story"]["type"]): string {
   if (storyType === "lyric-theme") {
-    return `${track.title}，来自 ${track.artist}。这首歌的旋律里藏着一些说不出口的情绪，让音乐替你说完吧。`;
+    return `${track.artist} 写 ${track.title} 的时候，大概也是这样一个安静的时段。歌词不用我念，你听到那句就明白了。`;
   }
   if (storyType === "background") {
-    return `接下来是 ${track.artist} 的 ${track.title}。这首歌背后有一段值得停下来听的故事。`;
+    return `这首 ${track.title} 我留了很久，${track.artist} 的版本最耐听。先放歌，背景的事下次慢慢说。`;
   }
-  return `${track.title}，${track.artist}。在这个时刻，这首歌刚好合适。`;
+  return `不解释了，${track.artist} 的 ${track.title}，放在现在这个时间点刚刚好。`;
 }
 
 export async function narrateStoryWithSources(
@@ -329,9 +336,33 @@ export async function narrateStoryWithSources(
   const effectiveType = rawType;
 
   const sourceContext = formatSourcesForLLM(sources);
+  const typeGuidance: Record<RadioEpisode["story"]["type"], string> = {
+    background:
+      "资料里有真实的创作背景：挑一个最有画面感的事实（年份、地点、人物、一件事）讲出来，像朋友顺口说起一件你刚好知道的事。不要罗列多个事实。",
+    "lyric-theme":
+      "资料里有歌词：挑一句最有画面感的歌词意象，把它和此刻的时间或心境连起来。不要逐句解读，不要复述整段歌词。",
+    "mood-reading":
+      "没有可靠的背景资料：不要假装知道幕后故事。谈这首歌的声音本身——节奏、人声的质感、某件乐器——以及它为什么适合现在这个时刻。"
+  };
+
   const fragments = buildContextWindow({
     now: new Date(),
-    systemPrompt: systemPrompt + `\n\n你是故事叙述者。基于以下曲目来源信息，为听众创作一段电台口播叙述。\n\n曲目: ${track.title} - ${track.artist}\n故事类型: ${effectiveType}\n\n来源:\n${sourceContext}`,
+    systemPrompt: systemPrompt + `
+
+现在为即将播放的歌写一段电台口播。这段话会被 TTS 朗读，压在歌曲前奏的垫乐上。
+
+曲目: ${track.title} - ${track.artist}
+故事类型: ${effectiveType}
+
+写法要求:
+- 2 到 4 句，口语，像电台里随口聊起，说完自然停住。
+- ${typeGuidance[effectiveType]}
+- 只讲一个点，讲透，不要面面俱到。
+- 行文中自然带到歌名或歌手名，但禁止用「接下来是 XXX 的 XXX」这种报幕腔开场。
+- 结尾把话头轻轻交给音乐即可，不要说「让我们一起聆听」之类的主持词。
+
+来源资料:
+${sourceContext}`,
     userTaste,
     routines,
     moodRules,
@@ -343,6 +374,7 @@ export async function narrateStoryWithSources(
 
   const decision = await llm.compute(fragments);
   const narration = narrationMentionsTrack(decision.say, track)
+    && respectsPersonaRules(decision.say)
     ? decision.say
     : buildGroundedFallbackNarration(track, effectiveType);
   return { narration, storyType: effectiveType };

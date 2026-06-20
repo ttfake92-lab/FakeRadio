@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,12 +12,14 @@ describe("needs-replan job restart lifecycle", () => {
   let registry: JobRegistry;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     testDir = join(tmpdir(), `fakeradio-replan-registry-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     mkdirSync(testDir, { recursive: true });
     registry = createJobRegistry(testDir);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -51,7 +53,7 @@ describe("needs-replan job restart lifecycle", () => {
     const needsReplanJob = await registry.markNeedsReplan(job.id, "User added constraints");
     const replanUpdatedAt = needsReplanJob!.updatedAt;
 
-    await new Promise(resolve => setTimeout(resolve, 10));
+    vi.advanceTimersByTime(10);
     const restartedJob = await registry.start(job.id);
     expect(restartedJob!.updatedAt).not.toBe(replanUpdatedAt);
     expect(new Date(restartedJob!.updatedAt).getTime()).toBeGreaterThan(new Date(replanUpdatedAt).getTime());

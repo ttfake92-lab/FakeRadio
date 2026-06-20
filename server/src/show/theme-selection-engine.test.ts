@@ -49,234 +49,195 @@ function createMockShowPlan(blocks: ShowPlanBlock[]): ShowPlan {
   };
 }
 
-describe("ThemeSelectionEngine", () => {
+describe("ThemeSelectionEngine behaviour", () => {
+  const engine = createThemeSelectionEngine();
+
   describe("user-library priority", () => {
-    it("prioritizes tracks from user library when available", () => {
-      const userLibrary: Track[] = [
-        createMockTrack("track-1", "Artist A", "Song A"),
-        createMockTrack("track-2", "Artist B", "Song B"),
-        createMockTrack("track-3", "Artist C", "Song C")
+    it("selects user library tracks before external tracks", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start with a classic")
+      ]);
+
+      const userLibrary = [
+        createMockTrack("lib-1", "Artist A", "Song A"),
+        createMockTrack("lib-2", "Artist B", "Song B")
+      ];
+      const externalTracks = [
+        createMockTrack("ext-1", "Artist C", "External Song", "netease")
       ];
 
-      const externalTracks: Track[] = [
-        createMockTrack("ext-1", "Artist D", "External Song", "mock")
-      ];
+      const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
+      const allTracks = extractTracksFromSelection(selection);
+      const userTracks = extractUserLibraryTracks(selection);
 
-      const selection = [...userLibrary, ...externalTracks].slice(0, 4);
-      const userLibraryRatio = selection.filter(t => t.source === "netease").length / selection.length;
-
-      expect(userLibraryRatio).toBeGreaterThanOrEqual(0.4);
-      expect(selection[0].source).toBe("netease");
+      expect(userTracks.length).toBeGreaterThanOrEqual(1);
+      expect(allTracks[0]!.source).toBe("netease");
     });
 
-    it("uses external tracks only when user library is insufficient", () => {
-      const userLibrary: Track[] = [
-        createMockTrack("track-1", "Artist A", "Song A")
+    it("fills remaining slots with external tracks when user library is insufficient", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start"),
+        createMockBlock("origin", "Early works"),
+        createMockBlock("signature-era", "Golden era")
+      ]);
+
+      const userLibrary = [createMockTrack("lib-1", "Artist A", "Song A")];
+      const externalTracks = [
+        createMockTrack("ext-1", "Artist B", "Ext B", "netease"),
+        createMockTrack("ext-2", "Artist C", "Ext C", "netease"),
+        createMockTrack("ext-3", "Artist D", "Ext D", "netease"),
+        createMockTrack("ext-4", "Artist E", "Ext E", "netease")
       ];
 
-      const externalTracks: Track[] = [
-        createMockTrack("ext-1", "Artist B", "External B", "mock"),
-        createMockTrack("ext-2", "Artist C", "External C", "mock")
-      ];
+      const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
+      const extTracks = extractExternalTracks(selection);
 
-      const allTracks = [...userLibrary, ...externalTracks];
-      const userLibraryRatio = allTracks.filter(t => t.source === "netease").length / allTracks.length;
-
-      expect(allTracks.length).toBeGreaterThan(1);
-      expect(userLibraryRatio).toBeLessThanOrEqual(0.6);
+      expect(extTracks.length).toBeGreaterThan(0);
     });
   });
 
   describe("external track cap at 60%", () => {
-    it("enforces 60% external track cap for full show", () => {
-      const totalEpisodes = 5;
-      const maxExternal = Math.floor(totalEpisodes * EXTERNAL_TRACK_CAP);
-
-      expect(maxExternal).toBe(3);
-
-      const externalTracks: Track[] = Array.from({ length: 3 }, (_, i) =>
-        createMockTrack(`ext-${i}`, `ExtArtist ${i}`, `Ext Song ${i}`, "mock")
-      );
-
-      const userLibrary: Track[] = [
-        createMockTrack("track-1", "Artist A", "Song A"),
-        createMockTrack("track-2", "Artist B", "Song B")
-      ];
-
-      const selection = [...userLibrary, ...externalTracks].slice(0, totalEpisodes);
-      const externalCount = selection.filter(t => t.source === "mock").length;
-      const externalRatio = externalCount / selection.length;
-
-      expect(externalRatio).toBeLessThanOrEqual(EXTERNAL_TRACK_CAP);
-    });
-
-    it("requires explicit reason when exceeding 60% external", () => {
-      const totalEpisodes = 3;
-      const externalTracks = [
-        { track: createMockTrack("ext-1", "Artist A", "Ext A", "mock"), reason: "representative-work" },
-        { track: createMockTrack("ext-2", "Artist B", "Ext B", "mock"), reason: "era-context" },
-        { track: createMockTrack("ext-3", "Artist C", "Ext C", "mock"), reason: "influence-link" }
-      ];
+    it("enforces 60% external track cap via engine", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start"),
+        createMockBlock("signature-era", "Classic hits")
+      ]);
 
       const userLibrary = [
-        createMockTrack("track-1", "Artist D", "User Song", "netease")
+        createMockTrack("lib-1", "Other", "Song 1"),
+        createMockTrack("lib-2", "Other", "Song 2")
+      ];
+      const externalTracks = [
+        createMockTrack("ext-1", "Artist", "Ext 1", "netease"),
+        createMockTrack("ext-2", "Artist", "Ext 2", "netease"),
+        createMockTrack("ext-3", "Artist", "Ext 3", "netease"),
+        createMockTrack("ext-4", "Artist", "Ext 4", "netease")
       ];
 
-      const allTracks = [...externalTracks.map(e => e.track), ...userLibrary];
-      const externalRatio = externalTracks.length / allTracks.length;
+      const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
 
-      if (externalRatio > EXTERNAL_TRACK_CAP) {
-        expect(externalTracks.every(e => e.reason && ["representative-work", "era-context", "influence-link", "cover-version"].includes(e.reason))).toBe(true);
-      }
+      expect(isWithinExternalCap(selection)).toBe(true);
+      expect(selection.externalRatio).toBeLessThanOrEqual(0.6);
     });
 
-    it("allows external tracks within 60% cap without special authorization", () => {
-      const totalEpisodes = 5;
-      const externalTracks = [
-        { track: createMockTrack("ext-1", "Artist A", "Ext A", "mock"), reason: "era-context" },
-        { track: createMockTrack("ext-2", "Artist B", "Ext B", "mock"), reason: "cover-version" }
-      ];
+    it("reports when authorization is needed for external ratio override", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("signature-era", "All classics")
+      ]);
 
-      const userLibrary = [
-        createMockTrack("track-1", "Artist C", "Song C"),
-        createMockTrack("track-2", "Artist D", "Song D"),
-        createMockTrack("track-3", "Artist E", "Song E")
-      ];
+      const selection = engine.selectForPlan(plan, [], [
+        createMockTrack("ext-1", "Artist", "Song 1", "netease"),
+        createMockTrack("ext-2", "Artist", "Song 2", "netease")
+      ]);
 
-      const selection = [...externalTracks.map(e => e.track), ...userLibrary].slice(0, totalEpisodes);
-      const externalCount = selection.filter(t => t.source === "mock").length;
-      const externalRatio = externalCount / selection.length;
-
-      expect(externalRatio).toBeLessThanOrEqual(EXTERNAL_TRACK_CAP);
+      expect(needsAuthorizationForExternal(selection)).toBe(true);
+      expect(needsAuthorizationForExternal(selection, 0.9)).toBe(false);
     });
   });
 
   describe("no recent-repeat avoidance for Theme Story Show", () => {
-    it("does not exclude recently played tracks for theme show", () => {
-      const recentTracks: Track[] = [
-        createMockTrack("recent-1", "Artist A", "Recently Played A"),
-        createMockTrack("recent-2", "Artist B", "Recently Played B")
-      ];
-
-      const showPlan = createMockShowPlan([
+    it("selects recently played tracks without filtering them out", () => {
+      const plan = createMockShowPlan([
         createMockBlock("opening", "Start with a classic"),
         createMockBlock("origin", "Early works")
       ]);
 
-      const candidatePool = recentTracks;
-
-      const recentlyPlayedIds = new Set(["recent-1", "recent-2"]);
-
-      const allowedForThemeShow = candidatePool.filter(track => {
-        return true;
-      });
-
-      expect(allowedForThemeShow.length).toBe(candidatePool.length);
-      expect(allowedForThemeShow.some(t => t.id === "recent-1")).toBe(true);
-    });
-
-    it("Daily Show would exclude recent tracks, but Theme Show does not", () => {
-      const allTracks: Track[] = [
+      const allTracks = [
         createMockTrack("recent-1", "Artist A", "Recently Played"),
-        createMockTrack("track-2", "Artist B", "Not Recent B")
+        createMockTrack("recent-2", "Artist B", "Also Recent")
       ];
 
-      const recentlyPlayedIds = new Set(["recent-1"]);
+      const selection = engine.selectForPlan(plan, allTracks, []);
+      const selectedTracks = extractTracksFromSelection(selection);
 
-      const forDailyShow = allTracks.filter(t => !recentlyPlayedIds.has(t.id));
-      expect(forDailyShow.some(t => t.id === "recent-1")).toBe(false);
-
-      const forThemeShow = allTracks;
-      expect(forThemeShow.some(t => t.id === "recent-1")).toBe(true);
+      expect(selectedTracks.some(t => t.id === "recent-1")).toBe(true);
     });
   });
 
   describe("same artist can appear consecutively", () => {
-    it("allows consecutive tracks from same artist", () => {
-      const tracks: Track[] = [
-        createMockTrack("track-1", "Artist A", "Artist A Song 1"),
-        createMockTrack("track-2", "Artist A", "Artist A Song 2"),
-        createMockTrack("track-3", "Artist B", "Artist B Song")
+    it("selects multiple tracks from the same artist", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("signature-era", "Classic Bee Gees hits")
+      ]);
+
+      const userLibrary = [
+        createMockTrack("bg-1", "Bee Gees", "Stayin Alive"),
+        createMockTrack("bg-2", "Bee Gees", "Night Fever"),
+        createMockTrack("bg-3", "Bee Gees", "How Deep Is Your Love")
       ];
 
-      let previousArtist: string | null = null;
-      let hasConsecutiveSameArtist = false;
-
-      for (const track of tracks) {
-        if (previousArtist === track.artist) {
-          hasConsecutiveSameArtist = true;
-          break;
-        }
-        previousArtist = track.artist;
-      }
-
-      expect(hasConsecutiveSameArtist).toBe(true);
-    });
-
-    it("does not enforce artist diversification like Daily Show", () => {
-      const tracks: Track[] = [
-        createMockTrack("track-1", "Bee Gees", "Song 1"),
-        createMockTrack("track-2", "Bee Gees", "Song 2"),
-        createMockTrack("track-3", "Bee Gees", "Song 3"),
-        createMockTrack("track-4", "Other Artist", "Other Song")
-      ];
-
-      const artistSequence = tracks.map(t => t.artist);
-      const beeGeesCount = artistSequence.filter(a => a === "Bee Gees").length;
+      const selection = engine.selectForPlan(plan, userLibrary, []);
+      const selectedTracks = extractTracksFromSelection(selection);
+      const beeGeesCount = selectedTracks.filter(t => t.artist === "Bee Gees").length;
 
       expect(beeGeesCount).toBe(3);
     });
   });
 
   describe("selection reason and source tracking", () => {
-    it("records selection reason for each track", () => {
-      const validReasons = [
-        "user-library-match",
-        "representative-work",
-        "era-context",
-        "influence-link",
-        "cover-version"
-      ];
+    it("assigns user-library-match reason to library tracks", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Open with a classic")
+      ]);
 
-      const selections = [
-        { track: createMockTrack("track-1", "Artist A", "Song A"), reason: "user-library-match" },
-        { track: createMockTrack("ext-1", "Artist B", "Ext B", "mock"), reason: "era-context" }
-      ];
+      const selection = engine.selectForPlan(plan, [
+        createMockTrack("lib-1", "Artist", "Song")
+      ], []);
 
-      for (const selection of selections) {
-        expect(validReasons).toContain(selection.reason);
+      for (const blockSel of selection.selections) {
+        for (const s of blockSel.selections) {
+          if (s.source === "user-library") {
+            expect(s.reason).toBe("user-library-match");
+          }
+        }
       }
     });
 
-    it("records source for each track selection", () => {
-      const selections = [
-        { track: createMockTrack("track-1", "Artist A", "Song A", "netease"), source: "user-library" as const },
-        { track: createMockTrack("ext-1", "Artist B", "Ext B", "mock"), source: "external" as const }
-      ];
+    it("assigns valid reason to external tracks", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Open with a classic")
+      ]);
 
-      expect(selections[0].source).toBe("user-library");
-      expect(selections[1].source).toBe("external");
+      const selection = engine.selectForPlan(plan, [], [
+        createMockTrack("ext-1", "Artist", "External Song", "netease")
+      ]);
+
+      const validReasons = ["user-library-match", "representative-work", "era-context", "influence-link", "cover-version"];
+      for (const blockSel of selection.selections) {
+        for (const s of blockSel.selections) {
+          expect(validReasons).toContain(s.reason);
+          expect(s.source).toBe("external");
+        }
+      }
     });
   });
 
   describe("degraded mode when sources insufficient", () => {
-    it("falls back to mood/lyric theme interpretation without sources", () => {
-      const emptySources: never[] = [];
+    it("returns empty selections when both pools are empty", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start")
+      ]);
 
-      const storyType = emptySources.length === 0 ? "mood-reading" : "background";
+      const selection = engine.selectForPlan(plan, [], []);
+      const selectedTracks = extractTracksFromSelection(selection);
 
-      expect(storyType).toBe("mood-reading");
+      expect(selectedTracks.length).toBe(0);
+      expect(selection.totalEpisodes).toBeGreaterThan(0);
     });
 
-    it("uses background story type when sources are available", () => {
-      const sources = [
-        { kind: "metadata" as const, title: "Metadata Source", content: "Background info", confidence: 0.7 }
-      ];
+    it("selects available tracks even when pool is smaller than needed", () => {
+      const plan = createMockShowPlan([
+        createMockBlock("opening", "Start"),
+        createMockBlock("signature-era", "Golden era")
+      ]);
 
-      const hasBackgroundSource = sources.some(s => s.kind === "metadata" && (s.confidence ?? 0) >= 0.5);
-      const storyType = hasBackgroundSource ? "background" : "mood-reading";
+      const selection = engine.selectForPlan(plan, [
+        createMockTrack("lib-1", "Artist", "Only Song")
+      ], []);
 
-      expect(storyType).toBe("background");
+      const selectedTracks = extractTracksFromSelection(selection);
+      expect(selectedTracks.length).toBeGreaterThan(0);
+      expect(selectedTracks.every(t => t.id === "lib-1")).toBe(true);
     });
   });
 });
@@ -315,7 +276,7 @@ describe("createThemeSelectionEngine", () => {
         createTrack("track-2", "Artist B", "Song 2")
       ];
       const externalTracks = [
-        createTrack("ext-1", "Artist C", "Ext Song", "mock")
+        createTrack("ext-1", "Artist C", "Ext Song", "netease")
       ];
 
       const plan = createMockShowPlan([
@@ -381,7 +342,7 @@ describe("createThemeSelectionEngine", () => {
       ];
 
       const externalTracks = [
-        createTrack("ext-1", "Bee Gees", "To Love Somebody", "mock")
+        createTrack("ext-1", "Bee Gees", "To Love Somebody", "netease")
       ];
 
       const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
@@ -405,10 +366,10 @@ describe("createThemeSelectionEngine", () => {
       ];
 
       const externalTracks = [
-        createTrack("ext-1", "Bee Gees", "Song 1", "mock"),
-        createTrack("ext-2", "Bee Gees", "Song 2", "mock"),
-        createTrack("ext-3", "Bee Gees", "Song 3", "mock"),
-        createTrack("ext-4", "Bee Gees", "Song 4", "mock")
+        createTrack("ext-1", "Bee Gees", "Song 1", "netease"),
+        createTrack("ext-2", "Bee Gees", "Song 2", "netease"),
+        createTrack("ext-3", "Bee Gees", "Song 3", "netease"),
+        createTrack("ext-4", "Bee Gees", "Song 4", "netease")
       ];
 
       const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
@@ -423,7 +384,7 @@ describe("createThemeSelectionEngine", () => {
       ]);
 
       const userLibrary = [createTrack("lib-1", "Artist", "Song")];
-      const externalTracks = [createTrack("ext-1", "Artist", "External Song", "mock")];
+      const externalTracks = [createTrack("ext-1", "Artist", "External Song", "netease")];
 
       const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
 
@@ -460,7 +421,7 @@ describe("createThemeSelectionEngine", () => {
       ]);
 
       const userLibrary = [createTrack("lib-1", "User", "User Song")];
-      const externalTracks = [createTrack("ext-1", "Ext", "Ext Song", "mock")];
+      const externalTracks = [createTrack("ext-1", "Ext", "Ext Song", "netease")];
 
       const selection = engine.selectForPlan(plan, userLibrary, externalTracks);
 
@@ -478,8 +439,8 @@ describe("createThemeSelectionEngine", () => {
 
       const userLibrary: Track[] = [];
       const externalTracks = [
-        createTrack("ext-1", "Artist", "Song 1", "mock"),
-        createTrack("ext-2", "Artist", "Song 2", "mock")
+        createTrack("ext-1", "Artist", "Song 1", "netease"),
+        createTrack("ext-2", "Artist", "Song 2", "netease")
       ];
 
       const selection = engine.selectForPlan(plan, userLibrary, externalTracks, 0.9);

@@ -40,13 +40,15 @@ describe("player view model", () => {
 
   it("labels provider status and track source in Chinese", () => {
     expect(getProviderStatusLabel("ready")).toBe("真实来源已连接");
-    expect(getProviderStatusLabel("mock")).toBe("已回退到 mock");
+    expect(getProviderStatusLabel("disabled")).toBe("未配置");
+    expect(getProviderStatusLabel("error")).toBe("连接异常");
     expect(getTrackSourceLabel("netease")).toBe("网易云");
-    expect(getTrackSourceLabel("mock")).toBe("Mock");
+    expect(getTrackSourceLabel("local")).toBe("本地");
   });
 
-  it("warns only when music provider falls back to mock", () => {
-    expect(shouldWarnOnMockMusic("mock")).toBe(true);
+  it("warns when music provider is unavailable", () => {
+    expect(shouldWarnOnMockMusic("disabled")).toBe(true);
+    expect(shouldWarnOnMockMusic("error")).toBe(true);
     expect(shouldWarnOnMockMusic("ready")).toBe(false);
   });
 
@@ -67,7 +69,6 @@ describe("player view model", () => {
     expect(getSourceKindLabel("lyric")).toBe("歌词");
     expect(getSourceKindLabel("metadata")).toBe("元数据");
     expect(getSourceKindLabel("web")).toBe("网页");
-    expect(getSourceKindLabel("mock")).toBe("Mock");
   });
 
   it("returns story source descriptions for non-background types", () => {

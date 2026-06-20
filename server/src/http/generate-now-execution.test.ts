@@ -3,18 +3,18 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createFakeMusicAdapter, createFakeStorySourceAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
-import { createMockLlmAdapter, createMockMusicAdapter as mkMusic, createMockWeatherAdapter, createMockCalendarAdapter, createMockDeviceAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter as mkMusic, createFakeWeatherAdapter, createFakeCalendarAdapter, createFakeDeviceAdapter } from "../test/fake-adapters.js";
 import { createShowProjectRepository } from "../show/show-project-repository.js";
 
 let app: FastifyInstance | undefined;
 let isolatedBaseDirs: string[] = [];
 
-function createMockMusicAdapterResult() {
+function createFakeMusicAdapterResult() {
   return {
-    music: createMockMusicAdapter(),
-    status: "mock" as const
+    music: createFakeMusicAdapter(),
+    status: "ready" as const
   };
 }
 
@@ -29,6 +29,7 @@ function createEmptyLikedSongsBaseDir() {
 function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });
 }
@@ -46,11 +47,11 @@ describe("generate-now execution flow", () => {
   describe("POST /api/shows/generate-now with full execution", () => {
     it("creates job, executes episode generation, and completes job with episodes", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 8, 0, 0)
       });
 
@@ -101,11 +102,11 @@ describe("generate-now execution flow", () => {
 
     it("generates multiple episodes for plan with multiple blocks", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 10, 0, 0)
       });
 
@@ -154,12 +155,12 @@ describe("generate-now execution flow", () => {
       app = await createTestRadioServer({
         musicAdapterResult: {
           music: failingMusicAdapter,
-          status: "mock" as const
+          status: "ready" as const
         },
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 12, 0, 0)
       });
 
@@ -189,11 +190,11 @@ describe("generate-now execution flow", () => {
 
     it("adds trace entries to job during execution", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 14, 0, 0)
       });
 
@@ -226,11 +227,11 @@ describe("generate-now execution flow", () => {
 
     it("updates project status to ready after successful execution", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 16, 0, 0)
       });
 
@@ -260,11 +261,11 @@ describe("generate-now execution flow", () => {
 
     it("can export project after successful execution", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
-        storySourceAdapter: createMockStorySourceAdapter(),
-        publicMetadataAdapter: createMockStorySourceAdapter(),
-        webResearchAdapter: createMockStorySourceAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
+        storySourceAdapter: createFakeStorySourceAdapter(),
+        publicMetadataAdapter: createFakeStorySourceAdapter(),
+        webResearchAdapter: createFakeStorySourceAdapter(),
         now: () => new Date(2026, 4, 13, 18, 0, 0)
       });
 
@@ -313,11 +314,11 @@ describe("generate-now execution flow", () => {
 describe("daily-show plan generator selection", () => {
   it("uses showPlanGenerator for theme-show briefs", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter(),
-      webResearchAdapter: createMockStorySourceAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      storySourceAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
+      webResearchAdapter: createFakeStorySourceAdapter(),
       now: () => new Date(2026, 4, 14, 11, 0, 0)
     });
 

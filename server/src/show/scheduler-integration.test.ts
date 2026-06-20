@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scheduleTonightBriefIfNeeded, executeScheduledJob, type SchedulerIntegrationDeps, type SchedulerExecutionDeps } from "./scheduler-integration.js";
@@ -7,7 +7,7 @@ import { createProgramBriefRepository } from "./program-brief-repository.js";
 import { createShowPlanRepository } from "./show-plan-repository.js";
 import { createJobRegistry } from "./show-generation-job.js";
 import { createShowProjectRepository } from "./show-project-repository.js";
-import { createMockLlmAdapter, createMockMusicAdapter, createMockTtsAdapter, createMockWeatherAdapter, createMockCalendarAdapter, createMockDeviceAdapter, createMockStorySourceAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeTtsAdapter, createFakeWeatherAdapter, createFakeCalendarAdapter, createFakeDeviceAdapter, createFakeStorySourceAdapter } from "../test/fake-adapters.js";
 import type { Track } from "@fakeradio/shared";
 import type { ProgramBrief, ShowPlan } from "@fakeradio/shared";
 import { createDailyShowPlanGenerator } from "./daily-show-plan-generator.js";
@@ -43,14 +43,14 @@ function createTestExecutionDeps(baseDir: string): SchedulerExecutionDeps {
     planRepo: createTestPlanRepo(programsDir),
     showProjectRepo: createTestShowProjectRepo(showsDir),
     jobRegistry: createTestJobRegistry(programsDir),
-    llm: createMockLlmAdapter(),
-    music: createMockMusicAdapter(),
-    tts: createMockTtsAdapter(),
+    llm: createFakeLlmAdapter(),
+    music: createFakeMusicAdapter(),
+    tts: createFakeTtsAdapter(),
     ttsCacheDir: join(baseDir, "tts-cache"),
-    weather: createMockWeatherAdapter(),
-    calendar: createMockCalendarAdapter(),
-    devices: createMockDeviceAdapter(),
-    storySource: createMockStorySourceAdapter(),
+    weather: createFakeWeatherAdapter(),
+    calendar: createFakeCalendarAdapter(),
+    devices: createFakeDeviceAdapter(),
+    storySource: createFakeStorySourceAdapter(),
     likedSongs: {
       list: async () => []
     } as any,
@@ -430,14 +430,14 @@ describe("scheduler-integration", () => {
         planRepo,
         showProjectRepo,
         jobRegistry,
-        llm: createMockLlmAdapter(),
-        music: createMockMusicAdapter(),
-        tts: createMockTtsAdapter(),
+        llm: createFakeLlmAdapter(),
+        music: createFakeMusicAdapter(),
+        tts: createFakeTtsAdapter(),
         ttsCacheDir: join(baseDir, "tts-cache"),
-        weather: createMockWeatherAdapter(),
-        calendar: createMockCalendarAdapter(),
-        devices: createMockDeviceAdapter(),
-        storySource: createMockStorySourceAdapter(),
+        weather: createFakeWeatherAdapter(),
+        calendar: createFakeCalendarAdapter(),
+        devices: createFakeDeviceAdapter(),
+        storySource: createFakeStorySourceAdapter(),
         likedSongs: {
           list: async () => [{
             id: "test-track-001",
@@ -464,6 +464,116 @@ describe("scheduler-integration", () => {
       expect(episodeFiles.length).toBeGreaterThanOrEqual(1);
     });
 
+    it("uses block selection goals before generic DJ search queries", async () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
+      testDirs.push(baseDir);
+
+      const programsDir = join(baseDir, "programs");
+      const showsDir = join(baseDir, "shows");
+      mkdirSync(programsDir, { recursive: true });
+      mkdirSync(showsDir, { recursive: true });
+
+      const briefRepo = createTestBriefRepo(programsDir);
+      const planRepo = createTestPlanRepo(programsDir);
+      const jobRegistry = createTestJobRegistry(programsDir);
+      const showProjectRepo = createTestShowProjectRepo(showsDir);
+
+      const brief: ProgramBrief = {
+        id: "test-brief-selection-goal-001",
+        type: "theme-show",
+        scope: "full-show",
+        priority: "user-requested",
+        status: "generating",
+        targetDate: "2026-05-13",
+        topic: "蒸汽波",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await briefRepo.save(brief);
+
+      const plan: ShowPlan = {
+        id: "test-plan-selection-goal-001",
+        briefId: brief.id,
+        version: 1,
+        active: true,
+        briefSnapshot: brief,
+        blocks: [
+          {
+            role: "opening",
+            title: "霓虹幻影：蒸汽波的诞生",
+            storyGoal: "解释蒸汽波如何从互联网亚文化中诞生。",
+            selectionGoal: "选一首标志性蒸汽波作品，如Macintosh Plus的《リサフランク420 / 現代のコンピュー》。",
+            sourceNeeds: [],
+            constraints: {},
+            episodeTargets: []
+          }
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await planRepo.save(plan);
+
+      const project = await showProjectRepo.create({ briefId: brief.id, slug: "test-selection-goal-show" });
+      await showProjectRepo.update(project.id, { activePlanId: plan.id });
+
+      const job = await jobRegistry.create({ briefId: brief.id, planId: plan.id });
+      await jobRegistry.start(job.id);
+
+      const vaporwaveTrack: Track = {
+        id: "macintosh-plus-420",
+        title: "リサフランク420 / 現代のコンピュー",
+        artist: "Macintosh Plus",
+        album: "Floral Shoppe",
+        source: "local",
+        audioUrl: "https://example.com/macintosh-plus.mp3"
+      };
+      const unrelatedTrack: Track = {
+        id: "unrelated-track",
+        title: "Unrelated",
+        artist: "Other Artist",
+        source: "local",
+        audioUrl: "https://example.com/unrelated.mp3"
+      };
+      const search = vi.fn(async (query: string) => (
+        query.includes("Macintosh Plus") || query.includes("リサフランク420")
+          ? [vaporwaveTrack]
+          : [unrelatedTrack]
+      ));
+
+      const deps: SchedulerExecutionDeps = {
+        briefRepo,
+        planRepo,
+        showProjectRepo,
+        jobRegistry,
+        llm: createFakeLlmAdapter(),
+        music: {
+          search,
+          recommend: vi.fn(async () => [unrelatedTrack]),
+          resolve: vi.fn(async (track: Track) => track)
+        },
+        tts: createFakeTtsAdapter(),
+        ttsCacheDir: join(baseDir, "tts-cache"),
+        weather: createFakeWeatherAdapter(),
+        calendar: createFakeCalendarAdapter(),
+        devices: createFakeDeviceAdapter(),
+        storySource: createFakeStorySourceAdapter(),
+        likedSongs: {
+          list: async () => []
+        } as any,
+        systemPrompt: "You are a test DJ."
+      };
+
+      await executeScheduledJob(deps, brief.id, plan.id, job.id);
+
+      expect(search).toHaveBeenCalled();
+      expect(search.mock.calls[0][0]).toContain("Macintosh Plus");
+
+      const episodeFiles = readdirSync(project.directoryPath).filter(f => f.startsWith("episode-"));
+      expect(episodeFiles).toHaveLength(1);
+      const episode = JSON.parse(readFileSync(join(project.directoryPath, episodeFiles[0]), "utf-8"));
+      expect(episode.track.id).toBe("macintosh-plus-420");
+    });
+
     it("marks job as failed when no project found", async () => {
       const baseDir = mkdtempSync(join(tmpdir(), "scheduler-test-"));
       testDirs.push(baseDir);
@@ -485,14 +595,14 @@ describe("scheduler-integration", () => {
         planRepo,
         showProjectRepo,
         jobRegistry,
-        llm: createMockLlmAdapter(),
-        music: createMockMusicAdapter(),
-        tts: createMockTtsAdapter(),
+        llm: createFakeLlmAdapter(),
+        music: createFakeMusicAdapter(),
+        tts: createFakeTtsAdapter(),
         ttsCacheDir: join(baseDir, "tts-cache"),
-        weather: createMockWeatherAdapter(),
-        calendar: createMockCalendarAdapter(),
-        devices: createMockDeviceAdapter(),
-        storySource: createMockStorySourceAdapter(),
+        weather: createFakeWeatherAdapter(),
+        calendar: createFakeCalendarAdapter(),
+        devices: createFakeDeviceAdapter(),
+        storySource: createFakeStorySourceAdapter(),
         likedSongs: { list: async () => [] } as any,
         systemPrompt: "Test DJ"
       };
@@ -576,14 +686,14 @@ describe("scheduler-integration", () => {
         planRepo,
         showProjectRepo,
         jobRegistry,
-        llm: createMockLlmAdapter(),
-        music: createMockMusicAdapter(),
-        tts: createMockTtsAdapter(),
+        llm: createFakeLlmAdapter(),
+        music: createFakeMusicAdapter(),
+        tts: createFakeTtsAdapter(),
         ttsCacheDir: join(baseDir, "tts-cache"),
-        weather: createMockWeatherAdapter(),
-        calendar: createMockCalendarAdapter(),
-        devices: createMockDeviceAdapter(),
-        storySource: createMockStorySourceAdapter(),
+        weather: createFakeWeatherAdapter(),
+        calendar: createFakeCalendarAdapter(),
+        devices: createFakeDeviceAdapter(),
+        storySource: createFakeStorySourceAdapter(),
         likedSongs: {
           list: async () => [{
             id: "recent-track-001",
@@ -681,14 +791,14 @@ describe("scheduler-integration", () => {
         planRepo,
         showProjectRepo,
         jobRegistry,
-        llm: createMockLlmAdapter(),
-        music: createMockMusicAdapter(),
-        tts: createMockTtsAdapter(),
+        llm: createFakeLlmAdapter(),
+        music: createFakeMusicAdapter(),
+        tts: createFakeTtsAdapter(),
         ttsCacheDir: join(baseDir, "tts-cache"),
-        weather: createMockWeatherAdapter(),
-        calendar: createMockCalendarAdapter(),
-        devices: createMockDeviceAdapter(),
-        storySource: createMockStorySourceAdapter(),
+        weather: createFakeWeatherAdapter(),
+        calendar: createFakeCalendarAdapter(),
+        devices: createFakeDeviceAdapter(),
+        storySource: createFakeStorySourceAdapter(),
         likedSongs: {
           list: async () => []
         } as any,

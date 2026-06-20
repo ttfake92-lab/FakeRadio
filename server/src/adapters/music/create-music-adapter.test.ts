@@ -31,7 +31,7 @@ describe("probeNeteaseService", () => {
 });
 
 describe("createMusicAdapter", () => {
-  it("returns netease adapter when auto mode probe succeeds", async () => {
+  it("returns netease adapter when the probe succeeds", async () => {
     const probe = vi.fn().mockResolvedValue(true);
     const adapter = {
       search: vi.fn(),
@@ -40,7 +40,7 @@ describe("createMusicAdapter", () => {
     };
 
     const result = await createMusicAdapter({
-      providerMode: "auto",
+      providerMode: "netease",
       probeNetease: probe,
       createNeteaseAdapter: () => adapter
     });
@@ -69,37 +69,14 @@ describe("createMusicAdapter", () => {
     expect(result.music).toBe(adapter);
   });
 
-  it("falls back to mock when auto mode probe fails", async () => {
-    const result = await createMusicAdapter({
-      providerMode: "auto",
-      probeNetease: vi.fn().mockResolvedValue(false)
-    });
-
-    const [track] = await result.music.search("anything");
-    expect(result.status).toBe("mock");
-    expect(track?.source).toBe("mock");
-  });
-
-  it("falls back to mock when netease mode probe fails", async () => {
+  it("returns a disabled adapter when the netease probe fails", async () => {
     const result = await createMusicAdapter({
       providerMode: "netease",
       probeNetease: vi.fn().mockResolvedValue(false)
     });
 
-    const [track] = await result.music.search("anything");
-    expect(result.status).toBe("mock");
-    expect(track?.source).toBe("mock");
-  });
-
-  it("skips probing in mock mode", async () => {
-    const probe = vi.fn();
-
-    const result = await createMusicAdapter({
-      providerMode: "mock",
-      probeNetease: probe
-    });
-
-    expect(probe).not.toHaveBeenCalled();
-    expect(result.status).toBe("mock");
+    expect(result.status).toBe("disabled");
+    expect(result.error).toContain("Netease music service is unavailable");
+    await expect(result.music.search("anything")).rejects.toThrow("Netease music service is unavailable");
   });
 });

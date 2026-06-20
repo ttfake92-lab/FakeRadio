@@ -32,7 +32,7 @@ export const StreamEventSchema = z.discriminatedUnion("type", [
     payload: z.object({
       role: z.literal("agent"),
       text: z.string().min(1),
-      trackId: z.string().min(1)
+      trackId: z.string().min(1).optional()
     })
   })
 ]);

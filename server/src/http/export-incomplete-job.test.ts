@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeStorySourceAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
 
 vi.mock("../show/scheduler-integration.js", async () => {
@@ -16,10 +16,10 @@ vi.mock("../show/scheduler-integration.js", async () => {
 
 let app: FastifyInstance | undefined;
 
-function createMockMusicAdapterResult() {
+function createFakeMusicAdapterResult() {
   return {
-    music: createMockMusicAdapter(),
-    status: "mock" as const
+    music: createFakeMusicAdapter(),
+    status: "ready" as const
   };
 }
 
@@ -33,6 +33,7 @@ function createEmptyLikedSongsBaseDir() {
 async function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });
 }
@@ -45,10 +46,10 @@ describe("POST /api/projects/:id/export returns 400 for incomplete job", () => {
 
   it("returns 400 when job has not completed", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const briefResp = await app.inject({

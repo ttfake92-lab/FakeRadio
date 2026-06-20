@@ -76,11 +76,12 @@ PWA 目前不是纯展示壳，而是本地运行态面板。它直接展示：
 - mock 回退提示
 - 今日计划与最新 `/api/next` 决策结果
 
-播放器的音频管线当前遵循三条稳定性规则：
+播放器的音频管线当前遵循四条稳定性规则：
 
 - DJ 口播播放时可以 duck 当前音乐音量，但播放失败后必须恢复音乐音量。
 - story audio（`speechAudio`）播放失败时不自动回退到纯音乐，进入 `error` 状态并提示用户「口播加载失败」。
 - 写入 `HTMLMediaElement.volume` 前，计算结果必须限制在 `[0, 1]`，避免浏览器抛出越界错误。
+- `dj-speech` WebSocket 事件到达时，若 episode story 正在播放（`speechAudio` 未暂停），仅更新 DJ 文字但不播放音频，避免覆盖正在进行的 story 口播。
 
 ## Story Episode 链路
 
@@ -90,11 +91,13 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 2. server 选择下一首曲目（复用现有 music adapter 搜索/队列/回退逻辑）
 3. `StorySourceAdapter` 收集歌词（网易云）、公开元数据（MusicBrainz）和网页研究（Brave Search）资料
 4. story composer 按证据门槛生成中文短故事（`background` / `lyric-theme` / `mood-reading`）
-5. TTS adapter 合成故事音频；真实 TTS 失败时，mock TTS 生成真实静音 WAV 文件回退
-6. 前端先播放 story
-7. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
-8. 音乐播放时后台预取下一集 episode
-9. 当前音乐结束后自动进入下一集 story，形成连续电台循环
+5. `narrateStoryWithSources()` 包含 `narrationMentionsTrack` 安全守卫——LLM 生成的文案若未提及所选曲目标题或艺术家名，自动回退到 `buildGroundedFallbackNarration` 确定性文案
+6. TTS adapter 合成故事音频；真实 TTS 失败时，mock TTS 生成真实静音 WAV 文件回退
+7. server 调用 `state.setDj()` 更新 DJ 状态，并广播 `dj-speech` 和 `agent-message` WebSocket 事件
+8. 前端先播放 story
+9. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
+10. 音乐播放时后台预取下一集 episode
+11. 当前音乐结束后自动进入下一集 story，形成连续电台循环
 
 播放器支持 `idle → preparing → story → crossfade → music` 六状态机（含 `error`），crossfade 触发条件、音量 clamp 和并发控制均通过测试覆盖。
 
@@ -102,40 +105,31 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 
 这条链路遵循现有边界：前端不直接访问资料 provider，所有外部资料源通过 server adapter 接入。
 
-## 播放器皮肤系统
+## 播放器 UI 系统
 
-FakeRadio 前端播放器支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 根据当前主题选择渲染。
+FakeRadio 前端主界面为 **Editorial Radio**（`editorial-radio.tsx`），采用三栏桌面布局（260px / 1fr / 320px），支持 bone（浅色 `#f4f1ea`）和 graphite（深色 `#0e0e10`）两套主题，通过 `data-theme` 属性切换。
 
-### 皮肤组件架构
+### Editorial Radio 布局
 
-5 套新版皮肤各自独立（`.tsx` 文件），通过 `.fr-*` CSS 前缀实现样式隔离：
+- **TopBar**（`position: fixed`，固定视口顶部）：左侧 `FakeRadio.` + 网易云登录状态，中间六导航标签（正在播放/节目单/制作/节目库/导出/设置），右侧 ON AIR 指示器 + 主题切换按钮
+- **LeftColumn**（260px）：封面、曲目信息（标题/艺术家/专辑）、进度条、播放控制（V/M 音量）、UP NEXT 队列
+- **CenterColumn**（1fr）：主内容区，支持六个视图 —— `main`（可视化 + DJ 引语）、`schedule`（节目单）、`production`（ProductionBoard）、`library`（ShowLibrary）、`export`（导出）、`settings`（SettingsPanel）
+- **RightColumn**（320px）：TRANSCRIPT 面板（DJ/YOU 消息、Agent 活动、TASTE 折叠区、快捷指令、输入框）
 
-| 皮肤 | 文件 | 风格 |
-|------|------|------|
-| 暖橙胶片 (amber) | `skin-amber.tsx` | 胶片质感、渐变封面、wave avatar |
-| 像素 Game Boy (pixel) | `skin-pixel.tsx` | 4 色调色板、ASCII 条、Canvas 封面 |
-| 终端 TUI (terminal) | `skin-terminal.tsx` | 终端风格、ASCII 封面、Spectrum 频谱 |
-| Bento 玻璃 (bento) | `skin-bento.tsx` | 毛玻璃卡片、Bento 网格布局 |
-| Y2K / Win98 (y2k) | `skin-y2k.tsx` | Windows 98 风格、可拖拽窗口、VU 表 |
+所有子页面（ProductionBoard、SettingsPanel、ShowLibrary）已统一为 editorial 风格：标题用 Instrument Serif 衬线体，标签和元数据用 JetBrains Mono 等宽体 9-10px + `letterSpacing: 0.15em`，无圆角，无 emoji 图标，颜色使用 CSS 变量（`--accent`、`--ink-soft`、`--line`、`--faint`、`--mute`）。
 
-### useRadioBridge 桥接层
+### 排版系统
 
-`useRadioBridge` hook 位于 `player-shell.tsx` 与皮肤组件之间，将外部状态（播放状态、曲目、音频控制）转换为皮肤组件所需的 `RadioState` 对象，并管理聊天消息状态（greeting seed、流式 SSE 响应、bubble action）。
+| 用途 | 字体 |
+|------|------|
+| Display | Instrument Serif |
+| Serif EN | Cormorant Garamond |
+| Body | Manrope |
+| Mono | JetBrains Mono |
 
-关键接口：`ask(userText, opts?)`（聊天）、`send(override?)`（发送）、`onBubbleAction(kind, msg)`（气泡操作：fav/more/less/copy）。
+### 旧版皮肤系统（已清理）
 
-### DJ Persona
-
-4 套人格通过 `skin-config.ts` 的 `PERSONAS` 配置：
-
-| ID | 名称 | 短名 | 风格 |
-|----|------|------|------|
-| `midnight` | 深夜电台 | 阿夜 | 低声、慢、留白多 |
-| `morning` | 清晨陪伴 | 晓 | 温柔、明亮、轻快 |
-| `buddy` | 话痨好友 | 搭子 | 松、口语、可自嘲 |
-| `cool` | 极简冷淡 | STATIC | 冷淡、克制、一两句 |
-
-人格选择通过 Settings 面板（皮肤组件内）持久化到 `localStorage("fakeradio-persona")`。
+此前支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 渲染。2026-05-29 前端清理（T2）删除了 `skin-pixel.tsx`、`skin-terminal.tsx`、`skin-bento.tsx`、`skin-y2k.tsx` 和 `on-air-terminal.tsx`，仅保留 `skin-amber.tsx` 作为可选皮肤。`SkinId`、`SKINS`、`ON_AIR_THEMES` 已同步简化。`useRadioBridge` hook 和 `skin-stage.tsx` 仍保留。
 
 ## Show Production 链路
 
@@ -144,11 +138,11 @@ FakeRadio 支持从「构思」到「成品」的完整节目制作流水线：
 ### 数据流
 
 ```
-ProgramBrief → ShowPlan → GenerationJob → ShowProject → Export ZIP
+用户对话 / 手动创建 → ProgramBrief → ShowPlan → GenerationJob → ShowProject → Export ZIP
 ```
 
-1. **ProgramBrief**：节目构思描述（主题、风格、时长等），存储在 `program_briefs` 表。
-2. **ShowPlan**：由 LLM 基于 ProgramBrief 生成的结构化节目计划，支持版本化（追加约束生成新版本）。存储在 `show_plans` 表。
+1. **ProgramBrief**：节目构思描述（主题、风格、时长等），存储在 `program_briefs` 表。可通过聊天自然语言创建（如"帮我做一期后摇主题节目"）或手动创建。
+2. **ShowPlan**：由 LLM 基于 ProgramBrief 生成的结构化节目计划（`ShowPlanGenerator` 使用 `LlmAdapter.computeJson()` 生成个性化 block），支持版本化（追加约束或对话修改生成新版本）。存储在 `show_plans` 表。
 3. **GenerationJob**：后台生成任务，状态机为 `pending → running → completed`（含 `paused`、`needs-replan`、`cancelled`、`failed` 中间态）。每个 job 绑定一个 ShowPlan。存储在 `generation_jobs` 表。
 4. **ShowProject**：已完成的节目成品，包含音频、文案和元数据。存储在 `show_projects` 表。
 
@@ -163,6 +157,44 @@ ProgramBrief → ShowPlan → GenerationJob → ShowProject → Export ZIP
 ### 一键生成
 
 `POST /api/shows/generate-now` 提供同步端到端生成：从 brief 创建 → plan 生成 → job 执行 → show 成品，单次请求完成全流程。
+
+### 对话式节目编排
+
+FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊天一样创建、修改和确认节目计划。
+
+**意图检测**采用两层策略：
+1. **regex 快速路径**（零延迟）：匹配"帮我做一期xxx主题节目"等明确指令
+2. **LLM 兜底检测**（1-3s）：regex 未命中时，用 `computeJson()` 判断自然语言意图（如"最近在听很多后摇"→ 识别为节目创建意图）
+
+**多轮对话流程**：
+- **create**：用户表达节目意图 → 创建 ProgramBrief → LLM 生成个性化 ShowPlan → 返回节目编排摘要
+- **refine**：用户修改计划（如"改成 30 分钟"、"多放 Mogwai"）→ LLM 更新 ShowPlan blocks → 返回 diff
+- **confirm**：用户确认计划 → 更新 brief status 为 confirmed → 引导到生成面板
+- **cancel**：用户取消 → 更新 brief status 为 cancelled
+
+对话上下文通过 `SessionRepository`（当日会话记录）推断，不引入独立的 conversation state 存储，保持无状态架构。
+
+## 天气与日历 Adapter
+
+### Weather Adapter
+
+`WeatherAdapter`（`server/src/adapters/io/weather-adapter.ts`）：
+
+- `mock`：返回固定天气数据
+- `auto`（默认）：有 `FAKERADIO_OPENWEATHER_API_KEY` 时使用 OpenWeatherMap，否则回退 mock
+
+环境变量：`FAKERADIO_OPENWEATHER_API_KEY`、`FAKERADIO_WEATHER_CITY`（默认 `Beijing`）。
+
+### Calendar Adapter
+
+`CalendarAdapter`（`server/src/adapters/io/lark-calendar-adapter.ts`）：
+
+- `mock`：返回固定日程数据
+- `auto`（默认）：有 `FAKERADIO_LARK_APP_ID` 时使用 Lark Calendar，否则回退 mock
+
+环境变量：`FAKERADIO_LARK_APP_ID`、`FAKERADIO_LARK_APP_SECRET`。
+
+两种 adapter 遵循与 LLM/TTS 相同的 auto-detect 模式：环境变量存在时自动启用真实 provider，缺失时静默回退 mock。`/api/health` 暴露 `adapters.weather` 和 `adapters.calendar` 状态。
 
 ## 预热与调度
 

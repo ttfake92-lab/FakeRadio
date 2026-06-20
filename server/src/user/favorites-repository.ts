@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { FavoriteTrack } from "@fakeradio/shared";
+import { createWriteLock } from "../utils/shared-utils.js";
 
 export type FavoritesRepository = {
   list(): Promise<FavoriteTrack[]>;
@@ -10,7 +11,7 @@ export type FavoritesRepository = {
 };
 
 export function createFavoritesRepository(filePath: string): FavoritesRepository {
-  let writeLock: Promise<void> = Promise.resolve();
+  const withWriteLock = createWriteLock();
 
   async function readAll(): Promise<FavoriteTrack[]> {
     try {
@@ -28,17 +29,6 @@ export function createFavoritesRepository(filePath: string): FavoritesRepository
     await writeFile(filePath, JSON.stringify(favorites, null, 2), "utf-8");
   }
 
-  async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-    const previous = writeLock;
-    let resolveLock!: () => void;
-    writeLock = new Promise<void>((resolve) => { resolveLock = resolve; });
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      resolveLock();
-    }
-  }
 
   return {
     async list() {

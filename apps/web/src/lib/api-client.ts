@@ -3,6 +3,8 @@ import {
   ChatResponseSchema,
   EpisodeNextResponseSchema,
   FavoritesResponseSchema,
+  GenerateNowRequestSchema,
+  GenerateNowResponseSchema,
   HealthResponseSchema,
   NeteaseCookieSubmitResponseSchema,
   NeteaseLoginStatusSchema,
@@ -24,7 +26,15 @@ import {
 } from "@fakeradio/shared";
 
 export function getServerBaseUrl() {
-  return process.env.NEXT_PUBLIC_FAKERADIO_SERVER_URL ?? "http://localhost:3301";
+  if (process.env.NEXT_PUBLIC_FAKERADIO_SERVER_URL) {
+    return process.env.NEXT_PUBLIC_FAKERADIO_SERVER_URL;
+  }
+  // 局域网访问时自动使用当前页面的 hostname，端口 3301
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:3301`;
+  }
+  return "http://localhost:3301";
 }
 
 export function buildApiUrl(path: string) {
@@ -65,6 +75,9 @@ export async function sendChat(message: string) {
     },
     body: JSON.stringify({ message })
   });
+  if (!response.ok) {
+    throw new Error(`chat failed: ${response.status}`);
+  }
   return ChatResponseSchema.parse(await response.json());
 }
 
@@ -75,6 +88,58 @@ export async function getNextEpisode() {
     throw new Error((body as { error?: string }).error ?? `Episode generation failed: ${response.status}`);
   }
   return EpisodeNextResponseSchema.parse(await response.json());
+}
+
+export async function prefetchNextEpisode() {
+  const response = await fetch(buildApiUrl("/api/episode/prefetch"));
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Episode prefetch failed: ${response.status}`);
+  }
+  return EpisodeNextResponseSchema.parse(await response.json());
+}
+
+export type TodayExportTask = {
+  id?: string;
+  taskId?: string;
+  status: "pending" | "running" | "completed" | "failed";
+  progress?: {
+    phase: "collecting" | "mixing" | "concatenating" | "notes" | "packaging" | "done";
+    current?: number;
+    total?: number;
+    trackTitle?: string;
+  };
+  result?: { downloadUrl: string; trackCount: number; date: string };
+  error?: string;
+};
+
+export async function exportTodayShow(): Promise<{ taskId: string; status: string }> {
+  const response = await fetch(buildApiUrl("/api/export/today"), { method: "POST" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Export failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getExportTodayStatus(taskId: string): Promise<TodayExportTask> {
+  const response = await fetch(buildApiUrl(`/api/export/status/${taskId}`));
+  if (!response.ok) {
+    throw new Error(`Failed to get export status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function reportEpisodePlaying(trackId: string) {
+  const response = await fetch(buildApiUrl("/api/episode/playing"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ trackId })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to report playing: ${response.status}`);
+  }
+  return response.json() as Promise<{ ok: boolean }>;
 }
 
 export async function getTaste() {
@@ -129,6 +194,7 @@ export async function addFavorite(track: { trackId: string; title: string; artis
     headers: { "content-type": "application/json" },
     body: JSON.stringify(track)
   });
+  if (!response.ok) throw new Error(`addFavorite failed: ${response.status}`);
   return response.json() as Promise<{ favorite: { trackId: string; favoritedAt: string } }>;
 }
 
@@ -136,6 +202,7 @@ export async function removeFavorite(trackId: string) {
   const response = await fetch(buildApiUrl(`/api/favorites/${trackId}`), {
     method: "DELETE"
   });
+  if (!response.ok) throw new Error(`removeFavorite failed: ${response.status}`);
   return response.json() as Promise<{ removed: boolean }>;
 }
 
@@ -183,6 +250,24 @@ export async function getShowProjects() {
     return { projects: [] };
   }
   return ShowProjectsListResponseSchema.parse(await response.json());
+}
+
+export async function generateNow(briefId: string) {
+  const body = GenerateNowRequestSchema.parse({ briefId });
+  const response = await fetch(buildApiUrl("/api/shows/generate-now"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    if (response.status >= 500) {
+      const parsed = GenerateNowResponseSchema.safeParse(errorBody);
+      if (parsed.success) return parsed.data;
+    }
+    throw new Error((errorBody as { error?: string }).error ?? `Generate failed: ${response.status}`);
+  }
+  return GenerateNowResponseSchema.parse(await response.json());
 }
 
 export async function exportProject(projectId: string, options?: { includeTrace?: boolean }) {

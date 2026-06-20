@@ -14,7 +14,7 @@ export type StreamStatus = {
 export type AgentMessage = {
   role: "agent";
   text: string;
-  trackId: string;
+  trackId?: string | undefined;
 };
 
 export type StreamConnection = {
@@ -26,7 +26,9 @@ export function useStreamConnection(
   onNowPlaying: (now: NowResponse) => void,
   onQueueUpdated: (queue: NowResponse["queue"]) => void,
   onDjSpeech: (dj: NowResponse["dj"]) => void,
-  onAgentMessage?: (msg: AgentMessage) => void
+  onAgentMessage?: (msg: AgentMessage) => void,
+  /** 返回 true 时跳过 now-playing/dj-speech，避免覆盖 episode 播放状态 */
+  isEpisodeActive?: () => boolean
 ): StreamConnection {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>({
     label: "连接中",
@@ -50,7 +52,10 @@ export function useStreamConnection(
       }
 
       if (event.type === "now-playing") {
-        onNowPlaying(event.payload);
+        // episode 播放中忽略服务端 now-playing，避免卡片显示与实际音频不一致
+        if (!isEpisodeActive?.()) {
+          onNowPlaying(event.payload);
+        }
       }
 
       if (event.type === "queue-updated") {
@@ -61,7 +66,16 @@ export function useStreamConnection(
         const musicAudio = audio.musicRef.current;
         const speechAudio = audio.speechRef.current;
 
-        if (speechAudio && event.payload.audioUrl) {
+        // Always update DJ text regardless of audio state
+        const dj: NowResponse["dj"] = { say: event.payload.text };
+        if (event.payload.audioUrl !== undefined) {
+          dj.audioUrl = event.payload.audioUrl;
+        }
+        onDjSpeech(dj);
+
+        // 仅在非 episode 播放、且 speech 元素空闲时才播放后台旁白；
+        // episode 播放时 speech 元素被 story 占用，不能抢。
+        if (!isEpisodeActive?.() && speechAudio && event.payload.audioUrl && speechAudio.paused) {
           if (audio.isDucking()) {
             audio.restoreMusicVolume();
           }
@@ -77,12 +91,6 @@ export function useStreamConnection(
 
           speechAudio.play().catch(() => audio.restoreMusicVolume());
         }
-
-        const dj: NowResponse["dj"] = { say: event.payload.text };
-        if (event.payload.audioUrl !== undefined) {
-          dj.audioUrl = event.payload.audioUrl;
-        }
-        onDjSpeech(dj);
       }
 
       if (event.type === "agent-message" && onAgentMessage) {
@@ -90,7 +98,10 @@ export function useStreamConnection(
       }
 
       if (event.type === "diagnostic") {
-        setStreamStatus({ label: event.payload.level, detail: event.payload.message });
+        // info 级别不覆盖已连接状态，避免误启轮询
+        if (event.payload.level === "error" || event.payload.level === "warn") {
+          setStreamStatus({ label: event.payload.level, detail: event.payload.message });
+        }
       }
     });
 

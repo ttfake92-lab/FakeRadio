@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,11 +10,13 @@ describe("createStateRepository", () => {
   let repo: ReturnType<typeof createStateRepository>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     tempDir = mkdtempSync(join(tmpdir(), "state-repo-test-"));
     repo = createStateRepository(join(tempDir, "test.db"));
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     try {
       rmSync(tempDir, { recursive: true, force: true });
     } catch {
@@ -31,7 +33,7 @@ describe("createStateRepository", () => {
       title: "Morning Signal",
       artist: "FakeRadio",
       album: "Dawn EP",
-      source: "mock",
+      source: "local",
       playedAt: new Date().toISOString()
     };
 
@@ -45,7 +47,7 @@ describe("createStateRepository", () => {
       title: "Morning Signal",
       artist: "FakeRadio",
       album: "Dawn EP",
-      source: "mock"
+      source: "local"
     });
   });
 
@@ -54,9 +56,9 @@ describe("createStateRepository", () => {
     const t2 = new Date("2026-01-01T11:00:00Z");
     const t3 = new Date("2026-01-01T12:00:00Z");
 
-    await repo.recordPlayedTrack({ id: "pt-1", trackId: "t1", title: "T1", artist: "A", album: null, source: "mock", playedAt: t1.toISOString() });
-    await repo.recordPlayedTrack({ id: "pt-2", trackId: "t2", title: "T2", artist: "A", album: null, source: "mock", playedAt: t2.toISOString() });
-    await repo.recordPlayedTrack({ id: "pt-3", trackId: "t3", title: "T3", artist: "A", album: null, source: "mock", playedAt: t3.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-1", trackId: "t1", title: "T1", artist: "A", album: null, source: "local", playedAt: t1.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-2", trackId: "t2", title: "T2", artist: "A", album: null, source: "local", playedAt: t2.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-3", trackId: "t3", title: "T3", artist: "A", album: null, source: "local", playedAt: t3.toISOString() });
 
     const recent = await repo.getRecentlyPlayed(10);
 
@@ -65,7 +67,7 @@ describe("createStateRepository", () => {
 
   it("getRecentlyPlayed respects limit", async () => {
     for (let i = 0; i < 5; i++) {
-      await repo.recordPlayedTrack({ id: `pt-${i}`, trackId: `t${i}`, title: `T${i}`, artist: "A", album: null, source: "mock", playedAt: new Date().toISOString() });
+      await repo.recordPlayedTrack({ id: `pt-${i}`, trackId: `t${i}`, title: `T${i}`, artist: "A", album: null, source: "local", playedAt: new Date().toISOString() });
     }
 
     const recent = await repo.getRecentlyPlayed(3);
@@ -77,8 +79,8 @@ describe("createStateRepository", () => {
     const old = new Date("2026-01-01T10:00:00Z");
     const recent = new Date("2026-06-01T10:00:00Z");
 
-    await repo.recordPlayedTrack({ id: "pt-old", trackId: "t-old", title: "Old", artist: "A", album: null, source: "mock", playedAt: old.toISOString() });
-    await repo.recordPlayedTrack({ id: "pt-new", trackId: "t-new", title: "New", artist: "A", album: null, source: "mock", playedAt: recent.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-old", trackId: "t-old", title: "Old", artist: "A", album: null, source: "local", playedAt: old.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-new", trackId: "t-new", title: "New", artist: "A", album: null, source: "local", playedAt: recent.toISOString() });
 
     const result = await repo.getRecentlyPlayed(10, recent.toISOString());
 
@@ -126,9 +128,9 @@ describe("createStateRepository", () => {
 
   it("snapshots the queue and retrieves it", async () => {
     const tracks = [
-      { id: "track-1", title: "Track 1", artist: "Artist", source: "mock" as const },
-      { id: "track-2", title: "Track 2", artist: "Artist", source: "mock" as const },
-      { id: "track-3", title: "Track 3", artist: "Artist", source: "mock" as const }
+      { id: "track-1", title: "Track 1", artist: "Artist", source: "local" as const },
+      { id: "track-2", title: "Track 2", artist: "Artist", source: "local" as const },
+      { id: "track-3", title: "Track 3", artist: "Artist", source: "local" as const }
     ];
     const blockAt = "2026-05-08T12:00:00Z";
 
@@ -147,14 +149,14 @@ describe("createStateRepository", () => {
 
   it("getLatestQueueSnapshot returns the most recent snapshot", async () => {
     await repo.snapshotQueue([
-      { id: "a", title: "A", artist: "X", source: "mock" as const },
-      { id: "b", title: "B", artist: "X", source: "mock" as const }
+      { id: "a", title: "A", artist: "X", source: "local" as const },
+      { id: "b", title: "B", artist: "X", source: "local" as const }
     ], null);
-    await new Promise(r => setTimeout(r, 10)); // small delay to ensure different timestamps
+    vi.advanceTimersByTime(10); // advance clock to ensure different timestamps
     const latest = await repo.snapshotQueue([
-      { id: "x", title: "X", artist: "Y", source: "mock" as const },
-      { id: "y", title: "Y", artist: "Y", source: "mock" as const },
-      { id: "z", title: "Z", artist: "Y", source: "mock" as const }
+      { id: "x", title: "X", artist: "Y", source: "local" as const },
+      { id: "y", title: "Y", artist: "Y", source: "local" as const },
+      { id: "z", title: "Z", artist: "Y", source: "local" as const }
     ], "2026-05-08T12:00:00Z");
 
     const result = await repo.getLatestQueueSnapshot();
@@ -198,11 +200,11 @@ describe("createStateRepository", () => {
 
   it("getStartupState returns all current state", async () => {
     // Add some data
-    await repo.recordPlayedTrack({ id: "pt-1", trackId: "t1", title: "T1", artist: "A", album: null, source: "mock", playedAt: new Date().toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-1", trackId: "t1", title: "T1", artist: "A", album: null, source: "local", playedAt: new Date().toISOString() });
     await repo.appendDjMessage({ text: "DJ hello", trackId: null, storyType: null });
     await repo.snapshotQueue([
-      { id: "q1", title: "Q1", artist: "A", source: "mock" as const },
-      { id: "q2", title: "Q2", artist: "A", source: "mock" as const }
+      { id: "q1", title: "Q1", artist: "A", source: "local" as const },
+      { id: "q2", title: "Q2", artist: "A", source: "local" as const }
     ], null);
     await repo.upsertPref("key1", "value1");
 
@@ -242,8 +244,8 @@ describe("createStateRepository", () => {
     const old = new Date("2026-01-01T00:00:00Z");
     const recent = new Date("2026-06-01T00:00:00Z");
 
-    await repo.recordPlayedTrack({ id: "pt-old", trackId: "t-old", title: "Old", artist: "A", album: null, source: "mock", playedAt: old.toISOString() });
-    await repo.recordPlayedTrack({ id: "pt-new", trackId: "t-new", title: "New", artist: "A", album: null, source: "mock", playedAt: recent.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-old", trackId: "t-old", title: "Old", artist: "A", album: null, source: "local", playedAt: old.toISOString() });
+    await repo.recordPlayedTrack({ id: "pt-new", trackId: "t-new", title: "New", artist: "A", album: null, source: "local", playedAt: recent.toISOString() });
 
     const pruned = await repo.pruneOldData(recent.toISOString());
 
@@ -263,9 +265,9 @@ describe("createStateRepository", () => {
 
   it("saves a prepared episode and returns it with id and timestamps", async () => {
     const episode = {
-      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/t1.mp3" },
       story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     const input = {
@@ -307,9 +309,9 @@ describe("createStateRepository", () => {
 
   it("claims a ready prepared episode and returns parsed RadioEpisode", async () => {
     const episode = {
-      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/t1.mp3" },
       story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -331,15 +333,15 @@ describe("createStateRepository", () => {
 
   it("prefers a non-recent prepared episode when claiming", async () => {
     const recentEpisode = {
-      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
+      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
       story: { text: "Recent", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     const freshEpisode = {
-      track: { id: "fresh-track", title: "Fresh Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/fresh-track.mp3" },
+      track: { id: "fresh-track", title: "Fresh Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/fresh-track.mp3" },
       story: { text: "Fresh", audioUrl: "http://localhost/tts/fresh.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -363,9 +365,9 @@ describe("createStateRepository", () => {
 
   it("returns null instead of replaying prepared episodes when all ready tracks are recent", async () => {
     const recentEpisode = {
-      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
+      track: { id: "recent-track", title: "Recent Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/recent-track.mp3" },
       story: { text: "Recent", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -387,9 +389,9 @@ describe("createStateRepository", () => {
 
   it("returns null when claiming from wrong radioDate", async () => {
     const episode = {
-      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/t1.mp3" },
       story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -405,9 +407,9 @@ describe("createStateRepository", () => {
 
   it("returns null when claiming from wrong blockAt", async () => {
     const episode = {
-      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/t1.mp3" },
       story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -423,9 +425,9 @@ describe("createStateRepository", () => {
 
   it("does not claim already consumed records", async () => {
     const episode = {
-      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/t1.mp3" },
+      track: { id: "t1", title: "Test Track", artist: "Test Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/t1.mp3" },
       story: { text: "Hello", audioUrl: "http://localhost/tts/hello.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -516,9 +518,9 @@ describe("createStateRepository", () => {
       blockAt: "08:00",
       status: "ready",
       episodeJson: JSON.stringify({
-        track: { id: "t1", title: "Test", artist: "Artist", source: "mock" as const },
+        track: { id: "t1", title: "Test", artist: "Artist", source: "local" as const },
         story: { text: "Hello", audioUrl: "http://localhost/tts/h.wav", type: "mood-reading" as const },
-        sources: [{ kind: "mock", title: "M", content: "C" }],
+        sources: [{ kind: "metadata", title: "M", content: "C" }],
         playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
       })
     });
@@ -539,9 +541,9 @@ describe("createStateRepository", () => {
       status: "ready",
       audioDownloaded: true,
       episodeJson: JSON.stringify({
-        track: { id: "t2", title: "Test 2", artist: "Artist", source: "mock" as const },
+        track: { id: "t2", title: "Test 2", artist: "Artist", source: "local" as const },
         story: { text: "Hello", audioUrl: "http://localhost/tts/h.wav", type: "mood-reading" as const },
-        sources: [{ kind: "mock", title: "M", content: "C" }],
+        sources: [{ kind: "metadata", title: "M", content: "C" }],
         playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
       })
     });

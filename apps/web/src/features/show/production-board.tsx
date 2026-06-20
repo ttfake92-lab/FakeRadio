@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
 import { exportProject, deleteProject, deleteProjectTrace } from "../../lib/api-client";
+import { getJobsForBrief, getProjectsForBrief, computeActiveProject } from "../../lib/brief-filter";
 
 export type ProductionBoardProps = {
   brief?: ProgramBrief | null;
@@ -11,42 +12,27 @@ export type ProductionBoardProps = {
   jobs?: ShowJob[];
   projects?: ShowProject[];
   isExpanded: boolean;
+  embedded?: boolean;
   onToggleExpand: () => void;
   onClose: () => void;
   onSwitchBrief?: ((briefId: string) => void | Promise<void>) | undefined;
   onExportStart?: (projectId: string) => void;
   onProjectsChanged?: (() => void) | undefined;
+  onGenerateNow?: ((briefId: string) => void | Promise<void>) | undefined;
 };
 
-function getJobsForBrief(jobs: ShowJob[] | undefined, briefId: string | null | undefined): ShowJob[] {
-  if (!briefId || !jobs) return [];
-  return jobs.filter((j) => j.briefId === briefId);
-}
-
-function getProjectsForBrief(projects: ShowProject[] | undefined, briefId: string | null | undefined): ShowProject[] {
-  if (!briefId || !projects) return [];
-  return projects.filter((p) => p.briefId === briefId);
-}
-
-export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExpanded, onToggleExpand, onClose, onSwitchBrief, onExportStart, onProjectsChanged }: ProductionBoardProps) {
+export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExpanded, embedded = false, onToggleExpand, onClose, onSwitchBrief, onExportStart, onProjectsChanged, onGenerateNow }: ProductionBoardProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [includeTrace, setIncludeTrace] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingNow, setIsGeneratingNow] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const jobsForBrief = useMemo(() => getJobsForBrief(jobs, brief?.id), [jobs, brief?.id]);
   const projectsForBrief = useMemo(() => getProjectsForBrief(projects, brief?.id), [projects, brief?.id]);
 
-  const completedJob = jobsForBrief.find((j) => j.status === "completed");
-
-  let activeProject: ShowProject | undefined;
-  if (selectedProjectId && projectsForBrief) {
-    activeProject = projectsForBrief.find(p => p.id === selectedProjectId);
-  } else if (completedJob && projectsForBrief) {
-    activeProject = projectsForBrief.find(p => p.activeJobId === completedJob.id) ||
-      projectsForBrief.find(p => p.briefId === completedJob.briefId);
-  }
+  const activeProject = computeActiveProject(jobs, projects, brief?.id, selectedProjectId) ?? undefined;
 
   useEffect(() => {
     if (selectedProjectId && brief?.id) {
@@ -106,21 +92,32 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
     }
   };
 
+  const handleGenerateNow = async () => {
+    if (!brief || !onGenerateNow) return;
+    setIsGeneratingNow(true);
+    setExportError(null);
+    try {
+      await onGenerateNow(brief.id);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Generate failed");
+    } finally {
+      setIsGeneratingNow(false);
+    }
+  };
+
   return (
     <div
       style={{
-        position: "fixed",
-        bottom: 80,
-        left: 16,
-        width: isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
-        maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
-        background: "rgba(0, 0, 0, 0.85)",
-        border: "1px solid rgba(255, 255, 255, 0.1)",
-        borderRadius: 12,
-        overflow: "hidden",
+        position: embedded ? "relative" : "fixed",
+        ...(embedded ? {} : { bottom: 80, left: 16 }),
+        width: embedded ? "100%" : isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
+        maxHeight: embedded ? "100%" : isExpanded ? "calc(100vh - 160px)" : "auto",
+        background: embedded ? "transparent" : "var(--bg-2)",
+        border: embedded ? "none" : "1px solid var(--line)",
+        borderRadius: 0,
+        overflow: "auto",
         transition: "width 0.2s ease",
-        zIndex: 100,
-        backdropFilter: "blur(8px)",
+        ...(embedded ? {} : { zIndex: 100 }),
       }}
     >
       <div
@@ -129,15 +126,21 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
           alignItems: "center",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: isExpanded ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
+          borderBottom: isExpanded ? "1px solid var(--line)" : "none",
           cursor: "pointer",
         }}
         onClick={onToggleExpand}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>📻</span>
-          <span style={{ color: "#fff", fontSize: 14, fontWeight: 600 }}>
-            {isExpanded ? "Production Board" : "制作台"}
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              color: "var(--text)",
+              fontSize: 20,
+              fontStyle: "italic",
+            }}
+          >
+            Production
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -146,16 +149,25 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: "var(--mute)",
               cursor: "pointer",
-              fontSize: 18,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.15em",
               padding: 4,
             }}
           >
-            ✕
+            CLOSE
           </button>
-          <span style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 12 }}>
-            {isExpanded ? "▼" : "▶"}
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--faint)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+            }}
+          >
+            {isExpanded ? "V" : ">"}
           </span>
         </div>
       </div>
@@ -167,25 +179,27 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
             activeBriefId={brief?.id}
             onSwitchBrief={onSwitchBrief}
           />
-          
+
           <ProjectSelector
             projects={projectsForBrief ?? []}
             selectedProjectId={selectedProjectId}
             onSelectProject={setSelectedProjectId}
           />
-          
+
           {brief || showPlan || activeProject ? (
             <ShowProjectView
               {...(brief !== undefined && { brief })}
               {...(showPlan !== undefined && { showPlan })}
               jobs={jobsForBrief}
               project={activeProject}
+              onGenerateNow={brief && showPlan && onGenerateNow ? handleGenerateNow : undefined}
               includeTrace={includeTrace}
               onIncludeTraceChange={setIncludeTrace}
               onExport={handleExport}
               onDeleteProject={handleDeleteProject}
               onDeleteTrace={handleDeleteTrace}
               isExporting={isExporting}
+              isGeneratingNow={isGeneratingNow}
               isDeleting={isDeleting}
               exportError={exportError}
             />
@@ -211,8 +225,17 @@ function BriefSelector({
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
-        选择 Brief
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          color: "var(--faint)",
+          letterSpacing: "0.15em",
+          textTransform: "uppercase",
+          marginBottom: 8,
+        }}
+      >
+        Brief
       </div>
       <select
         value={activeBriefId ?? ""}
@@ -220,11 +243,13 @@ function BriefSelector({
         style={{
           width: "100%",
           padding: "8px 12px",
-          borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.1)",
-          background: "rgba(255,255,255,0.05)",
-          color: "#fff",
-          fontSize: 12,
+          borderRadius: 0,
+          border: "1px solid var(--line)",
+          background: "var(--ink-soft)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
         }}
       >
         {briefs.map((b) => (
@@ -250,8 +275,17 @@ function ProjectSelector({
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
-        历史节目
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          color: "var(--faint)",
+          letterSpacing: "0.15em",
+          textTransform: "uppercase",
+          marginBottom: 8,
+        }}
+      >
+        History
       </div>
       <select
         value={selectedProjectId ?? ""}
@@ -259,11 +293,13 @@ function ProjectSelector({
         style={{
           width: "100%",
           padding: "8px 12px",
-          borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.1)",
-          background: "rgba(255,255,255,0.05)",
-          color: "#fff",
-          fontSize: 12,
+          borderRadius: 0,
+          border: "1px solid var(--line)",
+          background: "var(--ink-soft)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
         }}
       >
         <option value="">当前制作</option>
@@ -282,12 +318,14 @@ function ShowProjectView({
   showPlan,
   jobs,
   project,
+  onGenerateNow,
   includeTrace = true,
   onIncludeTraceChange,
   onExport,
   onDeleteProject,
   onDeleteTrace,
   isExporting = false,
+  isGeneratingNow = false,
   isDeleting = false,
   exportError = null,
 }: {
@@ -295,45 +333,112 @@ function ShowProjectView({
   showPlan?: ShowPlan | null;
   jobs?: ShowJob[];
   project?: ShowProject | undefined;
+  onGenerateNow?: (() => void) | undefined;
   includeTrace?: boolean;
   onIncludeTraceChange?: (v: boolean) => void;
   onExport?: () => void;
   onDeleteProject?: () => void;
   onDeleteTrace?: () => void;
   isExporting?: boolean;
+  isGeneratingNow?: boolean;
   isDeleting?: boolean;
   exportError?: string | null;
 }) {
   return (
-    <div style={{ color: "#fff" }}>
+    <div style={{ color: "var(--text)" }}>
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#e8a04a" }}>
+        <h3
+          style={{
+            margin: 0,
+            fontFamily: "var(--font-display)",
+            fontSize: 20,
+            lineHeight: 1.3,
+            color: "var(--accent)",
+          }}
+        >
           {brief?.topic ?? project?.slug ?? "未命名节目"}
         </h3>
-        <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(255, 255, 255, 0.6)" }}>
+        <p
+          style={{
+            margin: "4px 0 0",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--mute)",
+            letterSpacing: "0.15em",
+          }}
+        >
           {brief?.type ?? "theme-show"} · {brief?.status ?? project?.status ?? "draft"}
         </p>
       </div>
 
       {showPlan ? (
         <div>
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.5)", marginBottom: 8 }}>
-            {showPlan.blocks?.length ?? 0} 个段落
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              color: "var(--faint)",
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            {showPlan.blocks?.length ?? 0} blocks
           </div>
           {showPlan.blocks?.map((block, idx) => (
             <BlockView key={idx} block={block} idx={idx} />
           ))}
+          {onGenerateNow && (
+            <button
+              onClick={onGenerateNow}
+              disabled={isGeneratingNow || isExporting || isDeleting}
+              style={{
+                width: "100%",
+                padding: "10px 16px",
+                borderRadius: 0,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "var(--bg)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
+                cursor: (isGeneratingNow || isExporting || isDeleting) ? "not-allowed" : "pointer",
+                opacity: (isGeneratingNow || isExporting || isDeleting) ? 0.6 : 1,
+                marginTop: 12,
+              }}
+            >
+              {isGeneratingNow ? "Generating..." : "Generate Now"}
+            </button>
+          )}
         </div>
       ) : (
-        <p style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 13 }}>
-          暂无 ShowPlan
+        <p
+          style={{
+            color: "var(--faint)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            fontStyle: "italic",
+          }}
+        >
+          No ShowPlan
         </p>
       )}
 
       {jobs && jobs.length > 0 && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255, 255, 255, 0.1)" }}>
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.5)", marginBottom: 8 }}>
-            任务 ({jobs.length})
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              color: "var(--faint)",
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            Jobs ({jobs.length})
           </div>
           {jobs.map((job, idx) => (
             <JobView key={idx} job={job} />
@@ -342,11 +447,20 @@ function ShowProjectView({
       )}
 
       {project && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
-            导出节目
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              color: "var(--faint)",
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            Export
           </div>
-          
+
           {onIncludeTraceChange && onExport && (
             <>
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, cursor: "pointer" }}>
@@ -356,7 +470,16 @@ function ShowProjectView({
                   onChange={(e) => onIncludeTraceChange(e.target.checked)}
                   style={{ cursor: "pointer" }}
                 />
-                <span style={{ fontSize: 12, color: "#fff" }}>包含制作 trace</span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--text)",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  Include trace
+                </span>
               </label>
 
               <button
@@ -365,31 +488,51 @@ function ShowProjectView({
                 style={{
                   width: "100%",
                   padding: "10px 16px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "#4ade80",
-                  color: "#000",
-                  fontSize: 13,
-                  fontWeight: 600,
+                  borderRadius: 0,
+                  border: "1px solid var(--accent)",
+                  background: "var(--ink-soft)",
+                  color: "var(--text)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
                   cursor: (isExporting || isDeleting) ? "not-allowed" : "pointer",
                   opacity: (isExporting || isDeleting) ? 0.6 : 1,
                   marginBottom: 8,
                 }}
               >
-                {isExporting ? "导出中…" : "📦 导出节目包"}
+                {isExporting ? "Exporting…" : "Export"}
               </button>
             </>
           )}
 
           {exportError && (
-            <p style={{ marginTop: 8, fontSize: 12, color: "#f87171", margin: "8px 0 0" }}>
+            <p
+              style={{
+                marginTop: 8,
+                margin: "8px 0 0",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                letterSpacing: "0.08em",
+              }}
+            >
               {exportError}
             </p>
           )}
 
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>
-              管理
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              Manage
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {onDeleteTrace && project.productionTracePath && (
@@ -399,16 +542,19 @@ function ShowProjectView({
                   style={{
                     flex: 1,
                     padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.2)",
+                    borderRadius: 0,
+                    border: "1px solid var(--line)",
                     background: "transparent",
-                    color: "#fff",
-                    fontSize: 12,
+                    color: "var(--text)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 9,
+                    letterSpacing: "0.15em",
+                    textTransform: "uppercase",
                     cursor: (isDeleting || isExporting) ? "not-allowed" : "pointer",
                     opacity: (isDeleting || isExporting) ? 0.5 : 1,
                   }}
                 >
-                  删除 Trace
+                  Del Trace
                 </button>
               )}
               {onDeleteProject && (
@@ -418,16 +564,19 @@ function ShowProjectView({
                   style={{
                     flex: 1,
                     padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(248,113,113,0.5)",
+                    borderRadius: 0,
+                    border: "1px solid var(--faint)",
                     background: "transparent",
-                    color: "#f87171",
-                    fontSize: 12,
+                    color: "var(--faint)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 9,
+                    letterSpacing: "0.15em",
+                    textTransform: "uppercase",
                     cursor: (isDeleting || isExporting) ? "not-allowed" : "pointer",
                     opacity: (isDeleting || isExporting) ? 0.5 : 1,
                   }}
                 >
-                  删除节目
+                  Del Project
                 </button>
               )}
             </div>
@@ -444,40 +593,73 @@ function BlockView({ block, idx }: { block: any; idx: number }) {
       style={{
         marginBottom: 12,
         padding: 12,
-        background: "rgba(255, 255, 255, 0.05)",
-        borderRadius: 8,
-        border: "1px solid rgba(255, 255, 255, 0.08)",
+        background: "var(--ink-soft)",
+        borderRadius: 0,
+        border: "1px solid var(--line)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)" }}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--faint)",
+            letterSpacing: "0.08em",
+          }}
+        >
           #{idx + 1}
         </span>
         <span
           style={{
-            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
             padding: "2px 6px",
-            background: "rgba(232, 160, 74, 0.2)",
-            color: "#e8a04a",
-            borderRadius: 4,
-            fontWeight: 500,
+            background: "var(--ink-soft)",
+            color: "var(--accent)",
+            borderRadius: 0,
+            letterSpacing: "0.15em",
+            textTransform: "uppercase",
           }}
         >
           {block.role ?? "segment"}
         </span>
       </div>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 16,
+          lineHeight: 1.3,
+          marginBottom: 4,
+        }}
+      >
         {block.title ?? "未命名段落"}
       </div>
       {block.storyGoal && (
-        <p style={{ margin: 0, fontSize: 12, color: "rgba(255, 255, 255, 0.6)" }}>
+        <p
+          style={{
+            margin: 0,
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--mute)",
+            letterSpacing: "0.08em",
+          }}
+        >
           {block.storyGoal}
         </p>
       )}
       {block.episodes && block.episodes.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255, 255, 255, 0.05)" }}>
-          <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", marginBottom: 4 }}>
-             Episodes ({block.episodes.length})
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              color: "var(--faint)",
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            Episodes ({block.episodes.length})
           </div>
           {block.episodes.map((ep: any, epIdx: number) => (
             <EpisodeView key={epIdx} episode={ep} />
@@ -494,21 +676,35 @@ function EpisodeView({ episode }: { episode: any }) {
       style={{
         padding: "6px 8px",
         marginBottom: 4,
-        background: "rgba(255, 255, 255, 0.03)",
-        borderRadius: 4,
-        fontSize: 12,
+        background: "var(--ink-soft)",
+        borderRadius: 0,
+        fontSize: 10,
         display: "flex",
         alignItems: "center",
         gap: 6,
       }}
     >
-      <span style={{ color: "rgba(255, 255, 255, 0.4)" }}>
-        {episode.status === "completed" ? "✓" : episode.status === "generating" ? "⚙" : "○"}
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          color: "var(--faint)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+        }}
+      >
+        {episode.status === "completed" ? "OK" : episode.status === "generating" ? ".." : "--"}
       </span>
-      <span style={{ color: "#fff", flex: 1 }}>
+      <span style={{ color: "var(--text)", flex: 1 }}>
         {episode.track?.title ?? episode.title ?? "未命名"}
       </span>
-      <span style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 10 }}>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          color: "var(--faint)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+        }}
+      >
         {episode.track?.artist ?? ""}
       </span>
     </div>
@@ -521,25 +717,33 @@ function JobView({ job }: { job: any }) {
       style={{
         padding: "8px 10px",
         marginBottom: 6,
-        background: "rgba(255, 255, 255, 0.03)",
-        borderRadius: 6,
-        fontSize: 12,
+        background: "var(--ink-soft)",
+        borderRadius: 0,
+        fontSize: 10,
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
       }}
     >
-      <span style={{ color: "#fff" }}>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          color: "var(--text)",
+          letterSpacing: "0.08em",
+        }}
+      >
         {job.type ?? "job"}
       </span>
       <span
         style={{
+          fontFamily: "var(--font-mono)",
           padding: "2px 6px",
-          borderRadius: 4,
-          fontSize: 10,
-          fontWeight: 500,
-          background: getJobStatusColor(job.status),
-          color: "#000",
+          borderRadius: 0,
+          fontSize: 9,
+          letterSpacing: "0.15em",
+          textTransform: "uppercase",
+          background: "var(--ink-soft)",
+          color: "var(--accent)",
         }}
       >
         {job.status ?? "pending"}
@@ -548,23 +752,29 @@ function JobView({ job }: { job: any }) {
   );
 }
 
-function getJobStatusColor(status: string | undefined): string {
-  switch (status) {
-    case "completed": return "#4ade80";
-    case "running": return "#60a5fa";
-    case "failed": return "#f87171";
-    case "pending": return "#fbbf24";
-    default: return "#9ca3af";
-  }
-}
-
 function EmptyState() {
   return (
     <div style={{ textAlign: "center", padding: "24px 0" }}>
-      <p style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 13, margin: "0 0 8px" }}>
+      <p
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          margin: "0 0 8px",
+        }}
+      >
         暂无制作项目
       </p>
-      <p style={{ color: "rgba(255, 255, 255, 0.3)", fontSize: 11, margin: 0 }}>
+      <p
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          margin: 0,
+        }}
+      >
         在聊天中告诉 DJ 你的制作意图
       </p>
     </div>

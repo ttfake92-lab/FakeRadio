@@ -28,3 +28,20 @@
 ### Domain docs
 
 本仓库按 single-context 布局消费 domain docs。见 `docs/agents/domain.md`。
+
+## 多 Agent 编排系统
+
+FakeRadio 支持多 agent 并行任务执行：
+
+- `TASKS.md`：任务队列，声明依赖关系和验证命令
+- `agent-orchestrator.sh`：编排器，解析依赖图、创建 git worktree、并行启动 worker、merge + 验证
+- `agent-worker.mjs`：worker，通过 Anthropic Messages API 直接调用（tool-use loop）
+
+使用方式：
+
+```bash
+./agent-orchestrator.sh              # 运行所有可执行任务
+./agent-orchestrator.sh --dry-run    # 预览任务解析结果
+```
+
+环境变量：`AGENT_MAX_WORKERS`（默认 3）、`AGENT_WORKER_TIMEOUT`（默认 1800s）。

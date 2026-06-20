@@ -7,7 +7,7 @@ config({ path: resolve(fileURLToPath(import.meta.url), "../../../../.env") });
 
 const EnvSchema = z.object({
   FAKERADIO_SERVER_PORT: z.coerce.number().int().positive().default(3301),
-  FAKERADIO_PROVIDER_MODE: z.enum(["auto", "mock", "netease"]).default("auto"),
+  FAKERADIO_PROVIDER_MODE: z.enum(["netease"]).default("netease"),
   FAKERADIO_NETEASE_API_BASE_URL: z.string().url().default("http://127.0.0.1:3300"),
   FAKERADIO_NETEASE_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
   FAKERADIO_NETEASE_COOKIE_FILE: z.string().min(1).default("user/secrets/netease-cookie.txt"),
@@ -18,9 +18,10 @@ const EnvSchema = z.object({
   FAKERADIO_MIMO_API_KEY: z.string().optional(),
   FAKERADIO_MIMO_BASE_URL: z.string().url().default("https://api.xiaomimimo.com/v1"),
   FAKERADIO_MIMO_TTS_VOICE: z.string().min(1).default("茉莉"),
+  FAKERADIO_MIMO_TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   FAKERADIO_BRAVE_API_KEY: z.string().optional(),
   FAKERADIO_DEEPSEEK_API_KEY: z.string().optional(),
-  FAKERADIO_DEEPSEEK_MODEL: z.string().min(1).default("deepseek-v4-flash"),
+  FAKERADIO_DEEPSEEK_MODEL: z.string().min(1).default("deepseek-chat"),
   FAKERADIO_DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com/v1"),
   FAKERADIO_PREWARM_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   FAKERADIO_PREWARM_TIME: z.string().min(1).default("23:30"),

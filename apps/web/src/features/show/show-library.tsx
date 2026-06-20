@@ -1,13 +1,14 @@
 "use client";
 
 import type { ShowProject } from "@fakeradio/shared";
-import { useState, useMemo } from "react";
-import { deleteProject, deleteProjectTrace, getProjectExportFiles, downloadProjectFile } from "../../lib/api-client";
+import React, { useState, useMemo } from "react";
+import { deleteProject, deleteProjectTrace, getProjectExportFiles, downloadProjectFile, exportProject } from "../../lib/api-client";
 import { downloadBlob } from "../../lib/download-blob";
 
 export type ShowLibraryProps = {
   isExpanded: boolean;
   isOpen: boolean;
+  embedded?: boolean;
   projects: ShowProject[];
   onToggleExpand: () => void;
   onClose: () => void;
@@ -28,40 +29,26 @@ function formatDate(dateStr: string): string {
 function getStatusLabel(status: string): string {
   switch (status) {
     case "draft":
-      return "草稿";
+      return "DRAFT";
     case "generating":
-      return "生成中";
+      return "WIP";
     case "ready":
-      return "已完成";
+      return "READY";
     case "failed":
-      return "失败";
+      return "FAIL";
     case "exported":
-      return "已导出";
+      return "DONE";
     case "archived":
-      return "已归档";
+      return "ARCH";
     default:
-      return status;
-  }
-}
-
-function getStatusColor(status: string): string {
-  switch (status) {
-    case "ready":
-      return "rgba(74, 222, 128, 0.2)";
-    case "generating":
-      return "#60a5fa";
-    case "failed":
-      return "rgba(248, 113, 113, 0.2)";
-    case "exported":
-      return "rgba(167, 139, 250, 0.2)";
-    default:
-      return "rgba(156, 163, 175, 0.2)";
+      return status.toUpperCase();
   }
 }
 
 export function ShowLibrary({
   isExpanded,
   isOpen,
+  embedded = false,
   projects,
   onToggleExpand,
   onClose,
@@ -76,6 +63,7 @@ export function ShowLibrary({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingTraceId, setDeletingTraceId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
   const [showConfirmDelete, setShowConfirmDelete] = useState<{
     id: string;
     type: "project" | "trace";
@@ -111,15 +99,34 @@ export function ShowLibrary({
 
   const handleDownload = async (project: ShowProject) => {
     setDownloadingId(project.id);
+    setItemErrors((prev) => ({ ...prev, [project.id]: "" }));
     try {
-      const files = await getProjectExportFiles(project.id);
-      const fileList = Array.isArray(files) ? files : files.files ?? [];
+      let fileList: string[] = [];
+      try {
+        const files = await getProjectExportFiles(project.id);
+        fileList = Array.isArray(files) ? files : files.files ?? [];
+      } catch {
+        await exportProject(project.id, { includeTrace: true });
+        onRefresh();
+        const files = await getProjectExportFiles(project.id);
+        fileList = files.files ?? [];
+      }
+      if (fileList.length === 0) {
+        await exportProject(project.id, { includeTrace: true });
+        onRefresh();
+        const files = await getProjectExportFiles(project.id);
+        fileList = files.files ?? [];
+      }
       for (const file of fileList) {
         const blob = await downloadProjectFile(project.id, file);
         downloadBlob(blob, file);
       }
     } catch (error) {
       console.error("Failed to download project files:", error);
+      setItemErrors((prev) => ({
+        ...prev,
+        [project.id]: error instanceof Error ? error.message : "下载失败"
+      }));
     } finally {
       setDownloadingId(null);
     }
@@ -128,19 +135,16 @@ export function ShowLibrary({
   return (
     <div
       style={{
-        position: "fixed",
-        bottom: 80,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: isExpanded ? "min(520px, calc(100vw - 32px))" : "min(240px, calc(100vw - 32px))",
-        maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
-        background: "rgba(10, 10, 10, 0.95)",
-        border: "1px solid rgba(255, 255, 255, 0.15)",
-        borderRadius: 12,
-        overflow: "hidden",
+        position: embedded ? "relative" : "fixed",
+        ...(embedded ? {} : { bottom: 80, left: "50%", transform: "translateX(-50%)" }),
+        width: embedded ? "100%" : isExpanded ? "min(520px, calc(100vw - 32px))" : "min(240px, calc(100vw - 32px))",
+        maxHeight: embedded ? "100%" : isExpanded ? "calc(100vh - 160px)" : "auto",
+        background: embedded ? "transparent" : "var(--bg-2)",
+        border: embedded ? "none" : "1px solid var(--line)",
+        borderRadius: 0,
+        overflow: "auto",
         transition: "width 0.2s ease, transform 0.2s ease",
-        zIndex: 100,
-        backdropFilter: "blur(12px)",
+        ...(embedded ? {} : { zIndex: 100 }),
       }}
     >
       <div
@@ -149,26 +153,33 @@ export function ShowLibrary({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: isExpanded ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
+          borderBottom: isExpanded ? "1px solid var(--line)" : "none",
           cursor: "pointer",
-          background: "rgba(255, 255, 255, 0.02)",
+          background: "var(--ink-soft)",
         }}
         onClick={onToggleExpand}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>📚</span>
-          <span style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>
-            {isExpanded ? "历史节目库" : "节目库"}
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              color: "var(--text)",
+              fontSize: 20,
+              fontStyle: "italic",
+            }}
+          >
+            Library
           </span>
           {projects.length > 0 && (
             <span
               style={{
+                fontFamily: "var(--font-mono)",
                 padding: "2px 8px",
-                background: "rgba(167, 139, 250, 0.2)",
-                color: "#a78bfa",
-                borderRadius: 10,
-                fontSize: 11,
-                fontWeight: 500,
+                background: "var(--ink-soft)",
+                color: "var(--accent)",
+                borderRadius: 0,
+                fontSize: 9,
+                letterSpacing: "0.15em",
               }}
             >
               {projects.length}
@@ -185,13 +196,15 @@ export function ShowLibrary({
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: "var(--mute)",
               cursor: "pointer",
-              fontSize: 14,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.15em",
               padding: 4,
             }}
           >
-            ↻
+            SYNC
           </button>
           <button
             onClick={(e) => {
@@ -202,16 +215,25 @@ export function ShowLibrary({
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: "var(--mute)",
               cursor: "pointer",
-              fontSize: 16,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.15em",
               padding: 4,
             }}
           >
-            ✕
+            CLOSE
           </button>
-          <span style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11 }}>
-            {isExpanded ? "▼" : "▶"}
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--faint)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+            }}
+          >
+            {isExpanded ? "V" : ">"}
           </span>
         </div>
       </div>
@@ -235,6 +257,7 @@ export function ShowLibrary({
                   isDeleting={deletingId === project.id}
                   isDeletingTrace={deletingTraceId === project.id}
                   isDownloading={downloadingId === project.id}
+                  error={itemErrors[project.id]}
                   onDelete={() =>
                     setShowConfirmDelete({ id: project.id, type: "project" })
                   }
@@ -280,10 +303,26 @@ export function ShowLibrary({
 function EmptyLibrary() {
   return (
     <div style={{ textAlign: "center", padding: "24px 0" }}>
-      <p style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 13, margin: "0 0 8px" }}>
+      <p
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          margin: "0 0 8px",
+        }}
+      >
         暂无历史节目
       </p>
-      <p style={{ color: "rgba(255, 255, 255, 0.3)", fontSize: 11, margin: 0 }}>
+      <p
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          margin: 0,
+        }}
+      >
         生成并保存节目后，它们会显示在这里
       </p>
     </div>
@@ -295,6 +334,7 @@ type ProjectItemProps = {
   isDeleting: boolean;
   isDeletingTrace: boolean;
   isDownloading: boolean;
+  error?: string | undefined;
   onDelete: () => void;
   onDeleteTrace: () => void;
   onDownload: () => void;
@@ -305,6 +345,7 @@ function ProjectItem({
   isDeleting,
   isDeletingTrace,
   isDownloading,
+  error,
   onDelete,
   onDeleteTrace,
   onDownload,
@@ -316,9 +357,9 @@ function ProjectItem({
     <div
       style={{
         padding: 12,
-        background: "rgba(255, 255, 255, 0.05)",
-        borderRadius: 8,
-        border: "1px solid rgba(255, 255, 255, 0.08)",
+        background: "var(--ink-soft)",
+        borderRadius: 0,
+        border: "1px solid var(--line)",
       }}
     >
       <div
@@ -332,9 +373,10 @@ function ProjectItem({
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             style={{
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 500,
+              color: "var(--text)",
+              fontFamily: "var(--font-display)",
+              fontSize: 16,
+              lineHeight: 1.3,
               margin: 0,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -345,8 +387,10 @@ function ProjectItem({
           </p>
           <p
             style={{
-              color: "rgba(255, 255, 255, 0.5)",
-              fontSize: 11,
+              color: "var(--mute)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.08em",
               margin: "4px 0 0 0",
             }}
           >
@@ -355,12 +399,14 @@ function ProjectItem({
         </div>
         <span
           style={{
+            fontFamily: "var(--font-mono)",
             padding: "2px 8px",
-            borderRadius: 4,
-            fontSize: 10,
-            fontWeight: 500,
-            background: getStatusColor(project.status),
-            color: project.status === "generating" ? "#000" : "#fff",
+            borderRadius: 0,
+            fontSize: 9,
+            letterSpacing: "0.15em",
+            textTransform: "uppercase",
+            background: "var(--ink-soft)",
+            color: "var(--accent)",
             marginLeft: 8,
             flexShrink: 0,
           }}
@@ -382,53 +428,61 @@ function ProjectItem({
           {hasTrace && (
             <span
               style={{
-                fontSize: 10,
-                color: "rgba(255, 255, 255, 0.4)",
-                background: "rgba(156, 163, 175, 0.1)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                background: "var(--ink-soft)",
                 padding: "2px 6px",
-                borderRadius: 4,
+                borderRadius: 0,
+                letterSpacing: "0.1em",
               }}
             >
-              📝 有 Trace
+              TRACE
             </span>
           )}
           {project.showPlanPath && (
             <span
               style={{
-                fontSize: 10,
-                color: "rgba(255, 255, 255, 0.4)",
-                background: "rgba(156, 163, 175, 0.1)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                background: "var(--ink-soft)",
                 padding: "2px 6px",
-                borderRadius: 4,
+                borderRadius: 0,
+                letterSpacing: "0.1em",
               }}
             >
-              📋 有 Plan
+              PLAN
             </span>
           )}
           {project.showNotesPath && (
             <span
               style={{
-                fontSize: 10,
-                color: "rgba(255, 255, 255, 0.4)",
-                background: "rgba(156, 163, 175, 0.1)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                background: "var(--ink-soft)",
                 padding: "2px 6px",
-                borderRadius: 4,
+                borderRadius: 0,
+                letterSpacing: "0.1em",
               }}
             >
-              📝 有 Notes
+              NOTES
             </span>
           )}
           {project.showAudioPath && (
             <span
               style={{
-                fontSize: 10,
-                color: "rgba(255, 255, 255, 0.4)",
-                background: "rgba(156, 163, 175, 0.1)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--faint)",
+                background: "var(--ink-soft)",
                 padding: "2px 6px",
-                borderRadius: 4,
+                borderRadius: 0,
+                letterSpacing: "0.1em",
               }}
             >
-              🎵 有 Audio
+              AUDIO
             </span>
           )}
         </div>
@@ -440,17 +494,19 @@ function ProjectItem({
               disabled={isDownloading}
               style={{
                 padding: "4px 8px",
-                borderRadius: 4,
-                border: "none",
-                background: "#4ade80",
-                color: "#000",
-                fontSize: 11,
-                fontWeight: 500,
+                borderRadius: 0,
+                border: "1px solid var(--accent)",
+                background: "var(--ink-soft)",
+                color: "var(--text)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
                 cursor: isDownloading ? "not-allowed" : "pointer",
                 opacity: isDownloading ? 0.6 : 1,
               }}
             >
-              {isDownloading ? "下载中…" : "下载"}
+              {isDownloading ? "DL…" : "DL"}
             </button>
           )}
           {hasTrace && (
@@ -459,16 +515,19 @@ function ProjectItem({
               disabled={isDeletingTrace}
               style={{
                 padding: "4px 8px",
-                borderRadius: 4,
-                border: "1px solid rgba(251, 191, 36, 0.3)",
+                borderRadius: 0,
+                border: "1px solid var(--line)",
                 background: "transparent",
-                color: "#fbbf24",
-                fontSize: 11,
+                color: "var(--faint)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
                 cursor: isDeletingTrace ? "not-allowed" : "pointer",
                 opacity: isDeletingTrace ? 0.6 : 1,
               }}
             >
-              {isDeletingTrace ? "删除中…" : "删 Trace"}
+              {isDeletingTrace ? "DEL…" : "TRACE"}
             </button>
           )}
           <button
@@ -476,19 +535,35 @@ function ProjectItem({
             disabled={isDeleting}
             style={{
               padding: "4px 8px",
-              borderRadius: 4,
-              border: "1px solid rgba(248, 113, 113, 0.3)",
+              borderRadius: 0,
+              border: "1px solid var(--faint)",
               background: "transparent",
-              color: "#f87171",
-              fontSize: 11,
+              color: "var(--faint)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
               cursor: isDeleting ? "not-allowed" : "pointer",
               opacity: isDeleting ? 0.6 : 1,
             }}
           >
-            {isDeleting ? "删除中…" : "删除"}
+            {isDeleting ? "DEL…" : "DEL"}
           </button>
         </div>
       </div>
+      {error && (
+        <p
+          style={{
+            color: "var(--faint)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            letterSpacing: "0.08em",
+            margin: "8px 0 0",
+          }}
+        >
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -518,7 +593,7 @@ function ConfirmDialog({
         left: 0,
         right: 0,
         bottom: 0,
-        background: "rgba(0, 0, 0, 0.8)",
+        background: "var(--bg)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -528,9 +603,9 @@ function ConfirmDialog({
     >
       <div
         style={{
-          background: "rgba(20, 20, 20, 0.98)",
-          border: "1px solid rgba(255, 255, 255, 0.2)",
-          borderRadius: 12,
+          background: "var(--bg-2)",
+          border: "1px solid var(--line)",
+          borderRadius: 0,
           padding: 20,
           maxWidth: 320,
           width: "90%",
@@ -539,9 +614,9 @@ function ConfirmDialog({
       >
         <h3
           style={{
-            color: "#fff",
-            fontSize: 15,
-            fontWeight: 600,
+            color: "var(--text)",
+            fontFamily: "var(--font-display)",
+            fontSize: 20,
             margin: "0 0 12px 0",
           }}
         >
@@ -549,8 +624,10 @@ function ConfirmDialog({
         </h3>
         <p
           style={{
-            color: "rgba(255, 255, 255, 0.7)",
-            fontSize: 13,
+            color: "var(--mute)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
             margin: "0 0 20px 0",
             lineHeight: 1.5,
           }}
@@ -562,11 +639,14 @@ function ConfirmDialog({
             onClick={onCancel}
             style={{
               padding: "8px 16px",
-              borderRadius: 6,
-              border: "1px solid rgba(255, 255, 255, 0.2)",
+              borderRadius: 0,
+              border: "1px solid var(--line)",
               background: "transparent",
-              color: "#fff",
-              fontSize: 13,
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
               cursor: "pointer",
             }}
           >
@@ -576,12 +656,14 @@ function ConfirmDialog({
             onClick={onConfirm}
             style={{
               padding: "8px 16px",
-              borderRadius: 6,
-              border: "none",
-              background: "#f87171",
-              color: "#000",
-              fontSize: 13,
-              fontWeight: 500,
+              borderRadius: 0,
+              border: "1px solid var(--faint)",
+              background: "transparent",
+              color: "var(--faint)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
               cursor: "pointer",
             }}
           >

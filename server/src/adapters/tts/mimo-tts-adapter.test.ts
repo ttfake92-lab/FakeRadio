@@ -167,11 +167,12 @@ describe("createMimoTtsAdapter", () => {
     vi.restoreAllMocks();
   });
 
-  it("passes 15s AbortSignal.timeout to fetch", async () => {
+  it("passes 60s AbortSignal.timeout to fetch by default", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ audio: { data: audioBase64 } })
     });
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     vi.stubGlobal("fetch", fetchSpy);
 
     const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir });
@@ -179,6 +180,23 @@ describe("createMimoTtsAdapter", () => {
 
     const signal = fetchSpy.mock.calls[0][1].signal;
     expect(signal).toBeInstanceOf(AbortSignal);
+    expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+
+    vi.restoreAllMocks();
+  });
+
+  it("supports custom timeout", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ audio: { data: audioBase64 } })
+    });
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir, timeoutMs: 90_000 });
+    await adapter.synthesize("自定义超时测试");
+
+    expect(timeoutSpy).toHaveBeenCalledWith(90_000);
 
     vi.restoreAllMocks();
   });

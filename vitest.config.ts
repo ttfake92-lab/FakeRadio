@@ -12,17 +12,29 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["tests/**/*.test.ts", "packages/**/*.test.ts", "server/**/*.test.ts", "apps/**/*.test.ts"],
-    env: {
-      TZ: "Asia/Shanghai",
-      FAKERADIO_BRAVE_API_KEY: "",
-      FAKERADIO_DEEPSEEK_API_KEY: "",
-      FAKERADIO_MIMO_API_KEY: ""
-    },
-    environmentMatchGlobs: [
-      ["apps/web/**", "jsdom"],
-      ["**", "node"]
-    ],
-    setupFiles: "./apps/web/vitest.setup.ts"
+    projects: [
+      {
+        test: {
+          include: ["tests/**/*.test.ts", "packages/**/*.test.ts", "server/**/*.test.ts"],
+          environment: "node",
+          env: {
+            TZ: "Asia/Shanghai",
+            FAKERADIO_BRAVE_API_KEY: "",
+            FAKERADIO_DEEPSEEK_API_KEY: "",
+            FAKERADIO_MIMO_API_KEY: ""
+          },
+        }
+      },
+      {
+        test: {
+          include: ["apps/web/**/*.test.ts", "apps/web/**/*.test.tsx"],
+          environment: "jsdom",
+          setupFiles: "./apps/web/vitest.setup.ts",
+          env: {
+            TZ: "Asia/Shanghai",
+          },
+        }
+      }
+    ]
   }
 });

@@ -17,6 +17,7 @@ import type { ShowPlanGenerator } from "../show/show-plan-generator.js";
 import type { DailyShowPlanGenerator } from "../show/daily-show-plan-generator.js";
 import type { JobRegistry } from "../show/show-generation-job.js";
 import type { ShowProjectRepository } from "../show/show-project-repository.js";
+import type { RuntimeAdapterManager } from "./runtime-adapter-manager.js";
 
 export type RegisterRoutesDeps = {
   app: FastifyInstance;
@@ -52,6 +53,7 @@ export type RegisterRoutesDeps = {
   storySourceStatus: string;
   webResearchStatus: string;
   neteaseAuth: NeteaseAuthService;
+  runtimeManager?: RuntimeAdapterManager;
   baseDir: string;
   programBriefRepo: ProgramBriefRepository;
   showPlanRepo: ShowPlanRepository;

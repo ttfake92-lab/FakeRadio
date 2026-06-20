@@ -127,6 +127,52 @@ FAKERADIO_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 LLM 接收 6 类 ContextFragment（system、user、environment、memory、request、execution），输出符合 `DjDecisionSchema` 的 JSON。system prompt 从 `prompts/dj-persona.md` 读取。
 
+`LlmAdapter` 接口有三个方法：
+
+- `compute(fragments)` — 输入 context fragments，输出结构化 `DjDecision`（JSON mode）
+- `computeRaw(fragments)` — 输入 context fragments，输出原始文本
+- `computeJson<T>(systemPrompt, userPrompt)` — 通用 JSON 结构化输出，用于节目计划生成、意图检测等非 DJ 决策场景。使用 `response_format: { type: "json_object" }`，返回泛型 `T`
+
+## Weather adapter
+
+Weather 通过 `WeatherAdapter` 边界接入。当前支持两种 provider：
+
+| Provider | 环境变量 | 说明 |
+|----------|----------|------|
+| Mock | 无 key 时自动使用 | 返回固定天气数据 |
+| OpenWeatherMap | `FAKERADIO_OPENWEATHER_API_KEY` | OpenWeatherMap Current Weather API |
+
+### OpenWeatherMap 配置
+
+```bash
+FAKERADIO_OPENWEATHER_API_KEY=your_api_key
+FAKERADIO_WEATHER_CITY=Beijing
+```
+
+auto-detect 逻辑：有 `FAKERADIO_OPENWEATHER_API_KEY` 时自动使用 OpenWeatherMap，否则回退 mock。不需手动设置 provider mode。
+
+输出字段包含天气描述、温度、湿度和 mood hint（如 `warm`、`cool`、`rainy`），注入 DJ brain 的 environment context。
+
+## Calendar adapter
+
+Calendar 通过 `CalendarAdapter` 边界接入。当前支持两种 provider：
+
+| Provider | 环境变量 | 说明 |
+|----------|----------|------|
+| Mock | 无 key 时自动使用 | 返回固定日程数据 |
+| Lark Calendar | `FAKERADIO_LARK_APP_ID` + `FAKERADIO_LARK_APP_SECRET` | 飞书日历 API |
+
+### Lark Calendar 配置
+
+```bash
+FAKERADIO_LARK_APP_ID=your_app_id
+FAKERADIO_LARK_APP_SECRET=your_app_secret
+```
+
+auto-detect 逻辑：有 `FAKERADIO_LARK_APP_ID` 时自动使用 Lark Calendar，否则回退 mock。
+
+输出近期日程上下文，注入 DJ brain 的 environment context 用于感知用户当前时段的忙碌程度。
+
 ## StorySourceAdapter
 
 `StorySourceAdapter` 是 DJ 故事 episode 的资料源边界，把歌词、公开元数据和网页研究转换为结构化证据片段 `StorySourceNote[]`。

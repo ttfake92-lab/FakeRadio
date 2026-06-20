@@ -39,3 +39,35 @@ scripts/*.mjs
 scripts/*.js
 *.pyc
 __pycache__/
+
+# Agent orchestrator
+.agent-worktrees/
+.agent.lock.d/
+agent-logs/
+
+# Build artifacts & tool caches
+build/
+output/
+exports/
+.claude-flow/
+.claude/
+.playwright-cli/
+.agent-status
+apps/web/src/.claude-flow/
+
+# Scratch & design handoff (debug/design artifacts, not product code)
+.scratch/*.png
+.scratch/fakeradio-code-review/
+design_handoff_*/
+
+# One-off orchestration scripts & notes (not part of FakeRadio product)
+agent-manual.sh
+agent-orchestrator.sh
+agent-worker.mjs
+com.fakeradio.orchestrator.plist
+AGENT_DESIGN.md
+AGENT_PROMPT.md
+TASKS.md
+
+# User data backups
+user/taste.md.bak

@@ -98,12 +98,56 @@ export function createDeepSeekAdapter(options: CreateDeepSeekAdapterOptions): Ll
       // DeepSeek sometimes returns null instead of omitting a field — strip nulls
       const sanitized = stripNulls(parsed);
 
-      return DjDecisionSchema.parse(sanitized);
+      const strict = DjDecisionSchema.safeParse(sanitized);
+      if (strict.success) return strict.data;
+
+      // 容错：纯聊天轮次模型常省略 play/segue/reason。只要 say 在，
+      // 缺失字段补默认值，不让一次格式瑕疵毁掉整轮对话
+      const candidate = sanitized as Record<string, unknown>;
+      if (typeof candidate?.say === "string" && candidate.say.trim().length > 0) {
+        const playRaw = (typeof candidate.play === "object" && candidate.play !== null)
+          ? candidate.play as Record<string, unknown>
+          : {};
+        const repaired = {
+          say: candidate.say,
+          play: {
+            ...(typeof playRaw.query === "string" && playRaw.query.length > 0 ? { query: playRaw.query } : {}),
+            ...(typeof playRaw.trackId === "string" && playRaw.trackId.length > 0 ? { trackId: playRaw.trackId } : {}),
+            reason: typeof playRaw.reason === "string" && playRaw.reason.length > 0 ? playRaw.reason : "keep current mood"
+          },
+          reason: typeof candidate.reason === "string" && candidate.reason.length > 0 ? candidate.reason : "chat reply",
+          segue: typeof candidate.segue === "string" && candidate.segue.length > 0 ? candidate.segue : "继续。"
+        };
+        if (!("query" in repaired.play) && !("trackId" in repaired.play)) {
+          (repaired.play as Record<string, unknown>).query = "keep current";
+        }
+        const salvaged = DjDecisionSchema.safeParse(repaired);
+        if (salvaged.success) return salvaged.data;
+      }
+
+      throw new Error(`DeepSeek response failed DjDecision schema: ${strict.error.message.slice(0, 200)}`);
     },
 
     async computeRaw(fragments: ContextFragment[]): Promise<string> {
       const messages = fragmentsToMessages(fragments, { raw: true });
       return callDeepSeek(messages);
+    },
+
+    async computeJson<T>(systemPrompt: string, userPrompt: string): Promise<T> {
+      const messages: { role: "system" | "user"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ];
+      const content = await callDeepSeek(messages, "json_object");
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        throw new Error(`LLM returned invalid JSON: ${content.slice(0, 200)}`);
+      }
+
+      return stripNulls(parsed) as T;
     }
   };
 }

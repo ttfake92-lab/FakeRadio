@@ -22,13 +22,13 @@ const THEME_SHOW_PATTERNS = [
 ];
 
 const BLOCK_THEME_PATTERNS = [
-  /今晚(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /今夜(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /明早(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /明天早上(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /下午(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /中午(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
-  /傍晚(?:想?听)?(.+?)(?:相关)?(?:的)?(?:东西|歌|音乐)?$/i,
+  /今晚(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /今夜(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /明早(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /明天早上(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /下午(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /中午(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
+  /傍晚(?:安排|做|制作)一[期个]?(.+?)(?:相关)?(?:的)?(?:节目)?$/i,
 ];
 
 const WEAK_EXPRESSION_PATTERNS = [
@@ -93,17 +93,6 @@ export function parseChatIntent(message: string): ChatIntentResult {
     return { isProductionIntent: false };
   }
   
-  const themeShowTopic = extractTopic(trimmed, THEME_SHOW_PATTERNS);
-  if (themeShowTopic) {
-    return {
-      isProductionIntent: true,
-      type: "theme-show",
-      topic: themeShowTopic,
-      scope: "full-show",
-      priority: "user-requested"
-    };
-  }
-  
   const blockTopic = extractTopic(trimmed, BLOCK_THEME_PATTERNS);
   if (blockTopic) {
     const targetBlockAt = inferBlockTime(trimmed);
@@ -114,6 +103,17 @@ export function parseChatIntent(message: string): ChatIntentResult {
       scope: "block",
       priority: "user-requested",
       targetBlockAt
+    };
+  }
+
+  const themeShowTopic = extractTopic(trimmed, THEME_SHOW_PATTERNS);
+  if (themeShowTopic) {
+    return {
+      isProductionIntent: true,
+      type: "theme-show",
+      topic: themeShowTopic,
+      scope: "full-show",
+      priority: "user-requested"
     };
   }
   

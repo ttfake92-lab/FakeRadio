@@ -6,7 +6,7 @@ export type VisualTrack = {
   artist: string;
   album: string;
   dur: number; // duration in seconds (backend uses durationMs)
-  source: "netease" | "mock" | "local";
+  source: "netease" | "local";
   tone: [string, string, string]; // [dark, mid, light] colors for gradient
 };
 

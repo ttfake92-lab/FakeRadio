@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createFakeLlmAdapter } from "../test/fake-adapters.js";
 import { createShowPlanGenerator } from "./show-plan-generator.js";
 import type { ProgramBrief, ShowPlanBlock, ShowPlanBlockConstraints } from "@fakeradio/shared";
 
@@ -19,7 +20,7 @@ describe("ShowPlanGenerator", () => {
   }
 
   it("generates a show plan with 4-8 blocks for theme show", async () => {
-    const generator = createShowPlanGenerator();
+    const generator = createShowPlanGenerator(createFakeLlmAdapter());
     const brief = createTestBrief();
     const plan = await generator.generate(brief);
 
@@ -47,7 +48,7 @@ describe("ShowPlanGenerator", () => {
       "closing"
     ]);
 
-    const generator = createShowPlanGenerator();
+    const generator = createShowPlanGenerator(createFakeLlmAdapter());
     const brief = createTestBrief();
     const plan = await generator.generate(brief);
 
@@ -57,7 +58,7 @@ describe("ShowPlanGenerator", () => {
   });
 
   it("always starts with opening and ends with closing", async () => {
-    const generator = createShowPlanGenerator();
+    const generator = createShowPlanGenerator(createFakeLlmAdapter());
     const brief = createTestBrief();
     const plan = await generator.generate(brief);
 
@@ -66,7 +67,7 @@ describe("ShowPlanGenerator", () => {
   });
 
   it("generates new version with additional constraints from existing plan", async () => {
-    const generator = createShowPlanGenerator();
+    const generator = createShowPlanGenerator(createFakeLlmAdapter());
     const brief = createTestBrief();
     const existingPlan = await generator.generate(brief);
 
@@ -88,7 +89,7 @@ describe("ShowPlanGenerator", () => {
   });
 
   it("generates new version when job is in needs-replan state", async () => {
-    const generator = createShowPlanGenerator();
+    const generator = createShowPlanGenerator(createFakeLlmAdapter());
     const brief = createTestBrief();
     const originalPlan = await generator.generate(brief);
 

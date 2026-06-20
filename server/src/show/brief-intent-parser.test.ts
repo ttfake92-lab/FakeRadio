@@ -13,7 +13,7 @@ describe("brief-intent-parser", () => {
   });
 
   it("parses block-theme intent", () => {
-    const result = parseBriefIntent("今晚想听 Bee Gees", new Date(2026, 4, 12, 10, 0, 0));
+    const result = parseBriefIntent("今晚安排一期 Bee Gees", new Date(2026, 4, 12, 10, 0, 0));
     expect(result.isBriefIntent).toBe(true);
     if (result.isBriefIntent) {
       expect(result.type).toBe("block-theme");
@@ -25,6 +25,11 @@ describe("brief-intent-parser", () => {
 
   it("returns false for weak expression", () => {
     const result = parseBriefIntent("我喜欢 Bee Gees", new Date());
+    expect(result.isBriefIntent).toBe(false);
+  });
+
+  it("returns false for ordinary music requests", () => {
+    const result = parseBriefIntent("今晚想听 Bee Gees", new Date());
     expect(result.isBriefIntent).toBe(false);
   });
 

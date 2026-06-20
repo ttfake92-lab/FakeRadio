@@ -149,10 +149,10 @@ describe("DailySelectionEngine", () => {
       ];
 
       const externalTracks = [
-        makeTrack("ext-1", "Artist X", "Song X", "mock"),
-        makeTrack("ext-2", "Artist Y", "Song Y", "mock"),
-        makeTrack("ext-3", "Artist Z", "Song Z", "mock"),
-        makeTrack("ext-4", "Artist W", "Song W", "mock")
+        makeTrack("ext-1", "Artist X", "Song X", "netease"),
+        makeTrack("ext-2", "Artist Y", "Song Y", "netease"),
+        makeTrack("ext-3", "Artist Z", "Song Z", "netease"),
+        makeTrack("ext-4", "Artist W", "Song W", "netease")
       ];
 
       const engine = createDailySelectionEngine(mockRecentPlayedRepo);

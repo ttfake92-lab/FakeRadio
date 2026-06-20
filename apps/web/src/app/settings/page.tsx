@@ -32,6 +32,9 @@ export default function SettingsPage() {
       const updateRequest: UpdateSettingsRequest = {
         researchEnabled: settings.researchEnabled,
         providerMode: settings.providerMode,
+        neteaseBaseUrl: settings.neteaseBaseUrl,
+        neteaseTimeoutMs: settings.neteaseTimeoutMs,
+        neteaseAudioLevel: settings.neteaseAudioLevel,
         ttsProvider: settings.ttsProvider,
         ttsVoice: settings.ttsVoice,
         mimoVoice: settings.mimoVoice,
@@ -116,9 +119,54 @@ export default function SettingsPage() {
                 onChange={(e) => handleChange("providerMode", e.target.value as Settings["providerMode"])}
                 className="settings-select"
               >
-                <option value="auto">自动</option>
-                <option value="mock">模拟模式</option>
                 <option value="netease">网易云音乐</option>
+              </select>
+            </div>
+          </div>
+          <div className="settings-row">
+            <label className="settings-label">
+              <span>网易云 API 地址</span>
+              <span className="settings-hint">本地 NeteaseCloudMusicApi 服务地址</span>
+            </label>
+            <div className="settings-control">
+              <input
+                type="text"
+                value={settings.neteaseBaseUrl}
+                onChange={(e) => handleChange("neteaseBaseUrl", e.target.value)}
+                className="settings-input"
+              />
+            </div>
+          </div>
+          <div className="settings-row">
+            <label className="settings-label">
+              <span>网易云超时</span>
+              <span className="settings-hint">请求超时时间（毫秒）</span>
+            </label>
+            <div className="settings-control">
+              <input
+                type="number"
+                value={settings.neteaseTimeoutMs}
+                onChange={(e) => handleChange("neteaseTimeoutMs", Number.parseInt(e.target.value, 10) || 2500)}
+                className="settings-input small"
+              />
+            </div>
+          </div>
+          <div className="settings-row">
+            <label className="settings-label">
+              <span>网易云音质</span>
+              <span className="settings-hint">解析歌曲 URL 时使用的音质级别</span>
+            </label>
+            <div className="settings-control">
+              <select
+                value={settings.neteaseAudioLevel}
+                onChange={(e) => handleChange("neteaseAudioLevel", e.target.value as Settings["neteaseAudioLevel"])}
+                className="settings-select"
+              >
+                <option value="standard">standard</option>
+                <option value="higher">higher</option>
+                <option value="exhigh">exhigh</option>
+                <option value="lossless">lossless</option>
+                <option value="hires">hires</option>
               </select>
             </div>
           </div>

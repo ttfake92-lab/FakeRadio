@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createMockLlmAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter } from "../test/fake-adapters.js";
 import { computeDjDecision } from "./dj-brain.js";
 
 describe("computeDjDecision", () => {
   it("builds context and returns a validated decision", async () => {
     const decision = await computeDjDecision({
-      llm: createMockLlmAdapter(),
+      llm: createFakeLlmAdapter(),
       now: new Date("2026-04-29T08:00:00.000Z"),
       systemPrompt: "你是 FakeRadio DJ。",
       userTaste: "喜欢低刺激音乐。",
@@ -28,7 +28,7 @@ describe("computeDjDecision", () => {
 
   it("grounds DJ copy on real track tool results when available", async () => {
     const decision = await computeDjDecision({
-      llm: createMockLlmAdapter(),
+      llm: createFakeLlmAdapter(),
       now: new Date("2026-04-29T08:00:00.000Z"),
       systemPrompt: "你是 FakeRadio DJ。",
       userTaste: "喜欢低刺激音乐。",

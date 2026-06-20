@@ -1,6 +1,6 @@
 import type { EpisodeNextResponse, HealthResponse, NowResponse, StorySourceNote, StoryType, Track } from "@fakeradio/shared";
 
-export type AdapterStatus = "mock" | "ready" | "disabled";
+export type AdapterStatus = "ready" | "disabled" | "error";
 
 export function getPlaybackLabel(playback: NowResponse["playback"]) {
   const labels: Record<NowResponse["playback"], string> = {
@@ -26,8 +26,8 @@ export function formatDuration(durationMs: number | undefined) {
 export function getProviderStatusLabel(status: AdapterStatus) {
   const labels: Record<AdapterStatus, string> = {
     ready: "真实来源已连接",
-    mock: "已回退到 mock",
-    disabled: "已禁用"
+    disabled: "未配置",
+    error: "连接异常"
   };
 
   return labels[status];
@@ -36,7 +36,6 @@ export function getProviderStatusLabel(status: AdapterStatus) {
 export function getTrackSourceLabel(source: Track["source"]) {
   const labels: Record<Track["source"], string> = {
     netease: "网易云",
-    mock: "Mock",
     local: "本地"
   };
 
@@ -44,7 +43,7 @@ export function getTrackSourceLabel(source: Track["source"]) {
 }
 
 export function shouldWarnOnMockMusic(status: AdapterStatus) {
-  return status === "mock";
+  return status === "disabled" || status === "error";
 }
 
 export function computeFadedVolume(
@@ -140,8 +139,7 @@ export function getSourceKindLabel(kind: StorySourceNote["kind"]) {
   const labels: Record<StorySourceNote["kind"], string> = {
     lyric: "歌词",
     metadata: "元数据",
-    web: "网页",
-    mock: "Mock"
+    web: "网页"
   };
 
   return labels[kind];

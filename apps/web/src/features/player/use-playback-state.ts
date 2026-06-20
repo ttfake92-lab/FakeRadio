@@ -2,7 +2,7 @@
 
 import type { EpisodeNextResponse, RadioEpisode } from "@fakeradio/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildApiUrl, buildMediaUrl, getNextEpisode } from "../../lib/api-client";
+import { buildApiUrl, buildMediaUrl, getNextEpisode, prefetchNextEpisode as prefetchNextEpisodeApi, reportEpisodePlaying } from "../../lib/api-client";
 import {
   getEpisodeStateLabel,
   getNextEpisodeLabel,
@@ -70,6 +70,12 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     musicAudio.src = buildApiUrl(`/api/audio/${episode.track.id}`);
     musicAudio.volume = 0;
 
+    // 音频源加载失败（如网易云 URL 过期、未登录）时显式提示，
+    // 不再无声卡住；口播不中断，用户可点 NEXT 换一首
+    musicAudio.onerror = () => {
+      setError(`音乐加载失败：${episode.track.title}。可尝试 NEXT 换一首，或检查网易云登录状态`);
+    };
+
     speechAudio.src = buildMediaUrl(episode.story.audioUrl) ?? "";
 
     let crossfadeStarted = false;
@@ -119,6 +125,9 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
         setNextEpisode(null);
         setNextEpisodeError(null);
         playEpisodeData(next);
+        // 预取的 episode 是前端自行接续的，必须上报服务端，
+        // 否则服务端"当前曲目"停留在上一首，DJ 聊天会聊错歌
+        reportEpisodePlaying(next.track.id).catch(() => {});
         return;
       }
 
@@ -133,7 +142,10 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
               setNextEpisode(null);
               setNextEpisodeError(null);
               playEpisodeData(n);
+              reportEpisodePlaying(n.track.id).catch(() => {});
             } else {
+              musicAudio.pause();
+              musicAudio.currentTime = 0;
               setEpisodeState("idle");
             }
           }
@@ -143,12 +155,16 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
           if (pollIntervalRef.current === pollInterval) {
             clearInterval(pollInterval);
             pollIntervalRef.current = null;
+            musicAudio.pause();
+            musicAudio.currentTime = 0;
             setEpisodeState("idle");
           }
         }, 30_000);
         return;
       }
 
+      musicAudio.pause();
+      musicAudio.currentTime = 0;
       setEpisodeState("idle");
     };
 
@@ -166,6 +182,10 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
 
   const playEpisode = useCallback(async () => {
     if (episodeStateRef.current !== "idle" && episodeStateRef.current !== "error" && episodeStateRef.current !== "music") return;
+
+    // iOS/iPadOS：在 await 网络请求之前（仍在用户手势同步栈内）解锁音频元素，
+    // 否则跨过 await 后 play() 会被自动播放策略拦截，报"口播加载失败"
+    audio.unlock();
 
     episodeStateRef.current = "preparing";
     setEpisodeState("preparing");
@@ -185,11 +205,12 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
       if (err instanceof Error && err.message.startsWith("Invalid episode state transition")) {
         setEpisodeState("error");
         setError("状态转换异常，请刷新页面重试");
-        return;
+        throw err;
       }
       setEpisodeState("error");
       setEpisodeData(null);
       setError(`播放失败：${getErrorMessage(err)}`);
+      throw err;
     } finally {
       setIsLoadingEpisode(false);
     }
@@ -202,7 +223,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     setNextEpisodeError(null);
 
     try {
-      const response = await getNextEpisode();
+      const response = await prefetchNextEpisodeApi();
       if (!isPrefetchingRef.current) return;
       nextEpisodeRef.current = response.episode;
       setNextEpisode(response.episode);

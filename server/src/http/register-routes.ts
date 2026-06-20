@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   EpisodeNextResponseSchema,
+  EpisodePlayingRequestSchema,
   FavoriteRequestSchema,
   FavoritesResponseSchema,
   HealthResponseSchema,
@@ -35,13 +36,13 @@ import {
   type Settings
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { formatRadioDate } from "../utils/time.js";
-import { proxyAndRecord } from "../audio/audio-recorder.js";
+import { proxyAndRecord, isAudioRecorded, getAudioFilePath } from "../audio/audio-recorder.js";
 import { startExportTask, getExportTask, getExportFilePath, exportShowProject } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import { executeScheduledJob, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
@@ -49,12 +50,26 @@ import type { PlaybackState } from "./playback-state.js";
 import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
 import { handleChat } from "./chat-intent-router.js";
 import type { RegisterRoutesDeps } from "./types.js";
-import { createMockStorySourceAdapter } from "../adapters/story-source/mock-story-source-adapter.js";
 
-/** Strip server-internal fields (directoryPath) before sending to frontend. */
-function sanitizeProject<T extends { directoryPath?: string }>(project: T): Omit<T, "directoryPath"> {
-  const { directoryPath: _, ...rest } = project;
-  return rest;
+function serializeProject<T>(project: T): T {
+  return project;
+}
+
+const LOCAL_WEB_ORIGINS = new Set([
+  "http://localhost:3302",
+  "http://127.0.0.1:3302",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000"
+]);
+
+function getCorsHeadersForOrigin(origin: unknown): Record<string, string> {
+  if (typeof origin !== "string" || !LOCAL_WEB_ORIGINS.has(origin)) {
+    return {};
+  }
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Vary": "Origin"
+  };
 }
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
@@ -62,9 +77,20 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, weatherStatus, calendar, calendarStatus, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
-    storySourceStatus, webResearchStatus, neteaseAuth, baseDir, programBriefRepo,
+    storySourceStatus, webResearchStatus, neteaseAuth, runtimeManager, baseDir, programBriefRepo,
     showPlanRepo, showPlanGenerator, dailyShowPlanGenerator, jobRegistry, showProjectRepo
   } = deps;
+
+  const getAdapterStatuses = () => runtimeManager?.getStatuses() ?? {
+    llm: llmStatus,
+    music: musicStatus,
+    tts: ttsStatus,
+    weather: weatherStatus,
+    calendar: calendarStatus,
+    upnp: "disabled" as const,
+    storySource: storySourceStatus,
+    webResearch: webResearchStatus
+  };
 
   const episodeRunnerDeps: EpisodeRunnerDeps = {
     llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
@@ -76,6 +102,36 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   app.addHook("onClose", () => {
     if (snapshotTimer) clearTimeout(snapshotTimer);
   });
+
+  function scheduleQueueSnapshot(queue = state.getQueue(), blockAt: string | null = null) {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+    snapshotTimer = setTimeout(async () => {
+      await stateRepo.snapshotQueue(queue, blockAt);
+    }, 500);
+  }
+
+  async function ensureQueueSize(targetSize = 10) {
+    const currentQueue = state.getQueue();
+    if (currentQueue.length >= targetSize) return currentQueue;
+
+    const refillRaw = await deps.music.recommend({ mood: currentMoodHint, limit: Math.max(targetSize * 2, 10) }).catch(() => []);
+    const currentTrack = state.getCurrentTrack();
+    const excludedForRefill = new Set([
+      ...state.getRecentlySelectedTrackIds(),
+      ...(currentTrack ? [currentTrack.id] : []),
+      ...currentQueue.map((track) => track.id)
+    ]);
+    const refill = refillRaw
+      .filter((track) => !excludedForRefill.has(track.id))
+      .slice(0, targetSize - currentQueue.length);
+    if (refill.length === 0) return currentQueue;
+
+    const queue = [...currentQueue, ...refill];
+    state.setQueue(queue);
+    stream.broadcast({ type: "queue-updated", payload: { queue } });
+    scheduleQueueSnapshot(queue);
+    return queue;
+  }
 
   async function refreshRecentPlaybackMemory(): Promise<string[]> {
     const persistedRecent = await stateRepo.getRecentlyPlayed(30);
@@ -98,23 +154,24 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     ];
   }
 
-  app.get("/api/health", async () =>
-    HealthResponseSchema.parse({
+  app.get("/api/health", async () => {
+    const statuses = getAdapterStatuses();
+    return HealthResponseSchema.parse({
       ok: true,
       service: "FakeRadio",
       adapters: {
-        llm: llmStatus,
-        music: musicStatus,
-        tts: ttsStatus,
-        weather: weatherStatus,
-        calendar: calendarStatus,
-        upnp: "mock",
-        storySource: storySourceStatus,
-        webResearch: webResearchStatus
+        llm: statuses.llm,
+        music: statuses.music,
+        tts: statuses.tts,
+        weather: statuses.weather,
+        calendar: statuses.calendar,
+        upnp: statuses.upnp,
+        storySource: statuses.storySource,
+        webResearch: statuses.webResearch
       },
       checkedAt: new Date().toISOString()
-    })
-  );
+    });
+  });
 
   app.get("/api/prewarm/status", async () => {
     const today = formatRadioDate(nowProvider());
@@ -163,48 +220,32 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     });
   });
 
-  app.get("/api/next", async () => {
+  app.get("/api/next", async (_request, reply) => {
+    try {
     // Detect daypart transition and refresh queue
     const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
     const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
     const blockAt = currentBlock?.at ?? null;
     if (blockAt !== null && blockAt !== state.getLastPlanBlockAt()) {
       state.setLastPlanBlockAt(blockAt);
-      const newQueueRaw = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 5 });
+      const newQueueRaw = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 20 }).catch(() => []);
       const excludedForQueue = await refreshRecentPlaybackMemory();
       const currentQueueIds = new Set(state.getQueue().map(t => t.id));
-      const newQueue = newQueueRaw.filter(t => !excludedForQueue.includes(t.id) && !currentQueueIds.has(t.id)).slice(0, 3);
+      const newQueue = newQueueRaw.filter(t => !excludedForQueue.includes(t.id) && !currentQueueIds.has(t.id)).slice(0, 10);
       state.setQueue(newQueue);
       stream.broadcast({ type: "queue-updated", payload: { queue: newQueue } });
-      if (snapshotTimer) clearTimeout(snapshotTimer);
-      snapshotTimer = setTimeout(async () => {
-        await stateRepo.snapshotQueue(newQueue, null);
-      }, 500);
+      scheduleQueueSnapshot(newQueue);
     }
 
     await refreshRecentPlaybackMemory();
+    episodeRunnerDeps.musicStatus = getAdapterStatuses().music;
     const { track, decision, isFallback, candidates, candidateSource, rerankSource } = await resolveNextTrackAndDecision(episodeRunnerDeps);
     const { result: ttsResult } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
-    if (state.queueSize() < 2) {
-      const refillRaw = await deps.music.recommend({ mood: currentMoodHint, limit: 5 });
-      const existingQueueIds = new Set(state.getQueue().map(t => t.id));
-      const excludedForRefill = new Set([
-        ...state.getRecentlySelectedTrackIds(),
-        track.id,
-        ...existingQueueIds
-      ]);
-      const refill = refillRaw.filter(t => !excludedForRefill.has(t.id)).slice(0, 3);
-      const queue = [...state.getQueue(), ...refill];
-      state.setQueue(queue);
-      if (snapshotTimer) clearTimeout(snapshotTimer);
-      snapshotTimer = setTimeout(async () => {
-        await stateRepo.snapshotQueue(queue, null);
-      }, 500);
-    }
+    if (state.queueSize() < 2) await ensureQueueSize(10);
     state.setDj({
       say: decision.say,
       audioUrl: ttsResult.audioUrl,
@@ -239,9 +280,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         favoritesAvailable: candidates.length,
         candidatesCount: candidates.length,
         isFallback,
-        musicProvider: deps.musicStatus
+        musicProvider: getAdapterStatuses().music
       }
     });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Music provider unavailable";
+      return reply.status(503).send({ error: message });
+    }
   });
 
   app.post("/api/chat", async (request, reply) => {
@@ -263,6 +308,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
       "X-Accel-Buffering": "no",
+      ...getCorsHeadersForOrigin(request.headers.origin),
     });
 
     const emitter = {
@@ -275,6 +321,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     try {
       await handler((request.body as { message: string }).message, emitter);
     } catch (err) {
+      request.log.error({ err }, "chat stream handler failed");
       emitter.emit("done", { text: "信号断了。再说一次？" });
     }
 
@@ -318,12 +365,45 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (relativePath.startsWith("..") || isAbsolute(relativePath) || !fileExists) {
       return reply.status(404).send("Not found");
     }
-    if (!filePath.endsWith(".wav") && !filePath.endsWith(".mp3")) {
+    if (!filePath.endsWith(".wav") && !filePath.endsWith(".mp3") && !filePath.endsWith(".m4a")) {
       return reply.status(404).send("Not found");
     }
 
-    const mimeType = filePath.endsWith(".wav") ? "audio/wav" : "audio/mpeg";
-    return reply.type(mimeType).send(createReadStream(filePath));
+    const mimeType = filePath.endsWith(".wav")
+      ? "audio/wav"
+      : filePath.endsWith(".m4a")
+        ? "audio/mp4"
+        : "audio/mpeg";
+
+    // iOS/iPadOS Safari 播放音频必发 Range 请求，要求 206 Partial Content。
+    // 不处理 Range 会导导致口播音频加载失败。这里手动解析 Range 并返回分片流。
+    const fileStat = await stat(filePath);
+    const total = fileStat.size;
+    const rangeHeader = request.headers.range;
+    reply.header("accept-ranges", "bytes");
+
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+      if (match) {
+        const start = match[1] ? parseInt(match[1], 10) : 0;
+        const end = match[2] ? parseInt(match[2], 10) : total - 1;
+        if (start <= end && start < total) {
+          return reply
+            .status(206)
+            .header("content-type", mimeType)
+            .header("content-range", `bytes ${start}-${Math.min(end, total - 1)}/${total}`)
+            .header("content-length", Math.min(end, total - 1) - start + 1)
+            .send(createReadStream(filePath, { start, end }));
+        }
+      }
+      return reply.status(416).header("content-range", `bytes */${total}`).send("Range Not Satisfiable");
+    }
+
+    return reply
+      .status(200)
+      .header("content-type", mimeType)
+      .header("content-length", total)
+      .send(createReadStream(filePath));
   });
 
   app.get("/api/episode/next", async (request, reply) => {
@@ -342,6 +422,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           trackRegistry.register(episode.track);
           state.setTrack(episode.track);
           state.rememberSelectedTrack(episode.track);
+          state.removeFromQueue(episode.track.id);
+          if (state.queueSize() < 2) await ensureQueueSize(10);
           state.setDj({ say: episode.story.text, audioUrl: episode.story.audioUrl });
           stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
           stream.broadcast({ type: "dj-speech", payload: { text: episode.story.text, audioUrl: episode.story.audioUrl } });
@@ -361,7 +443,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           await stateRepo.appendDjMessage({
             text: episode.story.text,
             trackId: episode.track.id,
-            storyType: episode.story.type
+            storyType: episode.story.type,
+            audioUrl: episode.story.audioUrl
           });
           return EpisodeNextResponseSchema.parse({ episode, source: "prepared" });
         }
@@ -376,6 +459,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       trackRegistry.register(track);
       state.setTrack(track);
       state.rememberSelectedTrack(track);
+      state.removeFromQueue(track.id);
+      if (state.queueSize() < 2) await ensureQueueSize(10);
       stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
       await stateRepo.recordPlayedTrack({
         id: randomUUID(),
@@ -426,12 +511,12 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       if (hookText2 && hookText2.length > 0) {
         stream.broadcast({ type: "agent-message", payload: { role: "agent", text: hookText2, trackId: track.id } });
       }
-      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType });
+      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType, audioUrl: storyTtsResult.audioUrl });
 
       return EpisodeNextResponseSchema.parse({ episode, source: "live" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      return reply.status(500).send({ error: message });
+      return reply.status(503).send({ error: message });
     }
   });
 
@@ -445,6 +530,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       }
       // Register track for audio proxying but don't update playback state
       trackRegistry.register(track);
+      // 预取的曲目会被前端接续播放，必须登记进"最近已选"，
+      // 否则下一次预取会再次选中同一首，导致每首歌播两遍
+      state.rememberSelectedTrack(track);
 
       const sources = await gatherEpisodeSources(
         storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
@@ -480,11 +568,42 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         fallbackReason
       };
 
+      // 预取的 episode 大概率会被前端接续播放，口播记录（含音频路径）
+      // 要进 dj_messages，否则当日导出无法为这些歌混入口播
+      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType, audioUrl: storyTtsResult.audioUrl });
+
       return EpisodeNextResponseSchema.parse({ episode, source: "live" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      return reply.status(500).send({ error: message });
+      return reply.status(503).send({ error: message });
     }
+  });
+
+  // 前端接续播放预取 episode 时上报。预取接口不更新播放状态，
+  // 不上报的话服务端的"当前曲目"会停留在上一首，DJ 聊天会聊错歌
+  app.post("/api/episode/playing", async (request, reply) => {
+    const { trackId } = EpisodePlayingRequestSchema.parse(request.body);
+    const track = trackRegistry.get(trackId);
+    if (!track) {
+      return reply.status(404).send({ error: "track not found in registry" });
+    }
+
+    state.setTrack(track);
+    state.rememberSelectedTrack(track);
+    state.removeFromQueue(track.id);
+    if (state.queueSize() < 2) await ensureQueueSize(10);
+    stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
+    await stateRepo.recordPlayedTrack({
+      id: randomUUID(),
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album ?? null,
+      source: track.source,
+      playedAt: new Date().toISOString()
+    });
+
+    return reply.send({ ok: true });
   });
 
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(nowProvider(), userPreferences.playlists)));
@@ -514,12 +633,55 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.get("/api/audio/:trackId", async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
+    const corsHeaders = getCorsHeadersForOrigin(request.headers.origin);
+
+    // 磁盘已有录音：从本地文件 serve，完整支持 Range。
+    // iOS Safari 需要正确的 206 响应才能 seek，否则把流当直播流，
+    // 重新缓冲时从头恢复（"突然从头播放"的根因）。
+    const filePath = getAudioFilePath(audioDir, trackId);
+    if (isAudioRecorded(audioDir, trackId)) {
+      const fileExists = await access(filePath).then(() => true, () => false);
+      if (fileExists) {
+        const total = (await stat(filePath)).size;
+        reply.headers(corsHeaders).header("accept-ranges", "bytes");
+        const rangeHeader = request.headers.range;
+
+        if (rangeHeader) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+          if (match) {
+            const start = match[1] ? parseInt(match[1], 10) : 0;
+            const end = match[2] ? parseInt(match[2], 10) : total - 1;
+            if (start <= end && start < total) {
+              return reply
+                .status(206)
+                .header("content-type", "audio/mpeg")
+                .header("content-range", `bytes ${start}-${Math.min(end, total - 1)}/${total}`)
+                .header("content-length", Math.min(end, total - 1) - start + 1)
+                .send(createReadStream(filePath, { start, end }));
+            }
+          }
+          return reply.status(416).header("content-range", `bytes */${total}`).send("Range Not Satisfiable");
+        }
+
+        return reply
+          .status(200)
+          .header("content-type", "audio/mpeg")
+          .header("content-length", total)
+          .send(createReadStream(filePath));
+      }
+    }
+
+    // 首播（磁盘无录音）：走代理，透传上游 content-length，
+    // iOS 有了总大小即可 seek；录完后下次播放自动走上面的磁盘 206 分支。
     try {
       const result = await proxyAndRecord({ registry: trackRegistry, audioDir, music }, trackId);
       if (!result) return reply.status(404).send({ error: "track not found or no audio URL" });
-      return reply
-        .header("content-type", result.response.headers.get("content-type") ?? "audio/mpeg")
-        .send(result.response.body);
+      reply.headers(corsHeaders);
+      reply.header("content-type", result.response.headers.get("content-type") ?? "audio/mpeg");
+      reply.header("accept-ranges", "bytes");
+      const contentLength = result.response.headers.get("content-length");
+      if (contentLength) reply.header("content-length", contentLength);
+      return reply.send(result.response.body);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "audio proxy error";
       return reply.status(502).send({ error: msg });
@@ -528,7 +690,15 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.post("/api/export/today", async (request, reply) => {
     const taskId = startExportTask({
-      favorites, trackRegistry, audioDir, exportDir, ttsCacheDir
+      favorites, trackRegistry, audioDir, exportDir, ttsCacheDir,
+      getTodayPlayed: async () => {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const played = await stateRepo.getRecentlyPlayed(200, startOfDay.toISOString());
+        // 查询按时间倒序，导出节目需要按播放顺序串
+        return played.reverse();
+      },
+      getTodayDjStories: () => stateRepo.getDjMessagesToday()
     });
     return reply.status(202).send({ taskId, status: "pending" });
   });
@@ -819,7 +989,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   // Show Projects API
   app.get("/api/shows", async (_request, reply) => {
     const projects = await showProjectRepo.list();
-    return reply.send(ShowProjectsListResponseSchema.parse({ projects: projects.map(sanitizeProject) }));
+    return reply.send(ShowProjectsListResponseSchema.parse({ projects: projects.map(serializeProject) }));
   });
 
   app.get("/api/shows/:id", async (request, reply) => {
@@ -828,7 +998,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     if (!project) {
       return reply.status(404).send({ error: "project not found" });
     }
-    return reply.send(ShowProjectResponseSchema.parse({ project: sanitizeProject(project) }));
+    return reply.send(ShowProjectResponseSchema.parse({ project: serializeProject(project) }));
   });
 
   app.delete("/api/shows/:id", async (request, reply) => {
@@ -865,6 +1035,26 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       // Create a new project
       const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
       project = await showProjectRepo.create({ briefId: brief.id, slug });
+    }
+
+    const runningStatuses = new Set(["pending", "running", "paused", "needs-replan"]);
+    const existingJobs = await jobRegistry.list({ briefId: brief.id });
+    const reusableJob = existingJobs.find((job) => runningStatuses.has(job.status));
+    if (reusableJob) {
+      project = await showProjectRepo.update(project.id, {
+        activeJobId: reusableJob.id,
+        status: "generating"
+      }) ?? project;
+      await jobRegistry.addLog(reusableJob.id, {
+        level: "info",
+        message: "Generate-now request reused existing active job",
+        phase: "init"
+      });
+      const refreshedJob = await jobRegistry.get(reusableJob.id);
+      return reply.status(202).send(GenerateNowResponseSchema.parse({
+        project,
+        job: refreshedJob ?? reusableJob
+      }));
     }
 
     // Check if there's an active plan, if not create one
@@ -1026,20 +1216,26 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   });
 
   app.get("/api/settings", async (_request, reply) => {
-    const settings = await stateRepo.getPref<Settings>("show:settings");
-    const defaultSettings = SettingsSchema.parse({});
     return reply.send(SettingsResponseSchema.parse({
-      settings: settings ?? defaultSettings
+      settings: runtimeManager?.getSettings() ?? SettingsSchema.parse({})
     }));
   });
 
   app.put("/api/settings", async (request, reply) => {
     const body = UpdateSettingsRequestSchema.parse(request.body);
-    const currentSettings = await stateRepo.getPref<Settings>("show:settings") ?? {};
+    const currentSettings = runtimeManager?.getSettings() ?? await stateRepo.getPref<Settings>("show:settings") ?? {};
     const mergedSettings = SettingsSchema.parse({
       ...currentSettings,
       ...body
     });
+    if (runtimeManager) {
+      try {
+        await runtimeManager.applySettings(mergedSettings);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "设置应用失败";
+        return reply.status(503).send({ error: message });
+      }
+    }
     await stateRepo.upsertPref("show:settings", mergedSettings);
     return reply.send(SettingsResponseSchema.parse({ settings: mergedSettings }));
   });

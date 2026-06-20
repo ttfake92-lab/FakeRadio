@@ -1,7 +1,8 @@
-import { formatRadioDate } from "../utils/time.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { access } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
+import { createWriteLock } from "../utils/shared-utils.js";
+import { formatRadioDate } from "../utils/time.js";
 
 export type SessionEntry = {
   timestamp: string;
@@ -17,17 +18,13 @@ export type SessionRepository = {
   getByDate(date: string): Promise<SessionEntry[]>;
 };
 
-function formatDate(date: Date): string {
-  return formatRadioDate(date);
-}
-
 function getSessionPath(baseDir: string, date: string): string {
   return resolve(baseDir, `${date}.json`);
 }
 
 export function createSessionRepository(baseDir: string, nowProvider?: () => Date): SessionRepository {
   const now = nowProvider ?? (() => new Date());
-  let writeLock: Promise<void> = Promise.resolve();
+  const withWriteLock = createWriteLock();
 
   async function readSession(date: string): Promise<SessionEntry[]> {
     const path = getSessionPath(baseDir, date);
@@ -48,22 +45,11 @@ export function createSessionRepository(baseDir: string, nowProvider?: () => Dat
     await writeFile(path, JSON.stringify(entries, null, 2), "utf-8");
   }
 
-  async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-    const previous = writeLock;
-    let resolveLock!: () => void;
-    writeLock = new Promise<void>((resolve) => { resolveLock = resolve; });
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      resolveLock();
-    }
-  }
 
   return {
     async appendMessage(entry) {
       return withWriteLock(async () => {
-        const date = formatDate(now());
+        const date = formatRadioDate(now());
         const entries = await readSession(date);
         entries.push(entry);
         await writeSession(date, entries);
@@ -71,7 +57,7 @@ export function createSessionRepository(baseDir: string, nowProvider?: () => Dat
     },
 
     async getToday() {
-      return readSession(formatDate(now()));
+      return readSession(formatRadioDate(now()));
     },
 
     async getByDate(date) {

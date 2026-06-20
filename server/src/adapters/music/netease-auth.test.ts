@@ -224,7 +224,7 @@ describe("createNeteaseAuthService", () => {
     );
   });
 
-  it("treats a stored cookie as logged in even when the profile payload is empty", async () => {
+  it("reports cookie-invalid when a stored cookie returns an empty profile payload", async () => {
     const cookieFile = await makeCookieFile();
     const store = createNeteaseCookieStore(cookieFile);
     await store.save("MUSIC_U=stored-cookie;");
@@ -232,9 +232,10 @@ describe("createNeteaseAuthService", () => {
     const service = createNeteaseAuthService({ fetchJson, cookieStore: store });
 
     await expect(service.getStatus()).resolves.toMatchObject({
-      loggedIn: true,
+      status: "cookie-invalid",
+      loggedIn: false,
       cookieStored: true,
-      message: "已保存网易云 cookie，后续音乐请求会带登录态。"
+      message: "已保存网易云 cookie，但当前登录状态无效，请重新注入 cookie。"
     });
   });
 

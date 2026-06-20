@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ProgramBrief, ShowJob, ShowProject } from "@fakeradio/shared";
+import { getJobsForBrief, getProjectsForBrief, computeActiveProject } from "../../lib/brief-filter";
 
 function createBrief(id: string, topic: string): ProgramBrief {
   return {
@@ -40,40 +41,6 @@ function createProject(id: string, briefId: string, activeJobId?: string): ShowP
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-}
-
-function getJobsForBrief(jobs: ShowJob[] | undefined, briefId: string | null | undefined): ShowJob[] {
-  if (!briefId || !jobs) return [];
-  return jobs.filter((j) => j.briefId === briefId);
-}
-
-function getProjectsForBrief(projects: ShowProject[] | undefined, briefId: string | null | undefined): ShowProject[] {
-  if (!briefId || !projects) return [];
-  return projects.filter((p) => p.briefId === briefId);
-}
-
-function computeActiveProjectForBrief(
-  jobs: ShowJob[] | undefined,
-  projects: ShowProject[] | undefined,
-  briefId: string | null | undefined,
-  selectedProjectId: string | null
-): ShowProject | null {
-  const jobsForBrief = getJobsForBrief(jobs, briefId);
-  const projectsForBrief = getProjectsForBrief(projects, briefId);
-
-  const completedJob = jobsForBrief.find((j) => j.status === "completed");
-
-  if (selectedProjectId) {
-    return projectsForBrief.find((p) => p.id === selectedProjectId) ?? null;
-  }
-  if (completedJob) {
-    return (
-      projectsForBrief.find((p) => p.activeJobId === completedJob.id) ??
-      projectsForBrief.find((p) => p.briefId === completedJob.briefId) ??
-      null
-    );
-  }
-  return null;
 }
 
 describe("multi-brief user flow: ProductionBoard filtering", () => {
@@ -123,8 +90,8 @@ describe("multi-brief user flow: ProductionBoard filtering", () => {
   });
 
   it("activeProject selection: brief A has completed job -> shows project, brief B has no completed job -> no auto-selected project", () => {
-    const activeProjectA = computeActiveProjectForBrief(allJobs, allProjects, briefA.id, null);
-    const activeProjectB = computeActiveProjectForBrief(allJobs, allProjects, briefB.id, null);
+    const activeProjectA = computeActiveProject(allJobs, allProjects, briefA.id, null);
+    const activeProjectB = computeActiveProject(allJobs, allProjects, briefB.id, null);
 
     expect(activeProjectA?.id).toBe("show-a-done");
     expect(activeProjectA?.briefId).toBe("brief-a");
@@ -135,7 +102,7 @@ describe("multi-brief user flow: ProductionBoard filtering", () => {
   it("selectedProjectId from another brief should be ignored when switching briefs", () => {
     const selectedFromBriefA = "show-a-done";
 
-    const activeProjectWhenBriefB = computeActiveProjectForBrief(
+    const activeProjectWhenBriefB = computeActiveProject(
       allJobs, allProjects, briefB.id, selectedFromBriefA
     );
 
@@ -143,12 +110,12 @@ describe("multi-brief user flow: ProductionBoard filtering", () => {
   });
 
   it("switching from brief A (with completed job) to brief B (no completed job) correctly shows no auto-selected project", () => {
-    const activeProjectBriefA = computeActiveProjectForBrief(
+    const activeProjectBriefA = computeActiveProject(
       allJobs, allProjects, briefA.id, null
     );
     expect(activeProjectBriefA?.id).toBe("show-a-done");
 
-    const activeProjectBriefB = computeActiveProjectForBrief(
+    const activeProjectBriefB = computeActiveProject(
       allJobs, allProjects, briefB.id, null
     );
     expect(activeProjectBriefB).toBeNull();

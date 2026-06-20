@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { computeFadedVolume } from "./player-view-model";
 
 export type AudioEngine = {
@@ -10,6 +10,8 @@ export type AudioEngine = {
   restoreMusicVolume(): void;
   isDucking(): boolean;
   setDucking(value: boolean): void;
+  /** 在用户手势同步栈内调用，解锁 iOS 自动播放限制 */
+  unlock(): void;
 };
 
 export function useAudioEngine(): AudioEngine {
@@ -40,12 +42,62 @@ export function useAudioEngine(): AudioEngine {
     }
   }, [fadeVolume]);
 
+  // iOS/iPadOS 自动播放策略：play() 必须在用户手势同步栈内。
+  // 本电台播放链路在点击后会 await 网络请求再 play()，手势上下文已失效。
+  // 在点击的同步栈内先 play()+pause() 一次，给元素打上"已激活"标记，
+  // 后续异步 play() 即可放行。无 src 时 play() 会 reject，忽略即可。
+  const unlock = useCallback(() => {
+    for (const ref of [musicRef, speechRef]) {
+      const el = ref.current;
+      if (!el) continue;
+      el.muted = true;
+      const p = el.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          el.pause();
+          el.muted = false;
+        }).catch(() => {
+          el.muted = false;
+        });
+      }
+    }
+  }, []);
+
+  // iOS/iPadOS：页面切后台再回前台时，AudioContext 挂起恢复可能导致
+  // 被 createMediaElementSource 路由的音频元素 currentTime 被重置为 0。
+  // 隐藏前记录位置，恢复时若检测到被重置（当时非 0 却回到 0）则还原。
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    let hiddenAt: number | null = null;
+    const onHide = () => {
+      const audio = musicRef.current;
+      if (audio && !audio.paused) hiddenAt = audio.currentTime;
+    };
+    const onShow = () => {
+      if (hiddenAt === null) return;
+      const audio = musicRef.current;
+      if (audio && hiddenAt > 1 && audio.currentTime < 0.5 && !audio.paused) {
+        try { audio.currentTime = hiddenAt; } catch { /* seek 失败忽略 */ }
+      }
+      hiddenAt = null;
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) onHide();
+      else onShow();
+    });
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, []);
+
   return {
     musicRef,
     speechRef,
     fadeVolume,
     restoreMusicVolume,
     isDucking: () => isDuckingRef.current,
-    setDucking: (value: boolean) => { isDuckingRef.current = value; }
+    setDucking: (value: boolean) => { isDuckingRef.current = value; },
+    unlock
   };
 }

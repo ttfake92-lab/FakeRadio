@@ -1,6 +1,6 @@
 import type { ContextFragment, DjDecision, StorySourceNote, Track, TtsResult } from "@fakeradio/shared";
 
-export type AdapterStatus = "mock" | "ready" | "disabled";
+export type AdapterStatus = "ready" | "disabled" | "error";
 
 export type AdapterHealth = {
   llm: AdapterStatus;
@@ -15,6 +15,8 @@ export type AdapterHealth = {
 export type LlmAdapter = {
   compute(fragments: ContextFragment[]): Promise<DjDecision>;
   computeRaw(fragments: ContextFragment[]): Promise<string>;
+  /** Send a free-form prompt and get structured JSON back. */
+  computeJson<T>(systemPrompt: string, userPrompt: string): Promise<T>;
 };
 
 /** Searches, recommends, and resolves audio URLs for tracks. */

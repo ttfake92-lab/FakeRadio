@@ -6,6 +6,7 @@
   "scripts": {
     "preinstall": "npx only-allow pnpm",
     "dev": "concurrently -k -n server,web -c blue,green \"pnpm --filter @fakeradio/server dev\" \"pnpm --filter @fakeradio/web dev\"",
+    "start": "./scripts/start.sh",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @fakeradio/shared build && pnpm -r typecheck && pnpm --filter @fakeradio/web typecheck:test",
     "test": "vitest run",

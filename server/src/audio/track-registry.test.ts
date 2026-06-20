@@ -7,7 +7,7 @@ function makeTrack(overrides: Partial<Track> = {}): Track {
     id: "t1",
     title: "Song A",
     artist: "Artist A",
-    source: "mock",
+    source: "local",
     ...overrides
   };
 }

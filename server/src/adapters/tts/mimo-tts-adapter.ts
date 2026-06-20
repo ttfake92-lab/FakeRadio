@@ -9,6 +9,7 @@ export type CreateMimoTtsAdapterOptions = {
   model?: string;
   voice?: string;
   format?: "wav" | "mp3";
+  timeoutMs?: number;
 };
 
 function hashTtsPayload(text: string, provider: string, model: string, voice: string): string {
@@ -23,6 +24,7 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
   const model = options.model ?? "mimo-v2.5-tts";
   const voice = options.voice ?? "茉莉";
   const format = options.format ?? "wav";
+  const timeoutMs = options.timeoutMs ?? 60_000;
   const ext = format === "mp3" ? "mp3" : "wav";
   const cacheManager = createTtsCacheManager(options.cacheDir);
 
@@ -50,11 +52,11 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
             ],
             audio: { format, voice }
           }),
-          signal: AbortSignal.timeout(15_000)
+          signal: AbortSignal.timeout(timeoutMs)
         });
       } catch (err) {
         if (err instanceof Error && err.name === "TimeoutError") {
-          throw new Error("TTS 生成超时（15s），请重试");
+          throw new Error(`TTS 生成超时（${Math.round(timeoutMs / 1000)}s），请重试`);
         }
         throw err;
       }

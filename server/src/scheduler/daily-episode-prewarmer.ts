@@ -4,14 +4,14 @@ import type { StateRepository } from "../state/state-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { PlaybackState } from "../http/playback-state.js";
 import { gatherEpisodeSources, narrateStoryWithSources, synthesizeWithFallback } from "../http/episode-runner.js";
-import { buildMockEnvironment } from "../utils/mock-environment.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { env } from "../config/env.js";
 import { formatRadioDate } from "../utils/time.js";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
+import { getAudioFilePath } from "../utils/shared-utils.js";
 
 export type PrewarmDeps = {
   llm: LlmAdapter;
@@ -55,9 +55,6 @@ function buildPrewarmEpisodeState(): PlaybackState {
   };
 }
 
-function getAudioFilePath(audioDir: string, trackId: string): string {
-  return resolve(audioDir, `${trackId}.mp3`);
-}
 
 function selectFirstAvailableTrack(tracks: Track[], excludedTrackIds: Set<string>): Track | undefined {
   return tracks.find((track) => !excludedTrackIds.has(track.id));

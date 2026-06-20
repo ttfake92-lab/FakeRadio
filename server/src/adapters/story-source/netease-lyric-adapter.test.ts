@@ -54,11 +54,11 @@ describe("createNeteaseLyricAdapter", () => {
     expect(result).toEqual([]);
   });
 
-  it("throws when fetchJson fails", async () => {
+  it("returns empty sources when fetchJson fails", async () => {
     const fetchJson = vi.fn().mockRejectedValue(new Error("Netease down"));
 
     const adapter = createNeteaseLyricAdapter({ fetchJson });
-    await expect(adapter.gather(makeTrack())).rejects.toThrow("Netease down");
+    await expect(adapter.gather(makeTrack())).resolves.toEqual([]);
   });
 
   it("uses baseUrl and timeoutMs to build fetchJson when not provided", async () => {

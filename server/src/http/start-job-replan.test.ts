@@ -3,16 +3,16 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeStorySourceAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
 
 let app: FastifyInstance | undefined;
 let isolatedBaseDirs: string[] = [];
 
-function createMockMusicAdapterResult() {
+function createFakeMusicAdapterResult() {
   return {
-    music: createMockMusicAdapter(),
-    status: "mock" as const
+    music: createFakeMusicAdapter(),
+    status: "ready" as const
   };
 }
 
@@ -27,6 +27,7 @@ function createEmptyLikedSongsBaseDir() {
 async function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });
 }
@@ -74,10 +75,10 @@ describe("POST /api/jobs/:id/start", () => {
 
   it("transitions needs-replan job and triggers re-execution", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const { jobId } = await setupBriefAndJob();
@@ -108,10 +109,10 @@ describe("POST /api/jobs/:id/start", () => {
 
   it("returns 400 when starting a non-existent job", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const resp = await app.inject({
@@ -123,10 +124,10 @@ describe("POST /api/jobs/:id/start", () => {
 
   it("pending job can be started without triggering execution", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const { jobId } = await setupBriefAndJob();

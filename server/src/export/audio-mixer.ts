@@ -65,14 +65,17 @@ export async function mixEpisodeAudio(
     probeDuration(musicPath, ffprobePath)
   ]);
 
+  // 电台感垫乐：歌曲从 0 秒起以 DUCK_VOLUME 垫在整段口播下面，
+  // 口播结束后用 FADE_DURATION_S 秒渐入全音量，歌曲继续播到结尾。
+  // 叠加（amix）而非串联（concat），口播是"压"在歌曲前奏上的
   const fadeStart = ttsDuration;
   const duckExpr = `if(lt(t\\,${fadeStart})\\,${DUCK_VOLUME}\\,if(lt(t\\,${fadeStart + FADE_DURATION_S})\\,${DUCK_VOLUME}+(1-${DUCK_VOLUME})*(t-${fadeStart})/${FADE_DURATION_S}\\,1))`;
+  const totalDuration = Math.max(ttsDuration, musicDuration);
 
   const filterComplex = [
-    `[1:a]volume='${duckExpr}'[ducked]`,
-    `[0:a][ducked]concat=n=2:v=0:a=1[merged]`,
-    `[merged]apad=whole_dur=${musicDuration}[padded]`,
-    `[padded]atrim=0:${musicDuration}[out]`
+    `[1:a]volume='${duckExpr}'[bed]`,
+    `[0:a][bed]amix=inputs=2:duration=longest:normalize=0[mixed]`,
+    `[mixed]atrim=0:${totalDuration}[out]`
   ].join(";");
 
   onProgress?.({ phase: "mixing", percent: 0 });
@@ -86,6 +89,9 @@ export async function mixEpisodeAudio(
       "-map", "[out]",
       "-codec:a", "libmp3lame",
       "-b:a", OUTPUT_BITRATE,
+      // 与导出拼接的归一化参数一致，concat -c copy 才能直接拼
+      "-ar", "44100",
+      "-ac", "2",
       "-progress", "pipe:1",
       "-nostats",
       outputPath
@@ -101,7 +107,7 @@ export async function mixEpisodeAudio(
       const outTimeMatch = text.match(/out_time_ms=(\d+)/);
       if (outTimeMatch) {
         const outTimeMs = parseInt(outTimeMatch[1]!, 10);
-        const totalMs = musicDuration * 1_000_000;
+        const totalMs = totalDuration * 1_000_000;
         const percent = Math.min(100, Math.round((outTimeMs / totalMs) * 100));
         onProgress?.({ phase: "mixing", percent });
       }

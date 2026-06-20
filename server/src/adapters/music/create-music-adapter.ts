@@ -1,12 +1,12 @@
 import type { AdapterStatus, MusicAdapter } from "../types.js";
-import { createMockMusicAdapter } from "./mock-music-adapter.js";
+import { createDisabledMusicAdapter } from "./disabled-music-adapter.js";
 import {
   createNeteaseHttpClient,
   type CreateNeteaseHttpClientOptions
 } from "./netease-http-client.js";
 import { createNeteaseHttpMusicAdapter } from "./netease-http-music-adapter.js";
 
-type MusicProviderMode = "auto" | "mock" | "netease";
+type MusicProviderMode = "netease";
 
 type CreateMusicAdapterOptions = Partial<CreateNeteaseHttpClientOptions> & {
   providerMode: MusicProviderMode;
@@ -18,6 +18,7 @@ type CreateMusicAdapterOptions = Partial<CreateNeteaseHttpClientOptions> & {
 type MusicAdapterResult = {
   music: MusicAdapter;
   status: AdapterStatus;
+  error?: string;
 };
 
 const DEFAULT_NETEASE_BASE_URL = "http://127.0.0.1:3300";
@@ -51,13 +52,6 @@ export async function createMusicAdapter({
   probeNetease,
   createNeteaseAdapter
 }: CreateMusicAdapterOptions): Promise<MusicAdapterResult> {
-  if (providerMode === "mock") {
-    return {
-      music: createMockMusicAdapter(),
-      status: "mock"
-    };
-  }
-
   const available = await (probeNetease?.() ??
     probeNeteaseService({
       baseUrl,
@@ -66,9 +60,11 @@ export async function createMusicAdapter({
     }));
 
   if (!available) {
+    const message = `Netease music service is unavailable at ${baseUrl}`;
     return {
-      music: createMockMusicAdapter(),
-      status: "mock"
+      music: createDisabledMusicAdapter(message),
+      status: "disabled",
+      error: message
     };
   }
 

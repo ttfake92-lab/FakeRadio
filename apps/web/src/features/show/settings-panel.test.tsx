@@ -1,6 +1,6 @@
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react";
 import { SettingsPanel } from "./settings-panel";
 import * as apiClient from "../../lib/api-client";
 
@@ -11,7 +11,10 @@ const mockUpdateSettings = apiClient.updateSettings as ReturnType<typeof vi.fn>;
 
 const defaultSettings = {
   researchEnabled: true,
-  providerMode: "auto" as const,
+  providerMode: "netease" as const,
+  neteaseBaseUrl: "http://127.0.0.1:3300",
+  neteaseTimeoutMs: 2500,
+  neteaseAudioLevel: "higher" as const,
   ttsProvider: "edge" as const,
   ttsVoice: "zh-CN-XiaoxiaoNeural",
   mimoVoice: "crimson",
@@ -28,6 +31,10 @@ describe("SettingsPanel 用户流", () => {
     mockUpdateSettings.mockResolvedValue({ settings: defaultSettings });
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it("打开面板时加载设置", async () => {
     render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
     await waitFor(() => {
@@ -36,9 +43,11 @@ describe("SettingsPanel 用户流", () => {
   });
 
   it("不打开面板时不加载设置", async () => {
+    vi.useFakeTimers();
     render(<SettingsPanel isExpanded={false} isOpen={false} onToggleExpand={() => {}} onClose={() => {}} />);
-    await new Promise((r) => setTimeout(r, 50));
+    await act(async () => { vi.advanceTimersByTime(100); });
     expect(mockGetSettings).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("可以切换外部资料研究设置", async () => {
@@ -58,20 +67,27 @@ describe("SettingsPanel 用户流", () => {
     });
   });
 
-  it("可以修改 Provider 模式", async () => {
+  it("不显示模拟 Provider，且可以修改网易云 API 地址", async () => {
     render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
     await waitFor(() => {
       expect(screen.getByLabelText("Provider 模式")).toBeInTheDocument();
     });
 
-    const select = screen.getByLabelText("Provider 模式");
-    fireEvent.change(select, { target: { value: "mock" } });
+    const providerSelect = screen.getByLabelText("Provider 模式");
+    expect(providerSelect).not.toHaveTextContent("Mock");
+
+    const input = screen.getByLabelText("网易云 API 地址");
+    fireEvent.change(input, { target: { value: "http://127.0.0.1:3301" } });
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
         ...defaultSettings,
-        providerMode: "mock",
+        neteaseBaseUrl: "http://127.0.0.1:3301",
       });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("设置已生效")).toBeInTheDocument();
     });
   });
 
@@ -151,10 +167,10 @@ describe("SettingsPanel 用户流", () => {
 
     render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
     await waitFor(() => {
-      expect(screen.getByText("重试")).toBeInTheDocument();
+      expect(screen.getByText("Retry")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("重试"));
+    fireEvent.click(screen.getByText("Retry"));
 
     await waitFor(() => {
       expect(mockGetSettings).toHaveBeenCalledTimes(2);
@@ -184,11 +200,11 @@ describe("SettingsPanel 用户流", () => {
       />
     );
     await waitFor(() => {
-      expect(screen.getByText("设置")).toBeInTheDocument();
+      expect(screen.getByText("Settings")).toBeInTheDocument();
     });
 
     // 点击展开
-    fireEvent.click(screen.getByText("▶"));
+    fireEvent.click(screen.getByText(">"));
     expect(handleToggleExpand).toHaveBeenCalledTimes(1);
 
     // 切换到展开状态
@@ -200,7 +216,7 @@ describe("SettingsPanel 用户流", () => {
         onClose={() => {}}
       />
     );
-    expect(screen.getByText("▼")).toBeInTheDocument();
+    expect(screen.getByText("V")).toBeInTheDocument();
   });
 
   it("关闭按钮关闭面板", async () => {

@@ -126,12 +126,34 @@ FakeRadio 目前按四层理解：
 - 音频格式：MiMo 返回 WAV（16-bit PCM 24kHz），缓存文件扩展名与格式一致。
 - TTS 失败时回退到 mock TTS（生成真实静音 WAV），不阻断主流程。
 
+### 真实天气
+
+- `WeatherAdapter` 已支持 `mock` 和 `OpenWeatherMap`。
+- 有 `FAKERADIO_OPENWEATHER_API_KEY` 时自动使用 OpenWeatherMap，否则回退到 mock。
+- 遵循与 LLM/TTS 相同的 auto-detect 模式，不需手动切换 provider。
+- `/api/health` 暴露 `adapters.weather` 状态。
+
+### 真实日历
+
+- `CalendarAdapter` 已支持 `mock` 和 `Lark`（飞书日历）。
+- 有 `FAKERADIO_LARK_APP_ID` 时自动使用 Lark Calendar adapter。
+- `/api/health` 暴露 `adapters.calendar` 状态。
+
 ### Grounded DJ 决策
 
 - `/api/next` 当前采用两段式流程：先生成选歌 query，再在拿到真实曲目后重新生成 grounded DJ 文案。
 - grounded 阶段会把 `music.provider`、`music.selectedTrack` 和当前队列信息注入到 `toolResults`。
 - DJ 文案必须围绕真实选中的曲目生成，不能再假装 provider 结果不存在。
 - `/api/next` 选择候选曲目时会尽量避开当前正在播放的曲目；如果真实搜索和启动队列都没有可用曲目，会用 mock music adapter 做单次兜底。
+
+### 对话式节目编排
+
+- 用户可以通过自然对话与 DJ 交互，完成节目编排的全流程：创建 → 修改 → 确认 → 生成。
+- 意图检测采用两层策略：regex 快速路径（零延迟匹配明确指令）+ LLM 兜底检测（自然语言理解隐含意图）。
+- `ShowPlanGenerator` 使用 `LlmAdapter.computeJson()` 生成个性化节目 block（LLM 失败时回退 mock）。
+- `BriefIntentParser` 支持 LLM 兜底意图检测（如"最近在听很多 City Pop"→ 识别为节目创建意图）。
+- 多轮对话通过 `SessionRepository` 推断上下文，不引入独立 conversation state。
+- 聊天返回的 `ChatResponse.action.type` 扩展为支持 `show-brief-created`、`show-plan-refined`、`show-confirmed`、`show-cancelled`。
 
 ### 用户偏好接入
 
@@ -153,6 +175,12 @@ FakeRadio 目前按四层理解：
 - TTS provider 出错时，server 会回退到 mock TTS 结果，避免 Edge TTS 等真实 provider 的运行时失败阻断 `/api/next`。
 - 播放器收到 DJ 口播时会临时降低音乐音量；TTS 播放失败或淡入淡出计算越界时，前端必须把最终音量限制在浏览器允许的 `[0, 1]` 范围内。
 - story audio（`speechAudio`）播放失败时，前端不再自动回退到纯音乐，而是进入 `error` 状态并提示用户「口播加载失败」。
+
+### 播放器 UI
+
+- 主界面为 Editorial Radio（`editorial-radio.tsx`），三栏桌面布局，bone/graphite 双主题。
+- 旧版 5 套皮肤（pixel/terminal/bento/y2k/on-air-terminal）已在 2026-05-29 清理删除，仅保留 amber 作为可选皮肤。
+- `SkinId`、`SKINS`、`ON_AIR_THEMES` 已同步简化。
 
 ### 播放器诊断
 

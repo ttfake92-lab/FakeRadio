@@ -5,10 +5,10 @@ const app = await createRadioServer();
 
 await app.listen({
   port: env.FAKERADIO_SERVER_PORT,
-  host: "127.0.0.1"
+  host: "0.0.0.0"
 });
 
-console.log(`FakeRadio server listening on http://127.0.0.1:${env.FAKERADIO_SERVER_PORT}`);
+console.log(`FakeRadio server listening on http://0.0.0.0:${env.FAKERADIO_SERVER_PORT}`);
 
 function shutdown(signal: string) {
   console.log(`Received ${signal}, shutting down...`);

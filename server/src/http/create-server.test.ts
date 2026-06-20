@@ -3,17 +3,17 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMockMusicAdapter, createMockStorySourceAdapter, createMockTtsAdapter } from "../adapters/index.js";
+import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeStorySourceAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
 import { createStateRepository } from "../state/state-repository.js";
 
 let app: FastifyInstance | undefined;
 let isolatedBaseDirs: string[] = [];
 
-function createMockMusicAdapterResult() {
+function createFakeMusicAdapterResult() {
   return {
-    music: createMockMusicAdapter(),
-    status: "mock" as const
+    music: createFakeMusicAdapter(),
+    status: "ready" as const
   };
 }
 
@@ -28,6 +28,7 @@ function createEmptyLikedSongsBaseDir() {
 function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });
 }
@@ -44,14 +45,14 @@ afterEach(async () => {
 describe("createRadioServer", () => {
   it("serves health, now, plan, next, taste, and chat contracts", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
     expect(health.json().service).toBe("FakeRadio");
-    expect(health.json().adapters.storySource).toBe("mock");
+    expect(health.json().adapters.storySource).toBe("ready");
 
     const now = await app.inject({ method: "GET", url: "/api/now" });
     expect(now.statusCode).toBe(200);
@@ -67,7 +68,7 @@ describe("createRadioServer", () => {
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
-    expect(next.json().track.id).toBe("mock-track-001");
+    expect(next.json().track.id).toBe("fake-track-001");
 
     const chat = await app.inject({
       method: "POST",
@@ -87,8 +88,8 @@ describe("createRadioServer", () => {
     await repo.savePreparedEpisode({ radioDate: "2026-04-30", blockAt: "09:00", status: "failed", error: "no track" });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -117,33 +118,33 @@ describe("createRadioServer", () => {
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     await repo.recordPlayedTrack({
       id: "played-track-1",
-      trackId: "mock-track-001",
-      title: "Morning Signal",
-      artist: "FakeRadio Session",
+      trackId: "fake-track-001",
+      title: "Fake Track 1",
+      artist: "Fake Artist",
       album: "Local First Radio",
-      source: "mock",
+      source: "local",
       playedAt: new Date("2026-04-30T00:00:00.000Z").toISOString()
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter(),
-      webResearchAdapter: createMockStorySourceAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      storySourceAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
+      webResearchAdapter: createFakeStorySourceAdapter(),
       baseDir
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().episode.track.id).toBe("mock-track-002");
+    expect(response.json().episode.track.id).toBe("fake-track-002");
   });
 
   it("keeps the latest DJ speech in now after computing next", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
@@ -168,8 +169,8 @@ describe("createRadioServer", () => {
 
   it("allows the local web app origin during development", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const health = await app.inject({
@@ -209,8 +210,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       neteaseAuthService: neteaseAuth
     });
 
@@ -272,18 +273,18 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 8, 0, 0),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
     expect(health.json().adapters.music).toBe("ready");
-    expect(health.json().adapters.storySource).toBe("mock");
+    expect(health.json().adapters.storySource).toBe("ready");
 
     const nowBeforeNext = await app.inject({ method: "GET", url: "/api/now" });
     expect(nowBeforeNext.statusCode).toBe(200);
     expect(nowBeforeNext.json().queue).toEqual([queueTrack]);
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "warm morning indie", limit: 3 });
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "warm morning indie", limit: 10 });
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
@@ -328,7 +329,7 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 8, 0, 0),
-      ttsAdapter: createMockTtsAdapter(),
+      ttsAdapter: createFakeTtsAdapter(),
       userPreferences: {
         taste: "test taste",
         routines: "test routines",
@@ -346,7 +347,7 @@ describe("createRadioServer", () => {
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "custom morning seed", limit: 3 });
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "custom morning seed", limit: 10 });
   });
 
   it("selects a different search candidate after the current track has played", async () => {
@@ -381,7 +382,7 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 8, 0, 0),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const first = await app.inject({ method: "GET", url: "/api/next" });
@@ -393,7 +394,7 @@ describe("createRadioServer", () => {
     expect(second.json().track.id).toBe("netease-search-002");
   });
 
-  it("falls back to mock TTS when real TTS fails for /api/next", async () => {
+  it("falls back to cached TTS when real TTS fails for /api/next", async () => {
     const failingTts = {
       async synthesize() {
         throw new Error("TTS service down");
@@ -401,17 +402,17 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
       ttsAdapter: failingTts
     });
 
     const response = await app.inject({ method: "GET", url: "/api/next" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().tts.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.wav$/);
+    expect(response.json().tts.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.(m4a|wav)$/);
   });
 
-  it("falls back to mock track when search and queue are empty", async () => {
+  it("returns 503 when search and queue are empty", async () => {
     const music = {
       recommend: vi.fn().mockResolvedValue([]),
       search: vi.fn().mockResolvedValue([]),
@@ -424,13 +425,13 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 8, 0, 0),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
 
-    expect(next.statusCode).toBe(200);
-    expect(next.json().track.source).toBe("mock");
+    expect(next.statusCode).toBe(503);
+    expect(next.json().error).toContain("No track available");
     expect(music.search).toHaveBeenCalledWith("warm morning indie");
     expect(music.resolve).not.toHaveBeenCalled();
   });
@@ -467,13 +468,13 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 21, 30, 0),
-      ttsAdapter: createMockTtsAdapter()
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     await app.inject({ method: "GET", url: "/api/next" });
     const secondNext = await app.inject({ method: "GET", url: "/api/next" });
 
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "ambient pop night", limit: 3 });
+    expect(music.recommend).toHaveBeenCalledWith({ mood: "ambient pop night", limit: 10 });
     expect(secondNext.statusCode).toBe(200);
     expect(secondNext.json().decision.reason).toContain("Night Window");
     expect(secondNext.json().decision.say).toContain("Afterglow Desk");
@@ -481,8 +482,8 @@ describe("createRadioServer", () => {
 
   it("produces rain-aware DJ decision when weather contains rain", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       weatherAdapter: {
         async current() {
           return { summary: "大雨，适合窝在室内", moodHint: "rainy", temperatureC: 18 };
@@ -499,8 +500,13 @@ describe("createRadioServer", () => {
 
   it("produces empty-calendar DJ decision when calendar is empty", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      weatherAdapter: {
+        async current() {
+          return { summary: "晴", moodHint: "clear", temperatureC: 22 };
+        }
+      },
       calendarAdapter: {
         async upcoming() {
           return [];
@@ -517,8 +523,18 @@ describe("createRadioServer", () => {
 
   it("produces no-device DJ decision when no playback devices are available", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      weatherAdapter: {
+        async current() {
+          return { summary: "晴", moodHint: "clear", temperatureC: 22 };
+        }
+      },
+      calendarAdapter: {
+        async upcoming() {
+          return [{ title: "专注工作", start: "09:00", end: "12:00" }];
+        }
+      },
       deviceAdapter: {
         async list() {
           return [];
@@ -535,10 +551,10 @@ describe("createRadioServer", () => {
 
   it("returns a complete radio episode from /api/episode/next", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -546,12 +562,12 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode).toBeDefined();
-    expect(body.episode.track.id).toBe("mock-track-001");
+    expect(body.episode.track.id).toBe("fake-track-001");
     expect(body.episode.story.text).toBeTruthy();
     expect(body.episode.story.audioUrl).toBeTruthy();
-    expect(body.episode.story.type).toBe("mood-reading");
+    expect(body.episode.story.type).toBe("background");
     expect(body.episode.sources).toHaveLength(1);
-    expect(body.episode.sources[0].kind).toBe("mock");
+    expect(body.episode.sources[0].kind).toBe("metadata");
     expect(body.episode.playback.crossfadeStartOffsetMs).toBeGreaterThanOrEqual(0);
     expect(body.episode.playback.musicStartVolume).toBeGreaterThanOrEqual(0);
     expect(body.episode.playback.musicStartVolume).toBeLessThanOrEqual(1);
@@ -573,8 +589,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: metadataStorySource
     });
@@ -603,11 +619,11 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: lyricStorySource,
       webResearchAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: { async gather() { return []; } }
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -615,7 +631,7 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("lyric-theme");
-    expect(body.episode.sources).toHaveLength(2);
+    expect(body.episode.sources).toHaveLength(1);
     expect(body.episode.sources[0].kind).toBe("lyric");
   });
 
@@ -634,8 +650,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: lowConfidenceMetadataSource
     });
@@ -675,8 +691,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: lyricSource,
       webResearchAdapter: { async gather() { return []; } },
       publicMetadataAdapter: metadataSource
@@ -706,8 +722,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: { async gather() { return []; } },
       webResearchAdapter: webSource
@@ -739,8 +755,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: { async gather() { return []; } },
       webResearchAdapter: lowConfidenceWebSource
@@ -784,8 +800,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: metadataSource,
       webResearchAdapter: webSource
@@ -807,8 +823,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
       publicMetadataAdapter: failingMetadataSource
     });
@@ -818,10 +834,10 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("mood-reading");
-    expect(body.episode.sources[0].kind).toBe("mock");
+    expect(body.episode.sources).toHaveLength(0);
   });
 
-  it("falls back to mock TTS when real TTS fails for episode", async () => {
+  it("falls back to cached TTS when real TTS fails for episode", async () => {
     const failingTts = {
       async synthesize() {
         throw new Error("TTS service down");
@@ -829,17 +845,17 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
       ttsAdapter: failingTts,
-      webResearchAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      webResearchAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    expect(body.episode.story.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.wav$/);
+    expect(body.episode.story.audioUrl).toMatch(/^\/cache\/tts\/[a-f0-9]{16}\.(m4a|wav)$/);
     expect(body.episode.fallbackReason).toContain("TTS");
   });
 
@@ -857,11 +873,11 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: lyricStorySource,
       webResearchAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: { async gather() { return []; } }
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -869,7 +885,7 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("lyric-theme");
-    expect(body.episode.sources).toHaveLength(2);
+    expect(body.episode.sources).toHaveLength(1);
     expect(body.episode.sources[0].kind).toBe("lyric");
   });
 
@@ -881,11 +897,11 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: emptyStorySource,
-      webResearchAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      webResearchAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: { async gather() { return []; } }
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -893,7 +909,7 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("mood-reading");
-    expect(body.episode.sources[0].kind).toBe("mock");
+    expect(body.episode.sources).toHaveLength(0);
   });
 
   it("returns mood-reading story type when story source throws", async () => {
@@ -904,11 +920,11 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: failingStorySource,
-      webResearchAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      webResearchAdapter: { async gather() { return []; } },
+      publicMetadataAdapter: { async gather() { return []; } }
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -916,14 +932,14 @@ describe("createRadioServer", () => {
 
     const body = response.json();
     expect(body.episode.story.type).toBe("mood-reading");
-    expect(body.episode.sources[0].kind).toBe("mock");
+    expect(body.episode.sources).toHaveLength(0);
   });
   it("reports story source provider status in health", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter()
+      publicMetadataAdapter: createFakeStorySourceAdapter()
     });
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
@@ -939,10 +955,10 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       storySourceAdapter: { async gather() { return []; } },
-      publicMetadataAdapter: createMockStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
       webResearchAdapter
     });
 
@@ -951,15 +967,15 @@ describe("createRadioServer", () => {
     expect(health.json().adapters.webResearch).toBe("ready");
   });
 
-  it("reports calendar adapter status as mock when no real adapter is provided", async () => {
+  it("reports calendar adapter status as disabled when no real adapter is provided", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
     expect(health.statusCode).toBe(200);
-    expect(health.json().adapters.calendar).toBe("mock");
+    expect(health.json().adapters.calendar).toBe("disabled");
   });
 
   it("reports calendar adapter status as ready when a real adapter is injected", async () => {
@@ -970,8 +986,8 @@ describe("createRadioServer", () => {
     };
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       calendarAdapter: mockCalendarAdapter
     });
 
@@ -982,8 +998,8 @@ describe("createRadioServer", () => {
 
   it("uses injected user preferences for DJ decisions", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       userPreferences: {
         taste: "Custom taste: no vocals, ambient only.",
         routines: "Custom routines: night owl schedule.",
@@ -1006,8 +1022,8 @@ describe("createRadioServer", () => {
 
   it("exposes loaded user preferences via /api/taste", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       userPreferences: {
         taste: "Test taste content",
         routines: "Test routines content",
@@ -1033,8 +1049,8 @@ describe("createRadioServer", () => {
 
   it("returns loaded playlists from /api/taste", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       userPreferences: {
         taste: "Test taste",
         routines: "Test routines",
@@ -1097,7 +1113,7 @@ describe("createRadioServer", () => {
         status: "ready"
       },
       now: () => new Date(2026, 3, 30, 8, 0, 0),
-      ttsAdapter: createMockTtsAdapter(),
+      ttsAdapter: createFakeTtsAdapter(),
       userPreferences: {
         taste: "Test taste",
         routines: "Test routines",
@@ -1127,9 +1143,9 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const preparedEpisode = {
-      track: { id: "prepared-001", title: "Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-001.mp3" },
+      track: { id: "prepared-001", title: "Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/prepared-001.mp3" },
       story: { text: "Prepared story.", audioUrl: "http://localhost/tts/prepared.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -1141,8 +1157,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1165,15 +1181,15 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const recentEpisode = {
-      track: { id: "prepared-recent", title: "Prepared Recent", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-recent.mp3" },
+      track: { id: "prepared-recent", title: "Prepared Recent", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/prepared-recent.mp3" },
       story: { text: "Recent prepared story.", audioUrl: "http://localhost/tts/recent.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     const freshEpisode = {
-      track: { id: "prepared-fresh", title: "Prepared Fresh", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-fresh.mp3" },
+      track: { id: "prepared-fresh", title: "Prepared Fresh", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/prepared-fresh.mp3" },
       story: { text: "Fresh prepared story.", audioUrl: "http://localhost/tts/fresh.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.recordPlayedTrack({
@@ -1182,7 +1198,7 @@ describe("createRadioServer", () => {
       title: "Prepared Recent",
       artist: "Prepared Artist",
       album: null,
-      source: "mock",
+      source: "local",
       playedAt: "2026-04-30T03:30:00.000Z"
     });
     await repo.savePreparedEpisode({
@@ -1201,8 +1217,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 12, 30, 0)
     });
@@ -1217,11 +1233,11 @@ describe("createRadioServer", () => {
 
   it("falls back to live generation when no prepared episode exists for the current block", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
-      storySourceAdapter: createMockStorySourceAdapter(),
-      publicMetadataAdapter: createMockStorySourceAdapter(),
-      webResearchAdapter: createMockStorySourceAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      storySourceAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
+      webResearchAdapter: createFakeStorySourceAdapter(),
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
 
@@ -1229,7 +1245,7 @@ describe("createRadioServer", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    expect(body.episode.track.id).toBe("mock-track-001");
+    expect(body.episode.track.id).toBe("fake-track-001");
     expect(body.source).toBe("live");
   });
 
@@ -1241,9 +1257,9 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const preparedEpisode = {
-      track: { id: "prepared-002", title: "Prepared Track 2", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/prepared-002.mp3" },
+      track: { id: "prepared-002", title: "Prepared Track 2", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/prepared-002.mp3" },
       story: { text: "Prepared story 2.", audioUrl: "http://localhost/tts/prepared2.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -1255,8 +1271,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1267,7 +1283,7 @@ describe("createRadioServer", () => {
 
     const second = await app.inject({ method: "GET", url: "/api/episode/next" });
     expect(second.statusCode).toBe(200);
-    expect(second.json().episode.track.id).toBe("mock-track-001");
+    expect(second.json().episode.track.id).toBe("fake-track-001");
   });
 
   it("chat next-track intent does not consume prepared episodes", async () => {
@@ -1278,9 +1294,9 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const preparedEpisode = {
-      track: { id: "chat-prepared-001", title: "Chat Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/chat-prepared-001.mp3" },
+      track: { id: "chat-prepared-001", title: "Chat Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/chat-prepared-001.mp3" },
       story: { text: "Chat prepared story.", audioUrl: "http://localhost/tts/chat-prepared.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -1292,8 +1308,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1328,9 +1344,9 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const preparedEpisode = {
-      track: { id: "story-prepared-001", title: "Story Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/story-prepared-001.mp3" },
+      track: { id: "story-prepared-001", title: "Story Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/story-prepared-001.mp3" },
       story: { text: "Story prepared story.", audioUrl: "http://localhost/tts/story-prepared.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -1342,8 +1358,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1375,9 +1391,9 @@ describe("createRadioServer", () => {
 
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
     const preparedEpisode = {
-      track: { id: "default-prepared-001", title: "Default Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: "http://localhost/audio/default-prepared-001.mp3" },
+      track: { id: "default-prepared-001", title: "Default Prepared Track", artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: "http://localhost/audio/default-prepared-001.mp3" },
       story: { text: "Default prepared story.", audioUrl: "http://localhost/tts/default-prepared.wav", type: "mood-reading" as const },
-      sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+      sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
       playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
     };
     await repo.savePreparedEpisode({
@@ -1389,8 +1405,8 @@ describe("createRadioServer", () => {
     });
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1429,9 +1445,9 @@ describe("createRadioServer", () => {
         blockAt: "07:00",
         status: "ready",
         episodeJson: JSON.stringify({
-          track: { id: `return-prepared-${i}`, title: `Return Prepared ${i}`, artist: "Prepared Artist", durationMs: 180000, source: "mock" as const, audioUrl: `http://localhost/audio/return-prepared-${i}.mp3` },
+          track: { id: `return-prepared-${i}`, title: `Return Prepared ${i}`, artist: "Prepared Artist", durationMs: 180000, source: "local" as const, audioUrl: `http://localhost/audio/return-prepared-${i}.mp3` },
           story: { text: `Return story ${i}.`, audioUrl: `http://localhost/tts/return-${i}.wav`, type: "mood-reading" as const },
-          sources: [{ kind: "mock" as const, title: "Mock", content: "Mock source" }],
+          sources: [{ kind: "metadata" as const, title: "Mock", content: "Mock source" }],
           playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 }
         }),
         audioDownloaded: true
@@ -1439,8 +1455,8 @@ describe("createRadioServer", () => {
     }
 
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir,
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
@@ -1482,8 +1498,8 @@ describe("Liked songs diagnostics endpoint", () => {
 
   it("returns diagnostics with loaded=false when file is missing", async () => {
     diagApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir: tempDir
     });
 
@@ -1515,8 +1531,8 @@ describe("Liked songs diagnostics endpoint", () => {
     );
 
     diagApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir: tempDir
     });
 
@@ -1543,8 +1559,8 @@ describe("Liked songs diagnostics endpoint", () => {
     writeFileSync(join(userDir, "netease-liked-songs.raw.json"), JSON.stringify(songs), "utf-8");
 
     diagApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       baseDir: tempDir
     });
 
@@ -1573,8 +1589,8 @@ describe("TTS cache route", () => {
     writeFileSync(`${tempDir}/abc123.mp3`, Buffer.from("fake audio"));
 
     ttsApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       ttsCacheDir: tempDir
     });
 
@@ -1584,13 +1600,28 @@ describe("TTS cache route", () => {
     expect(response.headers["content-type"]).toContain("audio/mpeg");
   });
 
+  it("serves macOS say m4a fallback files", async () => {
+    writeFileSync(`${tempDir}/abc123.m4a`, Buffer.from("fake audio"));
+
+    ttsApp = await createTestRadioServer({
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      ttsCacheDir: tempDir
+    });
+
+    const response = await ttsApp.inject({ method: "GET", url: "/cache/tts/abc123.m4a" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("audio/mp4");
+  });
+
   it("rejects sibling directory prefix bypass", async () => {
     const siblingDir = mkdtempSync(join(tmpdir(), "tts-cache-sibling-"));
     writeFileSync(`${siblingDir}/secret.mp3`, Buffer.from("secret audio"));
 
     ttsApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       ttsCacheDir: tempDir
     });
 
@@ -1606,8 +1637,8 @@ describe("TTS cache route", () => {
     writeFileSync(`${outsideDir}/outside.mp3`, Buffer.from("outside audio"));
 
     ttsApp = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       ttsCacheDir: tempDir
     });
 
@@ -1622,8 +1653,8 @@ describe("TTS cache route", () => {
 describe("ProgramBrief intent parsing", () => {
   it("creates a theme-show brief when user says '帮我做一期 Bee Gees 主题节目'", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const response = await app.inject({
@@ -1641,17 +1672,17 @@ describe("ProgramBrief intent parsing", () => {
     expect(body.brief.status).toBe("draft");
   });
 
-  it("creates a block-theme brief when user says '今晚想听 Bee Gees'", async () => {
+  it("creates a block-theme brief when user says '今晚安排一期 Bee Gees'", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
       now: () => new Date(2026, 4, 12, 10, 0, 0)
     });
 
     const response = await app.inject({
       method: "POST",
       url: "/api/chat",
-      payload: { message: "今晚想听 Bee Gees" }
+      payload: { message: "今晚安排一期 Bee Gees" }
     });
 
     expect(response.statusCode).toBe(200);
@@ -1664,8 +1695,8 @@ describe("ProgramBrief intent parsing", () => {
 
   it("does not create brief for weak expression like '我喜欢 Bee Gees'", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const response = await app.inject({
@@ -1681,8 +1712,8 @@ describe("ProgramBrief intent parsing", () => {
 
   it("does not create brief for casual chat", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const response = await app.inject({
@@ -1698,8 +1729,8 @@ describe("ProgramBrief intent parsing", () => {
 
   it("lists briefs via GET /api/briefs", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const createResponse = await app.inject({
@@ -1720,8 +1751,8 @@ describe("ProgramBrief intent parsing", () => {
 
   it("gets brief by id via GET /api/briefs/:id", async () => {
     app = await createTestRadioServer({
-      musicAdapterResult: createMockMusicAdapterResult(),
-      ttsAdapter: createMockTtsAdapter()
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter()
     });
 
     const createResponse = await app.inject({
@@ -1743,8 +1774,8 @@ describe("ProgramBrief intent parsing", () => {
   describe("ShowPlan API", () => {
     it("lists all plans via GET /api/plans", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const response = await app.inject({ method: "GET", url: "/api/plans" });
@@ -1756,8 +1787,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("gets plans by briefId via GET /api/plans/:briefId", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -1780,8 +1811,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("gets active plan by briefId via GET /api/plans/:briefId/active", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -1806,8 +1837,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("returns 404 when no active plan exists for briefId", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const response = await app.inject({ method: "GET", url: "/api/plans/non-existent-brief-id/active" });
@@ -1816,8 +1847,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("integration: brief creation → plan generation → plan retrieval", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -1850,8 +1881,8 @@ describe("ProgramBrief intent parsing", () => {
   describe("ShowPlan constraints & versioning", () => {
     it("adds constraints to existing plan and creates new version", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -1892,8 +1923,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("returns 404 when plan does not exist for add-constraints", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const response = await app.inject({
@@ -1911,8 +1942,8 @@ describe("ProgramBrief intent parsing", () => {
   describe("Theme Story Show: Generate Now & Schedule Tonight", () => {
     it("generates a project and job for generate-now", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       // First create a brief
@@ -1953,8 +1984,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("schedules a show for tonight", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       // First create a brief
@@ -1982,8 +2013,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("returns 404 for generate-now with invalid briefId", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const response = await app.inject({
@@ -1996,8 +2027,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("returns 404 for schedule-tonight with invalid briefId", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const response = await app.inject({
@@ -2010,8 +2041,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("writes prepared episode trace entries to show project on generate-now", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -2041,8 +2072,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("writes trace for scheduled show status changes", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -2071,8 +2102,8 @@ describe("ProgramBrief intent parsing", () => {
 
     it("generate-now 成功后 brief 进入 completed 状态", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter()
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter()
       });
 
       const createResponse = await app.inject({
@@ -2105,10 +2136,10 @@ describe("ProgramBrief intent parsing", () => {
 
     it("POST /api/projects/:id/export returns 404 for non-existent project", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
         storySourceAdapter: { async gather() { return []; } },
-        publicMetadataAdapter: createMockStorySourceAdapter()
+        publicMetadataAdapter: createFakeStorySourceAdapter()
       });
 
       const response = await app.inject({
@@ -2122,10 +2153,10 @@ describe("ProgramBrief intent parsing", () => {
 
     it("GET /api/export/project/:id/download returns 404 for non-existent", async () => {
       app = await createTestRadioServer({
-        musicAdapterResult: createMockMusicAdapterResult(),
-        ttsAdapter: createMockTtsAdapter(),
+        musicAdapterResult: createFakeMusicAdapterResult(),
+        ttsAdapter: createFakeTtsAdapter(),
         storySourceAdapter: { async gather() { return []; } },
-        publicMetadataAdapter: createMockStorySourceAdapter()
+        publicMetadataAdapter: createFakeStorySourceAdapter()
       });
 
       const response = await app.inject({

@@ -43,7 +43,12 @@ export function createNeteaseLyricAdapter(options: CreateNeteaseLyricAdapterOpti
 
   return {
     async gather(track) {
-      const response = (await fetchJson("/lyric", { query: { id: track.id } })) as LyricResponse;
+      let response: LyricResponse;
+      try {
+        response = (await fetchJson("/lyric", { query: { id: track.id } })) as LyricResponse;
+      } catch {
+        return [];
+      }
       const rawLyric = response.lrc?.lyric;
 
       if (!rawLyric || rawLyric.trim().length === 0) {

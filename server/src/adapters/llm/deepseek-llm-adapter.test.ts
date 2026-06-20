@@ -139,7 +139,7 @@ describe("createDeepSeekAdapter", () => {
     vi.restoreAllMocks();
   });
 
-  it("throws when response does not match DjDecision schema", async () => {
+  it("salvages a partial response when say is present (chat replies often omit play/segue)", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ choices: [{ message: { content: '{"say":"hi"}' } }] })
@@ -147,7 +147,23 @@ describe("createDeepSeekAdapter", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const adapter = createDeepSeekAdapter({ apiKey: "test-key" });
-    await expect(adapter.compute(makeFragments())).rejects.toThrow();
+    const decision = await adapter.compute(makeFragments());
+    expect(decision.say).toBe("hi");
+    expect(decision.play.query).toBe("keep current");
+    expect(decision.segue.length).toBeGreaterThan(0);
+
+    vi.restoreAllMocks();
+  });
+
+  it("throws when response has no usable say field", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: '{"foo":"bar"}' } }] })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createDeepSeekAdapter({ apiKey: "test-key" });
+    await expect(adapter.compute(makeFragments())).rejects.toThrow(/schema/);
 
     vi.restoreAllMocks();
   });

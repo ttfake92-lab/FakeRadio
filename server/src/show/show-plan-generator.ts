@@ -1,110 +1,99 @@
 import type { ShowPlan, ProgramBrief, ShowPlanBlock, ShowPlanBlockConstraints } from "@fakeradio/shared";
+import { ShowPlanBlockSchema } from "@fakeradio/shared";
 import { randomUUID } from "node:crypto";
+import type { LlmAdapter } from "../adapters/types.js";
 
 export type ShowPlanGenerator = {
-  generate(brief: ProgramBrief): Promise<ShowPlan>;
+  generate(brief: ProgramBrief, taste?: string): Promise<ShowPlan>;
   generateFromPlan(existingPlan: ShowPlan, brief: ProgramBrief, additionalConstraints: ShowPlanBlockConstraints): Promise<ShowPlan>;
 };
 
-export function createShowPlanGenerator(): ShowPlanGenerator {
-  function generateMockBlocks(topic: string): ShowPlanBlock[] {
-    const baseBlocks: ShowPlanBlock[] = [
-      {
-        role: "opening",
-        title: `开场：${topic} 的声音`,
-        storyGoal: "介绍主题，营造氛围",
-        selectionGoal: "选择一首最具代表性的开场曲",
-        sourceNeeds: [],
-        constraints: {},
-        episodeTargets: []
-      },
-      {
-        role: "origin",
-        title: "起源与背景",
-        storyGoal: "讲述主题的起源故事",
-        selectionGoal: "选择体现早期风格的曲目",
-        sourceNeeds: [
-          { kind: "artist-bio", description: "艺人的早期背景" }
-        ],
-        constraints: {},
-        episodeTargets: []
-      },
-      {
-        role: "signature-era",
-        title: "标志性时代",
-        storyGoal: "展示最辉煌的时期",
-        selectionGoal: "选择多首经典热门曲目",
-        sourceNeeds: [
-          { kind: "era-context", description: "时代背景" },
-          { kind: "album-history", description: "经典专辑" }
-        ],
-        constraints: {},
-        episodeTargets: []
-      },
-      {
-        role: "closing",
-        title: "收尾与回味",
-        storyGoal: "留下深刻印象的结尾",
-        selectionGoal: "选择一首余音绕梁的收尾曲",
-        sourceNeeds: [],
-        constraints: {},
-        episodeTargets: []
-      }
-    ];
+const BLOCK_GENERATION_SYSTEM_PROMPT = `你是一个专业的电台节目编排师。用户会给你一个节目主题和类型，你需要设计一个有叙事弧线的节目结构。
 
-    const optionalBlocks: ShowPlanBlock[] = [
-      {
-        role: "turning-point",
-        title: "转折点",
-        storyGoal: "讲述风格转变的关键节点",
-        selectionGoal: "选择体现风格转变的曲目",
-        sourceNeeds: [
-          { kind: "relationship-story", description: "风格转变的背景" }
-        ],
-        constraints: {},
-        episodeTargets: []
-      },
-      {
-        role: "influence",
-        title: "影响与传承",
-        storyGoal: "展示对后世的影响",
-        selectionGoal: "选择受其影响的相关曲目",
-        sourceNeeds: [
-          { kind: "influence-link", description: "影响关系" }
-        ],
-        constraints: {},
-        episodeTargets: []
-      },
-      {
-        role: "relationship",
-        title: "合作与关系",
-        storyGoal: "讲述与其他艺人的合作",
-        selectionGoal: "选择合作曲目",
-        sourceNeeds: [
-          { kind: "relationship-story", description: "合作关系" }
-        ],
-        constraints: {},
-        episodeTargets: []
-      }
-    ];
+可用的节目段落角色（role）：
+- opening: 开场引入
+- origin: 起源与背景
+- turning-point: 转折点
+- signature-era: 标志性时代
+- relationship: 合作与关系
+- influence: 影响与传承
+- contrast: 对比与反差
+- personal-anchor: 个人锚点
+- closing: 收尾与回味
 
-    const shuffledOptional = [...optionalBlocks].sort(() => Math.random() - 0.5);
-    const extraCount = Math.floor(Math.random() * 5); // 0-4 extra blocks
+你必须返回一个 JSON 对象，格式如下：
+{
+  "blocks": [
+    {
+      "role": "opening",
+      "title": "段落标题",
+      "storyGoal": "这段要讲什么故事",
+      "selectionGoal": "选什么样的音乐",
+      "sourceNeeds": [{"kind": "artist-bio", "description": "需要什么资料"}],
+      "constraints": {"moodHint": "氛围关键词"},
+      "episodeTargets": []
+    }
+  ],
+  "totalDurationMinutes": 60
+}
 
-    const blocks = [
-      baseBlocks[0],
-      ...shuffledOptional.slice(0, extraCount),
-      ...baseBlocks.slice(1, 3),
-      baseBlocks[3]
-    ].filter((b): b is ShowPlanBlock => b !== undefined);
+要求：
+- blocks 数量 4-8 个，根据主题复杂度决定
+- 第一个 block 必须是 opening，最后一个必须是 closing
+- 每个 block 的 title 要具体、有画面感
+- storyGoal 和 selectionGoal 要具体可执行
+- sourceNeeds 的 kind 只能是：artist-bio, album-history, song-meaning, era-context, relationship-story, influence-link, cover-version, personal-memory
+- 如果用户给了品味偏好，在 constraints.moodHint 中体现`;
 
-    return blocks.slice(0, 8); // Ensure max 8 blocks
+const SHOW_PLAN_BLOCKS_SCHEMA_DESCRIPTION = `ShowPlanBlock 的 JSON schema：
+{
+  "role": "opening|origin|turning-point|signature-era|relationship|influence|contrast|personal-anchor|closing",
+  "title": "string",
+  "storyGoal": "string",
+  "selectionGoal": "string",
+  "sourceNeeds": [{"kind": "artist-bio|album-history|song-meaning|era-context|relationship-story|influence-link|cover-version|personal-memory", "description": "string"}],
+  "constraints": {"preferEra": "string(optional)", "avoidExplicit": "boolean(optional)", "moodHint": "string(optional)"},
+  "episodeTargets": [{"role": "opening-music|closing-music|bridge|solo(optional)", "durationMinutes": "number(optional)"}]
+}`;
+
+function buildUserPrompt(brief: ProgramBrief, taste?: string): string {
+  const parts: string[] = [];
+  parts.push(`节目类型：${brief.type === "theme-show" ? "主题节目" : brief.type === "block-theme" ? "时段主题" : "日常节目"}`);
+  if (brief.topic) parts.push(`主题：${brief.topic}`);
+  if (brief.constraints?.durationMinutes) parts.push(`时长：${brief.constraints.durationMinutes} 分钟`);
+  if (brief.constraints?.moodHint) parts.push(`氛围偏好：${brief.constraints.moodHint}`);
+  if (brief.constraints?.includeEra) parts.push(`偏好年代：${brief.constraints.includeEra}`);
+  if (brief.constraints?.avoidExplicit) parts.push(`避免露骨内容`);
+  if (taste) parts.push(`\n用户品味描述：\n${taste}`);
+  return parts.join("\n");
+}
+
+export function createShowPlanGenerator(llm?: LlmAdapter): ShowPlanGenerator {
+  async function generateWithLlm(brief: ProgramBrief, taste?: string): Promise<ShowPlanBlock[]> {
+    if (!llm) throw new Error("No LLM adapter available");
+
+    const userPrompt = buildUserPrompt(brief, taste);
+    const result = await llm.computeJson<{ blocks: unknown[] }>(
+      BLOCK_GENERATION_SYSTEM_PROMPT,
+      userPrompt
+    );
+
+    if (!result || !Array.isArray(result.blocks) || result.blocks.length === 0) {
+      throw new Error("LLM returned invalid show plan structure");
+    }
+
+    // Validate each block with Zod, fail fast if invalid
+    const validatedBlocks: ShowPlanBlock[] = [];
+    for (const block of result.blocks) {
+      validatedBlocks.push(ShowPlanBlockSchema.parse(block));
+    }
+    return validatedBlocks;
   }
 
   return {
-    async generate(brief: ProgramBrief): Promise<ShowPlan> {
+    async generate(brief: ProgramBrief, taste?: string): Promise<ShowPlan> {
       const now = new Date().toISOString();
-      const blocks = generateMockBlocks(brief.topic || "Theme");
+      const blocks = await generateWithLlm(brief, taste);
 
       return {
         id: `plan-${randomUUID()}`,
@@ -113,7 +102,7 @@ export function createShowPlanGenerator(): ShowPlanGenerator {
         active: true,
         briefSnapshot: brief,
         blocks,
-        totalDurationMinutes: 60,
+        totalDurationMinutes: brief.constraints?.durationMinutes ?? 60,
         createdAt: now,
         updatedAt: now
       };

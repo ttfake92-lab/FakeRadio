@@ -1,6 +1,6 @@
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react";
 import { ShowLibrary } from "./show-library";
 import * as apiClient from "../../lib/api-client";
 
@@ -10,6 +10,7 @@ const mockDeleteProject = apiClient.deleteProject as ReturnType<typeof vi.fn>;
 const mockDeleteProjectTrace = apiClient.deleteProjectTrace as ReturnType<typeof vi.fn>;
 const mockGetProjectExportFiles = apiClient.getProjectExportFiles as ReturnType<typeof vi.fn>;
 const mockDownloadProjectFile = apiClient.downloadProjectFile as ReturnType<typeof vi.fn>;
+const mockExportProject = apiClient.exportProject as ReturnType<typeof vi.fn>;
 
 const mockProjects = [
   {
@@ -46,6 +47,11 @@ describe("ShowLibrary 历史节目库", () => {
     mockDeleteProjectTrace.mockResolvedValue({ success: true });
     mockGetProjectExportFiles.mockResolvedValue({ files: ["show-plan.json", "show.mp3"] });
     mockDownloadProjectFile.mockResolvedValue(new Blob(["test"], { type: "application/json" }));
+    mockExportProject.mockResolvedValue({ project: mockProjects[0], files: ["show-plan.json", "show.mp3"] });
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("不打开面板时不显示内容", () => {
@@ -75,7 +81,7 @@ describe("ShowLibrary 历史节目库", () => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
 
-    const deleteButtons = screen.getAllByText("删除");
+    const deleteButtons = screen.getAllByRole("button", { name: "DEL" });
     fireEvent.click(deleteButtons[0]!);
 
     await waitFor(() => {
@@ -91,7 +97,7 @@ describe("ShowLibrary 历史节目库", () => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
 
-    const deleteButtons = screen.getAllByText("删除");
+    const deleteButtons = screen.getAllByRole("button", { name: "DEL" });
     fireEvent.click(deleteButtons[0]!);
 
     await waitFor(() => {
@@ -117,7 +123,7 @@ describe("ShowLibrary 历史节目库", () => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
 
-    const deleteButtons = screen.getAllByText("删除");
+    const deleteButtons = screen.getAllByRole("button", { name: "DEL" });
     fireEvent.click(deleteButtons[0]!);
 
     await waitFor(() => {
@@ -127,9 +133,11 @@ describe("ShowLibrary 历史节目库", () => {
     const cancelButton = screen.getByText("取消");
     fireEvent.click(cancelButton);
 
-    await new Promise((r) => setTimeout(r, 50));
+    vi.useFakeTimers();
+    await act(async () => { vi.advanceTimersByTime(100); });
     expect(mockDeleteProject).not.toHaveBeenCalled();
     expect(handleRefresh).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("点击删除 trace 时显示确认对话框", async () => {
@@ -139,7 +147,7 @@ describe("ShowLibrary 历史节目库", () => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
 
-    const deleteTraceButtons = screen.getAllByText("删 Trace");
+    const deleteTraceButtons = screen.getAllByRole("button", { name: "TRACE" });
     fireEvent.click(deleteTraceButtons[0]!);
 
     await waitFor(() => {
@@ -155,7 +163,7 @@ describe("ShowLibrary 历史节目库", () => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
 
-    const deleteTraceButtons = screen.getAllByText("删 Trace");
+    const deleteTraceButtons = screen.getAllByRole("button", { name: "TRACE" });
     fireEvent.click(deleteTraceButtons[0]!);
 
     await waitFor(() => {
@@ -206,22 +214,22 @@ describe("ShowLibrary 历史节目库", () => {
     const { rerender } = render(<ShowLibrary isExpanded={false} isOpen={true} projects={mockProjects} onToggleExpand={handleToggleExpand} onClose={() => {}} onRefresh={() => {}} />);
     
     await waitFor(() => {
-      expect(screen.getByText("▶")).toBeInTheDocument();
+      expect(screen.getByText(">")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText("▶"));
+    fireEvent.click(screen.getByText(">"));
     expect(handleToggleExpand).toHaveBeenCalledTimes(1);
 
     rerender(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={handleToggleExpand} onClose={() => {}} onRefresh={() => {}} />);
-    expect(screen.getByText("▼")).toBeInTheDocument();
+    expect(screen.getByText("V")).toBeInTheDocument();
   });
 
   it("项目状态显示正确的标签", async () => {
     render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
     
     await waitFor(() => {
-      expect(screen.getByText("已完成")).toBeInTheDocument();
-      expect(screen.getByText("已导出")).toBeInTheDocument();
+      expect(screen.getAllByText("READY").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("DONE").length).toBeGreaterThan(0);
     });
   });
 
@@ -229,10 +237,10 @@ describe("ShowLibrary 历史节目库", () => {
     render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
     
     await waitFor(() => {
-      expect(screen.getByText("📋 有 Plan")).toBeInTheDocument();
-      expect(screen.getByText("📝 有 Trace")).toBeInTheDocument();
-      expect(screen.getByText("📝 有 Notes")).toBeInTheDocument();
-      expect(screen.getByText("🎵 有 Audio")).toBeInTheDocument();
+      expect(screen.getAllByText("PLAN").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("TRACE").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("NOTES").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("AUDIO").length).toBeGreaterThan(0);
     });
   });
 });

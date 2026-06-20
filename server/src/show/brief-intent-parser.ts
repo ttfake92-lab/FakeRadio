@@ -1,4 +1,5 @@
 import type { ProgramBrief, ProgramBriefType, ProgramBriefScope, ProgramBriefPriority } from "@fakeradio/shared";
+import type { LlmAdapter } from "../adapters/types.js";
 
 export type ParsedBriefIntent = {
   isBriefIntent: true;
@@ -8,6 +9,7 @@ export type ParsedBriefIntent = {
   targetBlockAt?: string;
 } | { isBriefIntent: false };
 
+// Fast regex patterns — zero latency for explicit requests
 const THEME_SHOW_PATTERNS = [
   /帮我?做一期(.+?)主题节目/,
   /做一期关于(.+?)的节目/,
@@ -17,16 +19,35 @@ const THEME_SHOW_PATTERNS = [
 ];
 
 const BLOCK_THEME_PATTERNS = [
-  /今晚想听(.+)/,
-  /今晚听(.+)/,
-  /晚上想听(.+)/,
-  /今晚播放(.+)/,
-  /今晚放(.+)/
+  /今晚安排一期(.+)/,
+  /今晚做一期(.+)/,
+  /晚上安排一期(.+)/,
+  /晚上做一期(.+)/
 ];
+
+const INTENT_DETECTION_SYSTEM_PROMPT = `你是一个电台节目意图识别器。判断用户的消息是否隐含着"想做一期节目"的意图。
+
+返回 JSON：
+{
+  "isBriefIntent": true/false,
+  "type": "theme-show" 或 "block-theme",
+  "topic": "节目主题（如果有的话）",
+  "scope": "full-show" 或 "block"
+}
+
+判断规则：
+- 如果用户明确说要"做节目"、"策划一期"、"制作一期"、"帮我安排一期"等 → isBriefIntent: true
+- 如果用户只是描述音乐偏好或点歌，如"最近在听很多后摇"、"想听点爵士"、"来点 City Pop" → isBriefIntent: false
+- 如果用户说"今晚安排一期xxx"、"今晚做一期xxx" → isBriefIntent: true, type: "block-theme"
+- 如果用户只是日常聊天、问天气、说感受 → isBriefIntent: false
+- 不确定时 → isBriefIntent: false
+
+只返回 JSON，不要其他文字。`;
 
 export function parseBriefIntent(message: string, now: Date): ParsedBriefIntent {
   const trimmed = message.trim();
 
+  // Fast path: regex matching
   for (const pattern of THEME_SHOW_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match && match[1]) {
@@ -57,6 +78,52 @@ export function parseBriefIntent(message: string, now: Date): ParsedBriefIntent 
   }
 
   return { isBriefIntent: false };
+}
+
+/**
+ * LLM-powered intent detection — called when regex doesn't match.
+ * More expensive (1-3s) but catches natural language like "最近在听很多后摇".
+ */
+export async function parseBriefIntentWithLlm(
+  message: string,
+  now: Date,
+  llm: LlmAdapter
+): Promise<ParsedBriefIntent> {
+  try {
+    const result = await llm.computeJson<{
+      isBriefIntent: boolean;
+      type?: string;
+      topic?: string;
+      scope?: string;
+    }>(INTENT_DETECTION_SYSTEM_PROMPT, message);
+
+    if (!result.isBriefIntent || !result.topic) {
+      return { isBriefIntent: false };
+    }
+
+    const type: ProgramBriefType =
+      result.type === "block-theme" ? "block-theme" : "theme-show";
+    const scope: ProgramBriefScope =
+      type === "block-theme" ? "block" : "full-show";
+
+    const intent: ParsedBriefIntent = {
+      isBriefIntent: true,
+      type,
+      topic: result.topic,
+      scope
+    };
+
+    if (type === "block-theme") {
+      const tonight = new Date(now);
+      tonight.setHours(20, 0, 0, 0);
+      intent.targetBlockAt = tonight.toISOString();
+    }
+
+    return intent;
+  } catch {
+    // LLM failed — treat as no intent
+    return { isBriefIntent: false };
+  }
 }
 
 export function createBriefFromIntent(

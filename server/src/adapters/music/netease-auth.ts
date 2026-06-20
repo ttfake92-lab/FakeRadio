@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { NeteaseFetchJson } from "./netease-http-client.js";
 
@@ -30,6 +30,7 @@ export type NeteaseQrLoginCheck = {
 };
 
 export type NeteaseLoginStatus = {
+  status: "logged-in" | "cookie-invalid" | "logged-out" | "service-error";
   loggedIn: boolean;
   cookieStored: boolean;
   nickname?: string;
@@ -89,6 +90,7 @@ export function createNeteaseCookieStore(cookieFile: string): NeteaseCookieStore
     async save(cookie) {
       await mkdir(dirname(cookieFile), { recursive: true });
       await writeFile(cookieFile, cookie.trim(), "utf-8");
+      await chmod(cookieFile, 0o600);
     },
 
     async clear() {
@@ -181,7 +183,12 @@ export function createNeteaseAuthService(input: {
     async getStatus(): Promise<NeteaseLoginStatus> {
       const cookie = await cookieStore.read();
       if (cookie === null) {
-        return { loggedIn: false, cookieStored: false, message: "尚未保存网易云登录 cookie" };
+        return {
+          status: "logged-out",
+          loggedIn: false,
+          cookieStored: false,
+          message: "尚未保存网易云登录 cookie"
+        };
       }
 
       try {
@@ -193,15 +200,24 @@ export function createNeteaseAuthService(input: {
           }
         })) as NeteaseLoginStatusResponse;
         const profile = response.data?.profile ?? response.profile ?? null;
+        if (profile === null) {
+          return {
+            status: "cookie-invalid",
+            loggedIn: false,
+            cookieStored: true,
+            message: "已保存网易云 cookie，但当前登录状态无效，请重新注入 cookie。"
+          };
+        }
         return {
-          loggedIn: profile !== null || cookie !== null,
+          status: "logged-in",
+          loggedIn: true,
           cookieStored: true,
           ...(profile?.nickname ? { nickname: profile.nickname } : {}),
-          ...(typeof profile?.userId === "number" ? { userId: profile.userId } : {}),
-          ...(profile === null ? { message: "已保存网易云 cookie，后续音乐请求会带登录态。" } : {})
+          ...(typeof profile?.userId === "number" ? { userId: profile.userId } : {})
         };
       } catch (error) {
         return {
+          status: "service-error",
           loggedIn: false,
           cookieStored: true,
           message: error instanceof Error ? error.message : "网易云登录状态检查失败"
@@ -276,7 +292,7 @@ export function createNeteaseAuthService(input: {
 
     async logout() {
       await cookieStore.clear();
-      return { loggedIn: false, cookieStored: false };
+      return { status: "logged-out" as const, loggedIn: false, cookieStored: false };
     }
   };
 }

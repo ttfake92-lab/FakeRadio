@@ -1,0 +1,3463 @@
+'use client';
+
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import type { NowResponse, Track, FavoriteTrack, ProgramBrief, ShowPlan, ShowJob, ShowProject, NeteaseLoginStatus, TasteResponse } from '@fakeradio/shared';
+import {
+  getNow,
+  getTodayPlan, getShowProjects, generateNow, exportProject, getProjectExportFiles, downloadProjectFile,
+  getFavorites, addFavorite, removeFavorite,
+  getBriefs, getShowPlans, getShowJobs,
+  getNeteaseLoginStatus, createNeteaseQrLogin, checkNeteaseQrLogin, submitNeteaseCookie,
+  getTaste, getPrewarmStatus,
+  exportTodayShow, getExportTodayStatus, buildApiUrl,
+} from '../../lib/api-client';
+import type { TodayExportTask } from '../../lib/api-client';
+import { useAudioEngine } from '../player/use-audio-engine';
+import { usePlaybackState } from '../player/use-playback-state';
+import { useStreamConnection } from '../player/use-stream-connection';
+import type { AgentMessage } from '../player/use-stream-connection';
+import { useChatSSE } from '../player/use-chat-sse';
+import { QUICK_PROMPTS } from '../player/skin-config';
+import { ProductionBoard } from '../show/production-board';
+import { SettingsPanel } from '../show/settings-panel';
+import { ShowLibrary } from '../show/show-library';
+
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
+type Theme = 'bone' | 'graphite';
+
+interface ChatMessage {
+  id: string;
+  from: 'DJ' | 'YOU';
+  text: string;
+  streaming?: boolean;
+  origin?: 'broadcast' | 'chat';
+}
+
+type VisualizerState = {
+  levels: number[];
+  energy: number;
+  reactive: boolean;
+};
+
+type VisualizerGraph = {
+  context: AudioContext;
+  analyser: AnalyserNode;
+  data: Uint8Array<ArrayBuffer>;
+};
+
+const VISUALIZER_BARS = 72;
+const EMPTY_VISUALIZER_LEVELS = Array.from({ length: VISUALIZER_BARS }, () => 0);
+const visualizerGraphs = new WeakMap<HTMLMediaElement, VisualizerGraph>();
+
+function getAudioContextCtor(): typeof AudioContext | null {
+  const win = window as typeof window & { webkitAudioContext?: typeof AudioContext };
+  return window.AudioContext ?? win.webkitAudioContext ?? null;
+}
+
+function getOrCreateVisualizerGraph(audio: HTMLMediaElement): VisualizerGraph | null {
+  const existing = visualizerGraphs.get(audio);
+  if (existing) return existing;
+
+  const AudioContextCtor = getAudioContextCtor();
+  if (!AudioContextCtor) return null;
+
+  try {
+    const context = new AudioContextCtor();
+    const source = context.createMediaElementSource(audio);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.minDecibels = -88;
+    analyser.maxDecibels = -18;
+    analyser.smoothingTimeConstant = 0.78;
+    source.connect(analyser);
+    analyser.connect(context.destination);
+
+    const graph: VisualizerGraph = {
+      context,
+      analyser,
+      data: new Uint8Array(analyser.frequencyBinCount),
+    };
+    visualizerGraphs.set(audio, graph);
+    return graph;
+  } catch {
+    return null;
+  }
+}
+
+function mapFrequencyDataToBars(data: Uint8Array<ArrayBuffer>): { levels: number[]; energy: number } {
+  const usableBins = Math.max(1, Math.floor(data.length * 0.92));
+  let energyTotal = 0;
+  const levels = Array.from({ length: VISUALIZER_BARS }, (_, index) => {
+    const start = Math.floor((index / VISUALIZER_BARS) ** 1.35 * usableBins);
+    const end = Math.max(start + 1, Math.floor(((index + 1) / VISUALIZER_BARS) ** 1.35 * usableBins));
+    let peak = 0;
+    for (let bin = start; bin < Math.min(end, data.length); bin += 1) {
+      peak = Math.max(peak, data[bin] ?? 0);
+    }
+    const normalized = Math.min(1, peak / 255);
+    const shaped = Math.min(1, normalized ** 0.72 * 1.38);
+    energyTotal += shaped;
+    return shaped;
+  });
+  return { levels, energy: energyTotal / VISUALIZER_BARS };
+}
+
+function useAudioReactiveVisualizer(
+  audioRef: React.RefObject<HTMLAudioElement | null>,
+  active: boolean
+): VisualizerState & { resume: () => void } {
+  const [state, setState] = useState<VisualizerState>({
+    levels: EMPTY_VISUALIZER_LEVELS,
+    energy: 0,
+    reactive: false,
+  });
+
+  const resume = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || typeof window === 'undefined') return;
+    const graph = getOrCreateVisualizerGraph(audio);
+    graph?.context.resume().catch(() => {});
+  }, [audioRef]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || typeof window === 'undefined') return;
+
+    const wakeVisualizer = () => {
+      const graph = getOrCreateVisualizerGraph(audio);
+      graph?.context.resume().catch(() => {});
+    };
+
+    audio.addEventListener('play', wakeVisualizer);
+    audio.addEventListener('playing', wakeVisualizer);
+    return () => {
+      audio.removeEventListener('play', wakeVisualizer);
+      audio.removeEventListener('playing', wakeVisualizer);
+    };
+  }, [audioRef]);
+
+  useEffect(() => {
+    if (!active) {
+      setState((current) => current.reactive ? { levels: EMPTY_VISUALIZER_LEVELS, energy: 0, reactive: false } : current);
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio || typeof window === 'undefined') return;
+
+    const graph = getOrCreateVisualizerGraph(audio);
+    if (!graph) return;
+
+    let cancelled = false;
+    let frame = 0;
+    let lastUpdate = 0;
+    graph.context.resume().catch(() => {});
+
+    const tick = (now: number) => {
+      if (cancelled) return;
+      if (now - lastUpdate > 32) {
+        lastUpdate = now;
+        graph.analyser.getByteFrequencyData(graph.data);
+        const next = mapFrequencyDataToBars(graph.data);
+        const audible = !audio.paused && !audio.ended && next.energy > 0.006;
+        setState({
+          levels: audible ? next.levels : EMPTY_VISUALIZER_LEVELS,
+          energy: audible ? next.energy : 0,
+          reactive: audible,
+        });
+      }
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [active, audioRef]);
+
+  return { ...state, resume };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Breakpoint hook
+// ─────────────────────────────────────────────────────────────
+type Breakpoint = 'mobile' | 'tablet' | 'desktop';
+
+function useBreakpoint(): Breakpoint {
+  const [bp, setBp] = useState<Breakpoint>('desktop');
+
+  useEffect(() => {
+    // iPad 竖屏(768) 与 iPhone 一并走 mobile 布局；≥1024（iPad 横屏/桌面）走 desktop。
+    // tablet 区间保留以兼容类型，但不再被选中。
+    const mobile = window.matchMedia('(max-width: 1023px)');
+    const tablet = window.matchMedia('(min-width: 640px) and (max-width: 1023px)');
+    const desktop = window.matchMedia('(min-width: 1024px)');
+
+    const update = () => {
+      if (mobile.matches) setBp('mobile');
+      else if (tablet.matches) setBp('tablet');
+      else setBp('desktop');
+    };
+
+    update();
+    mobile.addEventListener('change', update);
+    tablet.addEventListener('change', update);
+    desktop.addEventListener('change', update);
+    return () => {
+      mobile.removeEventListener('change', update);
+      tablet.removeEventListener('change', update);
+      desktop.removeEventListener('change', update);
+    };
+  }, []);
+
+  return bp;
+}
+
+// ─────────────────────────────────────────────────────────────
+// EditorialRadio — main page
+// ─────────────────────────────────────────────────────────────
+export function EditorialRadio() {
+  const audio = useAudioEngine();
+  const playback = usePlaybackState(audio);
+  const bp = useBreakpoint();
+
+  // Theme
+  const [theme, setTheme] = useState<Theme>('bone');
+  const [themeOverridden, setThemeOverridden] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('fakeradio.theme');
+    if (stored === 'bone' || stored === 'graphite') {
+      setTheme(stored);
+      setThemeOverridden(true);
+    } else {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      setTheme(prefersDark ? 'graphite' : 'bone');
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setThemeOverridden(true);
+    setTheme((t) => {
+      const next = t === 'bone' ? 'graphite' : 'bone';
+      localStorage.setItem('fakeradio.theme', next);
+      return next;
+    });
+  }, []);
+
+  // State
+  const [now, setNow] = useState<NowResponse | null>(null);
+  const [clock, setClock] = useState(new Date());
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputDraft, setInputDraft] = useState('');
+  const [latestChatDjText, setLatestChatDjText] = useState<string | null>(null);
+  const [streamingChatDjText, setStreamingChatDjText] = useState<string | null>(null);
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
+  const chatSSE = useChatSSE();
+  const [activeView, setActiveView] = useState<'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library'>('main');
+
+  // Netease login + taste
+  const [neteaseStatus, setNeteaseStatus] = useState<NeteaseLoginStatus | null>(null);
+  const [showNeteaseLogin, setShowNeteaseLogin] = useState(false);
+  const [taste, setTaste] = useState<TasteResponse | null>(null);
+  const [showTaste, setShowTaste] = useState(false);
+
+  // Production data
+  const [briefs, setBriefs] = useState<ProgramBrief[]>([]);
+  const [activeBriefId, setActiveBriefId] = useState<string | null>(null);
+  const [showPlan, setShowPlan] = useState<ShowPlan | null>(null);
+  const [jobs, setJobs] = useState<ShowJob[]>([]);
+  const [projects, setProjects] = useState<ShowProject[]>([]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const audioTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 编排进度追踪：触发编排后轮询 job 状态，在聊天栏显示进程与 trace
+  const [trackedJob, setTrackedJob] = useState<ShowJob | null>(null);
+  const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopJobTracking = useCallback(() => {
+    if (jobPollRef.current) {
+      clearInterval(jobPollRef.current);
+      jobPollRef.current = null;
+    }
+  }, []);
+
+  const startJobTracking = useCallback((briefId: string) => {
+    stopJobTracking();
+    setTrackedJob(null);
+    let polls = 0;
+    const poll = async () => {
+      polls += 1;
+      // 最多轮询 5 分钟，避免异常情况下无限轮询
+      if (polls > 150) { stopJobTracking(); return; }
+      try {
+        const data = await getShowJobs(briefId);
+        const jobs = data.jobs ?? [];
+        if (jobs.length === 0) return;
+        const latest = [...jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+        if (!latest) return;
+        setTrackedJob(latest);
+        if (latest.status === 'completed' || latest.status === 'failed') {
+          stopJobTracking();
+        }
+      } catch { /* 网络抖动时继续轮询 */ }
+    };
+    poll();
+    jobPollRef.current = setInterval(poll, 2000);
+  }, [stopJobTracking]);
+
+  useEffect(() => stopJobTracking, [stopJobTracking]);
+
+  // Extract data
+  // 单一播放真相：episode 一旦加载，它就是"正在播放"的内容。
+  // 显示（曲目/队列/DJ 文案）一律跟随 episode，避免与后台 now-playing 广播错位。
+  const isEpisodeActive = playback.episodeData !== null;
+  const episodeActiveRef = useRef(isEpisodeActive);
+  episodeActiveRef.current = isEpisodeActive;
+
+  const track = playback.episodeData?.track ?? now?.track ?? null;
+  const queue = isEpisodeActive
+    ? (playback.nextEpisode ? [playback.nextEpisode.track] : [])
+    : (now?.queue ?? []);
+  const baseDjSay = playback.episodeData?.story.text ?? now?.dj?.say ?? '';
+  const djSay = streamingChatDjText ?? latestChatDjText ?? baseDjSay;
+  const isLive = isEpisodeActive
+    ? isPlaying
+    : (now?.playback === 'playing' || isPlaying);
+  const isFavorited = track ? favorites.some((f) => f.trackId === track.id) : false;
+  const activeBrief = briefs.find((b) => b.id === activeBriefId) ?? null;
+  const refreshProjects = useCallback(() => {
+    getShowProjects().then((data) => setProjects(data.projects ?? [])).catch(() => {});
+  }, []);
+  const refreshProductionData = useCallback(async (preferredBriefId?: string | null) => {
+    const [briefsData, projectsData] = await Promise.all([
+      getBriefs().catch(() => ({ briefs: [] })),
+      getShowProjects().catch(() => ({ projects: [] })),
+    ]);
+    const nextBriefs = briefsData.briefs ?? [];
+    setBriefs(nextBriefs);
+    setProjects(projectsData.projects ?? []);
+
+    const nextActiveBriefId =
+      preferredBriefId && nextBriefs.some((brief) => brief.id === preferredBriefId)
+        ? preferredBriefId
+        : activeBriefId && nextBriefs.some((brief) => brief.id === activeBriefId)
+          ? activeBriefId
+          : nextBriefs[0]?.id ?? null;
+
+    setActiveBriefId(nextActiveBriefId);
+    if (!nextActiveBriefId) {
+      setShowPlan(null);
+      setJobs([]);
+      return;
+    }
+
+    const [plansData, jobsData] = await Promise.all([
+      getShowPlans(nextActiveBriefId).catch(() => ({ plans: [] })),
+      getShowJobs(nextActiveBriefId).catch(() => ({ jobs: [] })),
+    ]);
+    const plans = plansData.plans ?? [];
+    setShowPlan(plans.find((plan) => plan.active) ?? plans[0] ?? null);
+    setJobs(jobsData.jobs ?? []);
+  }, [activeBriefId]);
+
+  useEffect(() => {
+    setLatestChatDjText(null);
+    setStreamingChatDjText(null);
+  }, [track?.id, baseDjSay]);
+
+  // DJ typewriter
+  const djLines = useMemo(() => {
+    const text = latestChatDjText ?? baseDjSay;
+    if (text) return [text];
+    return ['等待播放…'];
+  }, [baseDjSay, latestChatDjText]);
+  const [djLineIndex, setDjLineIndex] = useState(0);
+  const [typedText, setTypedText] = useState('');
+  const displayTypedText = streamingChatDjText ?? (latestChatDjText ? latestChatDjText : typedText);
+
+  useEffect(() => {
+    const full = djLines[djLineIndex] ?? '';
+    let i = 0;
+    setTypedText('');
+    const t = setInterval(() => {
+      i++;
+      setTypedText(full.slice(0, i));
+      if (i >= full.length) {
+        clearInterval(t);
+        setTimeout(
+          () => setDjLineIndex((l) => (l + 1) % djLines.length),
+          3200,
+        );
+      }
+    }, 60);
+    return () => clearInterval(t);
+  }, [djLineIndex, djLines]);
+
+  // WebSocket stream
+  const { streamStatus } = useStreamConnection(
+    audio,
+    (nowPlaying) => {
+      // 仅在非 episode 播放时收到（hook 已门控）。episode 播放时显示由 episodeData 单源驱动。
+      setNow(nowPlaying);
+      if (nowPlaying.playback === 'playing') setIsPlaying(true);
+      if (nowPlaying.playback === 'idle') setIsPlaying(false);
+    },
+    (queue) => {
+      setNow((prev) => (prev ? { ...prev, queue } : null));
+    },
+    (dj) => {
+      setNow((prev) => (prev ? { ...prev, dj } : null));
+      // episode 播放期间，后台整轨旁白不灌入对话流（DJ 文案已在中栏展示），
+      // 否则会淹没用户与 DJ 的真实对话。
+      if (dj.say && !episodeActiveRef.current) {
+        setMessages((prev) => [
+          ...prev,
+          { id: `dj-${Date.now()}`, from: 'DJ', text: dj.say, origin: 'broadcast' },
+        ]);
+      }
+    },
+    (msg) => {
+      setAgentMessages((prev) => [...prev.slice(-19), msg]);
+    },
+    () => episodeActiveRef.current,
+  );
+
+  // Initial fetch
+  useEffect(() => {
+    getNow()
+      .then((data) => setNow(data))
+      .catch(() => {});
+    getFavorites()
+      .then((data) => setFavorites(data.favorites))
+      .catch(() => {});
+    getBriefs()
+      .then((data) => {
+        setBriefs(data.briefs ?? []);
+        const firstBrief = data.briefs?.[0];
+        if (firstBrief) setActiveBriefId(firstBrief.id);
+      })
+      .catch(() => {});
+    getShowProjects()
+      .then((data) => setProjects(data.projects ?? []))
+      .catch(() => {});
+    getNeteaseLoginStatus()
+      .then((data) => setNeteaseStatus(data))
+      .catch(() => {});
+    getTaste()
+      .then((data) => setTaste(data))
+      .catch(() => {});
+  }, []);
+
+  // Load plans and jobs when active brief changes
+  useEffect(() => {
+    if (!activeBriefId) { setShowPlan(null); setJobs([]); return; }
+    getShowPlans(activeBriefId)
+      .then((data) => {
+        const plans = data.plans ?? [];
+        setShowPlan(plans.find((p) => p.active) ?? plans[0] ?? null);
+      })
+      .catch(() => {});
+    getShowJobs(activeBriefId)
+      .then((data) => setJobs(data.jobs ?? []))
+      .catch(() => {});
+  }, [activeBriefId]);
+
+  // Fallback polling
+  useEffect(() => {
+    if (streamStatus.label === '已连接') return;
+    const id = setInterval(() => {
+      getNow()
+        .then((data) => setNow(data))
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  }, [streamStatus.label]);
+
+  // Track audio time
+  useEffect(() => {
+    if (!isPlaying) return;
+    audioTimeRef.current = setInterval(() => {
+      const musicAudio = audio.musicRef.current;
+      if (musicAudio) setCurrentTime(musicAudio.currentTime);
+    }, 500);
+    return () => {
+      if (audioTimeRef.current) {
+        clearInterval(audioTimeRef.current);
+        audioTimeRef.current = null;
+      }
+    };
+  }, [isPlaying, audio.musicRef]);
+
+  useEffect(() => {
+    const musicAudio = audio.musicRef.current;
+    if (!musicAudio) return;
+    const updateDuration = () => {
+      setAudioDurationSec(Number.isFinite(musicAudio.duration) && musicAudio.duration > 0 ? musicAudio.duration : null);
+    };
+    musicAudio.addEventListener('loadedmetadata', updateDuration);
+    musicAudio.addEventListener('durationchange', updateDuration);
+    updateDuration();
+    return () => {
+      musicAudio.removeEventListener('loadedmetadata', updateDuration);
+      musicAudio.removeEventListener('durationchange', updateDuration);
+    };
+  }, [audio.musicRef, track?.id]);
+
+  // Clock
+  useEffect(() => {
+    const id = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollTop = chatEndRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Play / Pause
+  const handlePlayPause = useCallback(async () => {
+    const state = playback.episodeState;
+    if (state === 'idle' || state === 'error') {
+      playback.setError(null);
+      try {
+        await playback.playEpisode();
+        setIsPlaying(true);
+      } catch {
+        setIsPlaying(false);
+      }
+      return;
+    }
+    // state is preparing/story/crossfade/music — 按当前阶段暂停/恢复对应的音频元素。
+    // 口播阶段绝不能 play() 音乐元素：音乐会在静音状态偷跑，
+    // 提前触发 ended 把还没说完的口播切掉
+    const musicAudio = audio.musicRef.current;
+    const speechAudio = audio.speechRef.current;
+    if (!musicAudio) return;
+
+    const anyPlaying =
+      (speechAudio && !speechAudio.paused) || !musicAudio.paused;
+
+    if (anyPlaying) {
+      speechAudio?.pause();
+      musicAudio.pause();
+      setIsPlaying(false);
+    } else {
+      const speechPhase = state === 'preparing' || state === 'story' || state === 'crossfade';
+      if (speechPhase) {
+        speechAudio?.play().catch(() => {});
+        if (state === 'crossfade') musicAudio.play().catch(() => {});
+      } else {
+        musicAudio.play().catch(() => {});
+      }
+      setIsPlaying(true);
+    }
+    setCurrentTime(musicAudio.currentTime);
+  }, [playback.episodeState, playback.setError, playback.playEpisode, audio.musicRef, audio.speechRef]);
+
+  // Current error from playback
+  const playbackError = playback.error;
+
+  // Next
+  const handleNext = useCallback(async () => {
+    try {
+      audio.musicRef.current?.pause();
+      audio.speechRef.current?.pause();
+      playback.clearEpisodeState();
+      await playback.playEpisode();
+      setIsPlaying(true);
+    } catch {
+      setIsPlaying(false);
+    }
+  }, [audio.musicRef, audio.speechRef, playback.clearEpisodeState, playback.playEpisode]);
+
+  // Toggle favorite
+  const handleToggleFavorite = useCallback(async () => {
+    if (!track) return;
+    if (isFavorited) {
+      try {
+        await removeFavorite(track.id);
+        setFavorites((prev) => prev.filter((f) => f.trackId !== track.id));
+      } catch { /* silent */ }
+    } else {
+      try {
+        await addFavorite({ trackId: track.id, title: track.title, artist: track.artist, ...(track.album ? { album: track.album } : {}) });
+        setFavorites((prev) => [...prev, { trackId: track.id, title: track.title, artist: track.artist, album: track.album ?? undefined, favoritedAt: new Date().toISOString() }]);
+      } catch { /* silent */ }
+    }
+  }, [track, isFavorited]);
+
+  // Chat send via SSE streaming
+  const handleSend = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      const trimmed = text.trim();
+      setInputDraft('');
+      const userMsg: ChatMessage = { id: `u-${Date.now()}`, from: 'YOU', text: trimmed };
+      const djId = `dj-${Date.now()}`;
+      const djPlaceholder: ChatMessage = { id: djId, from: 'DJ', text: '', streaming: true, origin: 'chat' };
+      let streamedText = '';
+      setMessages((prev) => [...prev, userMsg, djPlaceholder]);
+
+      chatSSE.sendMessage(trimmed, {
+        onChunk(chunk) {
+          streamedText += chunk;
+          setStreamingChatDjText(streamedText);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === djId ? { ...m, text: m.text + chunk } : m)),
+          );
+        },
+        onDone(data) {
+          const finalText = data.text || streamedText;
+          setStreamingChatDjText(null);
+          if (finalText.trim()) {
+            setLatestChatDjText(finalText);
+          }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === djId ? { ...m, text: finalText || m.text, streaming: false } : m,
+            ),
+          );
+          if (data.action?.type === 'next-track') {
+            handleNext();
+            return;
+          }
+
+          if (
+            data.action?.type === 'show-brief-created' ||
+            data.action?.type === 'show-plan-refined' ||
+            data.action?.type === 'show-confirmed' ||
+            data.action?.type === 'show-cancelled'
+          ) {
+            const briefId = data.action.briefId ?? activeBriefId;
+            setActiveView('production');
+            refreshProductionData(briefId).catch(() => {});
+            if (data.action.type === 'show-confirmed' && briefId) {
+              startJobTracking(briefId);
+              generateNow(briefId)
+                .then(() => refreshProductionData(briefId))
+                .catch(() => refreshProductionData(briefId));
+            }
+          }
+        },
+      });
+    },
+    [activeBriefId, chatSSE, handleNext, refreshProductionData, startJobTracking],
+  );
+
+  const handleGenerateNow = useCallback(async (briefId: string) => {
+    startJobTracking(briefId);
+    await generateNow(briefId);
+    await refreshProductionData(briefId);
+    setActiveView('production');
+  }, [refreshProductionData, startJobTracking]);
+
+  // Derived display data
+  const durationSec = track?.durationMs
+    ? Math.round(track.durationMs / 1000)
+    : audioDurationSec;
+  const progress = durationSec && durationSec > 0 ? Math.min(currentTime / durationSec, 1) : 0;
+  const timeStr = formatTime(clock);
+  const isDark = theme === 'graphite';
+  const sharedAudioElements = (
+    <>
+      <audio
+        key="fakeradio-music-audio"
+        ref={audio.musicRef}
+        preload="auto"
+        playsInline
+        crossOrigin="anonymous"
+        style={{ display: 'none' }}
+      />
+      <audio
+        key="fakeradio-speech-audio"
+        ref={audio.speechRef}
+        preload="auto"
+        playsInline
+        style={{ display: 'none' }}
+      />
+    </>
+  );
+
+  // Mobile layout: vertical stack with bottom chat drawer
+  if (bp === 'mobile') {
+    return (
+      <>
+        {sharedAudioElements}
+        <MobileRadio
+          theme={theme}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+          track={track}
+          progress={progress}
+          durationSec={durationSec}
+          isPlaying={isPlaying}
+          isLoading={playback.isLoadingEpisode}
+          episodeState={playback.episodeState}
+          error={playbackError}
+          isFavorited={isFavorited}
+          onPlayPause={handlePlayPause}
+          onNext={handleNext}
+          onToggleFavorite={handleToggleFavorite}
+          musicRef={audio.musicRef}
+          typedText={displayTypedText}
+          currentDjText={djSay}
+          djLineIndex={djLineIndex}
+          messages={messages}
+          inputDraft={inputDraft}
+          onInputChange={setInputDraft}
+          onSend={handleSend}
+          chatEndRef={chatEndRef}
+          timeStr={timeStr}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {sharedAudioElements}
+      <div
+        style={{
+          width: '100%',
+          minHeight: '100vh',
+          position: 'relative',
+          background: 'var(--bg)',
+          color: 'var(--text)',
+          fontFamily: 'var(--font-body)',
+          paddingTop: 88,
+        }}
+      >
+      {/* Subtle vignette */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: isDark
+            ? 'radial-gradient(120% 80% at 50% 100%, rgba(255,255,255,0.025), transparent 60%)'
+            : 'radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0.025), transparent 60%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* TOP BAR */}
+      <TopBar
+        isLive={isLive}
+        timeStr={timeStr}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
+        activeView={activeView}
+        onNavigate={setActiveView}
+        neteaseStatus={neteaseStatus}
+        onOpenNeteaseLogin={() => setShowNeteaseLogin(true)}
+        bp={bp}
+      />
+
+      {/* MAIN 3-COLUMN GRID */}
+      <div
+        style={{
+          padding: bp === 'tablet' ? '24px 24px 56px' : '24px 56px 56px',
+          display: 'grid',
+          gridTemplateColumns: bp === 'tablet' ? '1fr' : '260px 1fr 320px',
+          gap: bp === 'tablet' ? 32 : 48,
+        }}
+      >
+        {/* LEFT — track + queue */}
+        <LeftColumn
+          track={track}
+          progress={progress}
+          durationSec={durationSec}
+          queue={queue}
+          isPlaying={isPlaying}
+          episodeState={playback.episodeState}
+          isLoading={playback.isLoadingEpisode}
+          error={playbackError}
+          isFavorited={isFavorited}
+          onPlayPause={handlePlayPause}
+          onNext={handleNext}
+          onToggleFavorite={handleToggleFavorite}
+          musicRef={audio.musicRef}
+          bp={bp}
+        />
+
+        {/* CENTER — visualizer + DJ quote / schedule / export / production / settings / library */}
+        {activeView === 'main' ? (
+          <CenterColumn
+            typedText={displayTypedText}
+            djLineIndex={djLineIndex}
+            musicRef={audio.musicRef}
+            isPlaying={isPlaying}
+            bp={bp}
+          />
+        ) : activeView === 'schedule' ? (
+          <ScheduleView />
+        ) : activeView === 'production' ? (
+          <ProductionBoard
+            brief={activeBrief}
+            briefs={briefs}
+            showPlan={showPlan}
+            jobs={jobs}
+            projects={projects}
+            isExpanded
+            embedded
+            onToggleExpand={() => {}}
+            onClose={() => setActiveView('main')}
+            onSwitchBrief={(id) => setActiveBriefId(id)}
+            onProjectsChanged={refreshProjects}
+            onGenerateNow={handleGenerateNow}
+          />
+        ) : activeView === 'settings' ? (
+          <SettingsPanel
+            isExpanded
+            isOpen
+            embedded
+            onToggleExpand={() => {}}
+            onClose={() => setActiveView('main')}
+          />
+        ) : activeView === 'library' ? (
+          <ShowLibrary
+            isExpanded
+            isOpen
+            embedded
+            projects={projects}
+            onToggleExpand={() => {}}
+            onClose={() => setActiveView('main')}
+            onRefresh={refreshProjects}
+          />
+        ) : (
+          <ExportView />
+        )}
+
+        {/* RIGHT — chat transcript */}
+        <RightColumn
+          messages={messages}
+          agentMessages={agentMessages}
+          inputDraft={inputDraft}
+          onInputChange={setInputDraft}
+          onSend={handleSend}
+          onQuickPrompt={handleSend}
+          chatEndRef={chatEndRef}
+          taste={taste}
+          showTaste={showTaste}
+          onToggleTaste={() => setShowTaste((v) => !v)}
+          trackedJob={trackedJob}
+          bp={bp}
+          onDismissJob={() => { stopJobTracking(); setTrackedJob(null); }}
+        />
+      </div>
+
+      {/* Netease Login Modal */}
+      {showNeteaseLogin && (
+        <NeteaseLoginModal
+          status={neteaseStatus}
+          onClose={() => setShowNeteaseLogin(false)}
+          onStatusChange={setNeteaseStatus}
+        />
+      )}
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// TopBar
+// ─────────────────────────────────────────────────────────────
+function TopBar({
+  isLive,
+  timeStr,
+  isDark,
+  onToggleTheme,
+  activeView,
+  onNavigate,
+  neteaseStatus,
+  onOpenNeteaseLogin,
+  bp,
+}: {
+  isLive: boolean;
+  timeStr: string;
+  isDark: boolean;
+  onToggleTheme: () => void;
+  activeView: 'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library';
+  onNavigate: (view: 'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library') => void;
+  neteaseStatus: NeteaseLoginStatus | null;
+  onOpenNeteaseLogin: () => void;
+  bp: Breakpoint;
+}) {
+  const isTablet = bp === 'tablet';
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        padding: isTablet ? '20px 24px 0' : '32px 56px 0',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        zIndex: 6,
+        background: 'var(--bg)',
+        borderBottom: '1px solid var(--line)',
+        paddingBottom: 12,
+      }}
+    >
+      {/* Logo + ON AIR + Netease */}
+      <div style={{ flexShrink: 0 }}>
+        <div
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 24,
+            lineHeight: 1,
+            letterSpacing: '-0.01em',
+            fontStyle: 'italic',
+          }}
+        >
+          FakeRadio<span style={{ color: 'var(--faint)' }}>.</span>
+        </div>
+        <button
+          onClick={onOpenNeteaseLogin}
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            marginTop: 6,
+            letterSpacing: '0.15em',
+            color: neteaseStatus?.loggedIn ? 'var(--text)' : 'var(--faint)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: neteaseStatus?.loggedIn ? '#4ade80' : 'var(--faint)',
+            }}
+          />
+          {neteaseStatus?.loggedIn
+            ? `网易云 · ${neteaseStatus.nickname ?? '已登录'}`
+            : '网易云 · 未登录'}
+        </button>
+      </div>
+
+      {/* Nav */}
+      <nav style={{ display: 'flex', gap: isTablet ? 20 : 36, minWidth: 0, overflow: 'hidden' }}>
+        {([
+          { key: 'main' as const, label: '正在播放' },
+          { key: 'schedule' as const, label: '节目单' },
+          { key: 'production' as const, label: '制作' },
+          { key: 'library' as const, label: '节目库' },
+          { key: 'export' as const, label: '导出' },
+          { key: 'settings' as const, label: '设置' },
+        ]).map((it) => (
+          <button
+            key={it.key}
+            onClick={() => onNavigate(it.key)}
+            style={{
+              fontSize: 12,
+              color: activeView === it.key ? 'var(--text)' : 'var(--mute)',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              borderBottom:
+                activeView === it.key ? '1px solid var(--text)' : '1px solid transparent',
+              paddingBottom: 3,
+              cursor: activeView === it.key ? 'default' : 'pointer',
+              background: 'none',
+              fontFamily: 'inherit',
+            }}
+          >
+            {it.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Right — ON AIR + theme toggle */}
+      <div
+        style={{
+          textAlign: 'right',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 10,
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            color: 'var(--mute)',
+            letterSpacing: '0.15em',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: 'var(--text)',
+              marginRight: 6,
+              verticalAlign: 'middle',
+              animation: isLive
+                ? 'fr-pulse 2.4s ease-in-out infinite'
+                : 'none',
+              opacity: isLive ? 1 : 0.3,
+            }}
+          />
+          <span suppressHydrationWarning>
+            {isLive ? 'ON AIR' : 'OFF AIR'} · {timeStr}
+          </span>
+        </div>
+        <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
+      </div>
+    </div>
+  );
+}
+
+function ThemeToggle({
+  isDark,
+  onToggle,
+}: {
+  isDark: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        marginTop: 4,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px 6px 8px',
+        background: 'transparent',
+        border: '1px solid var(--line)',
+        borderRadius: 999,
+        color: 'var(--text)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 9,
+        letterSpacing: '0.22em',
+        cursor: 'pointer',
+        transition: 'background 0.2s, border-color 0.2s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--ink-soft)';
+        e.currentTarget.style.borderColor = 'var(--faint)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.borderColor = 'var(--line)';
+      }}
+    >
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          border: '1px solid var(--text)',
+          background: `linear-gradient(90deg, ${isDark ? '#0e0e10' : '#f4f1ea'} 50%, ${isDark ? '#f4f1ea' : '#0e0e10'} 50%)`,
+          flexShrink: 0,
+        }}
+      />
+      <span>{isDark ? '切换浅色' : '切换深色'}</span>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// LeftColumn — track info + progress + queue
+// ─────────────────────────────────────────────────────────────
+function LeftColumn({
+  track,
+  progress,
+  durationSec,
+  queue,
+  isPlaying,
+  episodeState,
+  isLoading,
+  error,
+  isFavorited,
+  onPlayPause,
+  onNext,
+  onToggleFavorite,
+  musicRef,
+  bp,
+}: {
+  track: Track | null;
+  progress: number;
+  durationSec: number | null;
+  queue: Track[];
+  isPlaying: boolean;
+  episodeState: string;
+  isLoading: boolean;
+  error: string | null;
+  isFavorited: boolean;
+  onPlayPause: () => void;
+  onNext: () => void;
+  onToggleFavorite: () => void;
+  musicRef: React.RefObject<HTMLAudioElement | null>;
+  bp: Breakpoint;
+}) {
+  const title = track?.title ?? '—';
+  const artist = track?.artist ?? '—';
+  const album = track?.album ?? '';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 40, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
+      {/* Track info */}
+      <div>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            letterSpacing: '0.28em',
+            color: 'var(--mute)',
+            textTransform: 'uppercase',
+            marginBottom: 18,
+          }}
+        >
+          N°<span style={{ marginLeft: 4 }}>003</span> &nbsp;/&nbsp; NOW
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+          <div
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: bp === 'tablet' ? 44 : 64,
+              lineHeight: 0.95,
+              fontWeight: 400,
+              letterSpacing: '-0.02em',
+              marginBottom: 16,
+            }}
+          >
+            {title}
+          </div>
+          {track && (
+            <button
+              onClick={onToggleFavorite}
+              aria-label={isFavorited ? '取消收藏' : '收藏'}
+              style={{
+                marginTop: 8,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 4,
+                color: isFavorited ? 'var(--text)' : 'var(--faint)',
+                fontSize: 20,
+                lineHeight: 1,
+                transition: 'color 0.2s',
+              }}
+            >
+              {isFavorited ? '♥' : '♡'}
+            </button>
+          )}
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-serif-en)',
+            fontSize: 18,
+            fontStyle: 'italic',
+            color: 'var(--mute)',
+            marginBottom: 28,
+          }}
+        >
+          by &nbsp;{artist}
+        </div>
+        <div
+          style={{
+            fontSize: 11.5,
+            color: 'var(--mute)',
+            lineHeight: 1.8,
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.02em',
+          }}
+        >
+          ALBUM &nbsp;{' '}
+          <span style={{ color: 'var(--text)' }}>{album || '—'}</span>
+          <br />
+          YEAR &nbsp;&nbsp; {track?.durationMs ? '—' : '—'}
+          <br />
+          SOURCE &nbsp;{track?.source ?? '—'}
+        </div>
+      </div>
+
+      {/* Progress */}
+      <div>
+        <div
+          style={{
+            height: 1,
+            background: 'var(--line)',
+            position: 'relative',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${progress * 100}%`,
+              background: 'var(--text)',
+              transition: 'width 0.3s ease',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: `${progress * 100}%`,
+              top: -2,
+              width: 1,
+              height: 5,
+              background: 'var(--text)',
+              transform: 'translateX(-50%)',
+              transition: 'left 0.3s ease',
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            color: 'var(--mute)',
+            marginTop: 10,
+            letterSpacing: '0.08em',
+          }}
+        >
+          <span>{fmtTime(durationSec ? progress * durationSec : null)}</span>
+          <span>{fmtTime(durationSec)}</span>
+        </div>
+      </div>
+
+      {/* Playback controls */}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button
+          onClick={onPlayPause}
+          disabled={isLoading}
+          style={{
+            padding: '10px 24px',
+            border: '1px solid var(--line)',
+            borderRadius: 999,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            letterSpacing: '0.15em',
+            color: 'var(--text)',
+            cursor: isLoading ? 'wait' : 'pointer',
+            transition: 'background 0.2s, border-color 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--ink-soft)';
+            e.currentTarget.style.borderColor = 'var(--faint)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.borderColor = 'var(--line)';
+          }}
+        >
+          {isLoading ? 'LOADING…' : isPlaying ? 'PAUSE' : 'PLAY'}
+        </button>
+        <button
+          onClick={onNext}
+          disabled={isLoading}
+          style={{
+            padding: '10px 24px',
+            border: '1px solid var(--line)',
+            borderRadius: 999,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            letterSpacing: '0.15em',
+            color: 'var(--mute)',
+            cursor: isLoading ? 'wait' : 'pointer',
+            transition: 'background 0.2s, border-color 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--ink-soft)';
+            e.currentTarget.style.borderColor = 'var(--faint)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.borderColor = 'var(--line)';
+          }}
+        >
+          NEXT
+        </button>
+      </div>
+
+      {/* Volume */}
+      <VolumeControl musicRef={musicRef} />
+
+      {/* Error display */}
+      {error && (
+        <div
+          style={{
+            fontSize: 11,
+            color: '#c44',
+            lineHeight: 1.5,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Up Next */}
+      <div>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            letterSpacing: '0.28em',
+            color: 'var(--mute)',
+            textTransform: 'uppercase',
+            marginBottom: 16,
+            display: 'flex',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>UP NEXT</span>
+          <span>QUEUED BY DJ</span>
+        </div>
+        <div>
+          {queue.slice(0, 3).map((q, i) => (
+            <div
+              key={q.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '18px 1fr auto',
+                alignItems: 'baseline',
+                gap: 12,
+                padding: '12px 0',
+                borderTop: '1px solid var(--line)',
+                fontSize: 13,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--faint)',
+                  fontSize: 10,
+                }}
+              >
+                {String(i + 1).padStart(2, '0')}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 17,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {q.title}
+                </div>
+                <div
+                  style={{ color: 'var(--mute)', fontSize: 11, marginTop: 2 }}
+                >
+                  {q.artist}
+                </div>
+              </div>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--faint)',
+                  fontSize: 10,
+                }}
+              >
+                {q.durationMs ? fmtTime(q.durationMs / 1000) : '—'}
+              </span>
+            </div>
+          ))}
+          {queue.length === 0 && (
+            <div
+              style={{
+                padding: '12px 0',
+                borderTop: '1px solid var(--line)',
+                fontSize: 12,
+                color: 'var(--faint)',
+                fontStyle: 'italic',
+              }}
+            >
+              队列为空
+            </div>
+          )}
+          <div style={{ borderTop: '1px solid var(--line)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CenterColumn — visualizer + DJ pullquote
+// ─────────────────────────────────────────────────────────────
+function CenterColumn({
+  typedText,
+  djLineIndex,
+  musicRef,
+  isPlaying,
+  bp,
+}: {
+  typedText: string;
+  djLineIndex: number;
+  musicRef: React.RefObject<HTMLAudioElement | null>;
+  isPlaying: boolean;
+  bp: Breakpoint;
+}) {
+  const visualizer = useAudioReactiveVisualizer(musicRef, isPlaying);
+  const visualizerSize = bp === 'tablet' ? 260 : 340;
+  return (
+    <div
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 48,
+      }}
+    >
+      <MinimalVisualizer
+        size={visualizerSize}
+        levels={visualizer.levels}
+        energy={visualizer.energy}
+        reactive={visualizer.reactive}
+      />
+
+      {/* DJ pullquote */}
+      <div
+        style={{
+          maxWidth: 460,
+          textAlign: 'center',
+          position: 'relative',
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            letterSpacing: '0.32em',
+            color: 'var(--mute)',
+            marginBottom: 18,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+          }}
+        >
+          <span
+            style={{ width: 24, height: 1, background: 'var(--line)' }}
+          />
+          DJ — SPEAKING
+          <span
+            style={{ width: 24, height: 1, background: 'var(--line)' }}
+          />
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 26,
+            lineHeight: 1.5,
+            fontStyle: 'italic',
+            color: 'var(--text)',
+            minHeight: '3.2em',
+            fontWeight: 400,
+          }}
+        >
+          <span>&ldquo;{typedText}</span>
+          <span
+            style={{
+              display: 'inline-block',
+              width: '0.55em',
+              height: '1em',
+              background: 'var(--text)',
+              verticalAlign: '-0.12em',
+              marginLeft: '0.18em',
+              opacity: 0.6,
+              animation: 'fr-caret 1.1s steps(1) infinite',
+            }}
+          />
+          <span>&rdquo;</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MinimalVisualizer({
+  size = 340,
+  levels = EMPTY_VISUALIZER_LEVELS,
+  energy = 0,
+  reactive = false,
+}: {
+  size?: number;
+  levels?: number[];
+  energy?: number;
+  reactive?: boolean;
+}) {
+  const bars = VISUALIZER_BARS;
+  const color = 'var(--text)';
+  const muteColor = 'var(--faint)';
+  const ringOpacity = reactive ? 0.28 + energy * 0.34 : 0.4;
+  const tickY = size * 0.529; // 约 180/340，cardinal tick 偏移按尺寸缩放
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      {/* Concentric rings */}
+      {[0.4, 0.65, 0.9].map((s, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            inset: `${(1 - s) * 50}%`,
+            borderRadius: '50%',
+            border: `1px solid ${muteColor}`,
+            opacity: Math.max(0.08, ringOpacity - i * 0.1),
+            transition: 'opacity 120ms linear',
+          }}
+        />
+      ))}
+
+      {/* Center dot */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          width: 4,
+          height: 4,
+          borderRadius: '50%',
+          background: color,
+          transform: 'translate(-50%, -50%)',
+        }}
+      />
+
+      {/* Inner circle */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: '46%',
+          borderRadius: '50%',
+          border: `1px solid ${color}`,
+          transform: `scale(${1 + energy * 0.12})`,
+          transition: 'transform 80ms linear',
+        }}
+      />
+
+      {/* Spectral bars */}
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 340 340"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          animation: 'fr-spin 80s linear infinite',
+        }}
+      >
+        {Array.from({ length: bars }).map((_, i) => {
+          const a = (i / bars) * Math.PI * 2;
+          const r = 130;
+          const idle = 3 + Math.abs(Math.sin(i * 0.38) * Math.cos(i * 0.21)) * 28;
+          const level = levels[i] ?? 0;
+          const h = reactive ? 3 + idle * 0.36 + level * 28 : idle;
+          const rd = (v: number) => Math.round(v * 100) / 100;
+          const x1 = rd(170 + Math.cos(a) * r);
+          const y1 = rd(170 + Math.sin(a) * r);
+          const x2 = rd(170 + Math.cos(a) * (r + h));
+          const y2 = rd(170 + Math.sin(a) * (r + h));
+          return (
+            <line
+              key={i}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke="currentColor"
+              strokeWidth={reactive ? 0.65 + level * 0.95 : 0.8}
+              strokeLinecap="round"
+              opacity={reactive ? 0.35 + level * 0.65 : 0.55 + (i % 4) * 0.1}
+              style={{
+                animation: reactive ? 'none' : `fr-wave ${1.3 + (i % 6) * 0.16}s ease-in-out infinite`,
+                animationDelay: reactive ? undefined : `${i * 0.025}s`,
+                transformOrigin: '170px 170px',
+                transition: 'opacity 80ms linear, stroke-width 80ms linear',
+              }}
+            />
+          );
+        })}
+      </svg>
+
+      {/* Cardinal ticks */}
+      {[0, 90, 180, 270].map((deg) => (
+        <div
+          key={deg}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            width: 1,
+            height: 6,
+            background: color,
+            transform: `translate(-50%, -50%) rotate(${deg}deg) translateY(-${tickY}px)`,
+            transformOrigin: 'center',
+            opacity: 0.6,
+          }}
+        />
+      ))}
+
+      {/* Labels */}
+      <div
+        style={{
+          position: 'absolute',
+          top: -22,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: muteColor,
+          letterSpacing: '0.3em',
+        }}
+      >
+        0°
+      </div>
+      <div
+        style={{
+          position: 'absolute',
+          bottom: -22,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: muteColor,
+          letterSpacing: '0.3em',
+        }}
+      >
+        180°
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// RightColumn — chat transcript
+// ─────────────────────────────────────────────────────────────
+function RightColumn({
+  messages,
+  agentMessages,
+  inputDraft,
+  onInputChange,
+  onSend,
+  onQuickPrompt,
+  chatEndRef,
+  taste,
+  showTaste,
+  onToggleTaste,
+  trackedJob,
+  onDismissJob,
+  bp,
+}: {
+  messages: ChatMessage[];
+  agentMessages: AgentMessage[];
+  inputDraft: string;
+  onInputChange: (v: string) => void;
+  onSend: (text: string) => void;
+  onQuickPrompt: (text: string) => void;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
+  taste: TasteResponse | null;
+  showTaste: boolean;
+  onToggleTaste: () => void;
+  trackedJob: ShowJob | null;
+  onDismissJob: () => void;
+  bp: Breakpoint;
+}) {
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const canSend = inputDraft.trim().length > 0;
+
+  // tablet 单列：聊天区作为普通块参与流式布局，去掉三列时左侧的竖线/缩进和粘性定位
+  const isTablet = bp === 'tablet';
+  return (
+    <div
+      style={{
+        borderLeft: isTablet ? 'none' : '1px solid var(--line)',
+        paddingLeft: isTablet ? 0 : 32,
+        display: 'flex',
+        flexDirection: 'column',
+        // 固定为视口高度并 sticky，消息在栏内滚动，避免聊天把整页撑长、
+        // 滚动后看不到播放器。tablet 单列下改为普通块，不再粘性顶屏。
+        position: isTablet ? 'static' : 'sticky',
+        top: isTablet ? undefined : 112,
+        alignSelf: 'start',
+        height: isTablet ? undefined : 'calc(100vh - 136px)',
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.28em',
+          color: 'var(--mute)',
+          textTransform: 'uppercase',
+          marginBottom: 24,
+          display: 'flex',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span>TRANSCRIPT</span>
+        <span suppressHydrationWarning style={{ color: 'var(--faint)' }}>
+          {timeStr} · TODAY
+        </span>
+      </div>
+
+      <div
+        ref={chatEndRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 22,
+          overflowY: 'auto',
+        }}
+      >
+        {messages.length === 0 && (
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--faint)',
+              fontStyle: 'italic',
+            }}
+          >
+            跟 Nora 聊点什么吧…
+          </div>
+        )}
+        {messages.map((m) => (
+          <TranscriptLine key={m.id} from={m.from} text={m.text} streaming={m.streaming} />
+        ))}
+      </div>
+
+      {/* Production progress + trace */}
+      {trackedJob && (
+        <ProductionProgressPanel job={trackedJob} onDismiss={onDismissJob} />
+      )}
+
+      {/* Agent messages */}
+      {agentMessages.length > 0 && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.22em', color: 'var(--faint)' }}>
+            ACTIVITY
+          </div>
+          {agentMessages.slice(-3).map((msg, i) => (
+            <div key={i} style={{ fontSize: 11, color: 'var(--faint)', lineHeight: 1.4, fontFamily: 'var(--font-mono)' }}>
+              {msg.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Taste */}
+      {taste && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            onClick={onToggleTaste}
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              letterSpacing: '0.22em',
+              color: 'var(--faint)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 8 }}>{showTaste ? '▼' : '▶'}</span>
+            TASTE
+          </button>
+          {showTaste && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {taste.taste && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--faint)', letterSpacing: '0.15em', marginBottom: 4 }}>
+                    PROFILE
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--mute)', lineHeight: 1.5, fontFamily: 'var(--font-body)' }}>
+                    {taste.taste}
+                  </div>
+                </div>
+              )}
+              {taste.routines && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--faint)', letterSpacing: '0.15em', marginBottom: 4 }}>
+                    ROUTINES
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--mute)', lineHeight: 1.5, fontFamily: 'var(--font-body)' }}>
+                    {taste.routines}
+                  </div>
+                </div>
+              )}
+              {taste.playlists.length > 0 && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--faint)', letterSpacing: '0.15em', marginBottom: 4 }}>
+                    PLAYLISTS
+                  </div>
+                  {taste.playlists.map((pl) => (
+                    <div key={pl.id} style={{ fontSize: 11, color: 'var(--mute)', marginBottom: 4, fontFamily: 'var(--font-body)' }}>
+                      <span style={{ fontWeight: 500 }}>{pl.name}</span>
+                      {pl.description && (
+                        <span style={{ color: 'var(--faint)', marginLeft: 6 }}>— {pl.description}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {taste.moodRules && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--faint)', letterSpacing: '0.15em', marginBottom: 4 }}>
+                    MOOD RULES
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--mute)', lineHeight: 1.5, fontFamily: 'var(--font-body)' }}>
+                    {taste.moodRules}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick prompts */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+        {QUICK_PROMPTS.map((qp) => (
+          <button
+            key={qp.label}
+            onClick={() => onQuickPrompt(qp.prompt)}
+            style={{
+              padding: '5px 12px',
+              border: '1px solid var(--line)',
+              borderRadius: 999,
+              background: 'transparent',
+              color: 'var(--mute)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+              transition: 'background 0.2s, border-color 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--ink-soft)';
+              e.currentTarget.style.borderColor = 'var(--faint)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'var(--line)';
+            }}
+          >
+            {qp.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div
+        style={{
+          paddingTop: 18,
+          marginTop: 18,
+          borderTop: '1px solid var(--line)',
+        }}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSend) onSend(inputDraft);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            paddingBottom: 8,
+            borderBottom: '1px solid var(--text)',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              color: 'var(--mute)',
+              letterSpacing: '0.2em',
+            }}
+          >
+            YOU
+          </span>
+          <input
+            placeholder="给 Nora 写一句话…"
+            value={inputDraft}
+            onChange={(e) => onInputChange(e.target.value)}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'var(--text)',
+              fontSize: 13.5,
+              fontFamily: 'inherit',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!canSend}
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              padding: '4px 8px',
+              border: '1px solid var(--line)',
+              borderRadius: 2,
+              background: canSend ? 'var(--text)' : 'transparent',
+              color: canSend ? 'var(--paper)' : 'var(--mute)',
+              letterSpacing: '0.08em',
+              cursor: canSend ? 'pointer' : 'default',
+              opacity: canSend ? 1 : 0.55,
+            }}
+          >
+            SEND
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function TranscriptLine({ from, text, streaming }: { from: 'DJ' | 'YOU'; text: string; streaming?: boolean | undefined }) {
+  const isMe = from === 'YOU';
+  return (
+    <div>
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: isMe ? 'var(--faint)' : 'var(--mute)',
+          letterSpacing: '0.22em',
+          marginBottom: 5,
+        }}
+      >
+        {from}
+      </div>
+      <div
+        style={{
+          fontSize: 13.5,
+          lineHeight: 1.6,
+          color: isMe ? 'var(--mute)' : 'var(--text)',
+          fontFamily: isMe
+            ? 'var(--font-body)'
+            : 'var(--font-display)',
+          fontStyle: isMe ? 'normal' : 'italic',
+        }}
+      >
+        {text || (streaming ? '' : '')}
+        {streaming && (
+          <span
+            style={{
+              display: 'inline-block',
+              width: '0.55em',
+              height: '1em',
+              background: 'var(--text)',
+              verticalAlign: '-0.12em',
+              marginLeft: '0.18em',
+              opacity: 0.6,
+              animation: 'fr-caret 1.1s steps(1) infinite',
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ProductionProgressPanel — 编排进度 + trace（聊天栏内）
+// ─────────────────────────────────────────────────────────────
+const JOB_STATUS_LABELS: Record<string, string> = {
+  pending: '排队中',
+  running: '生成中',
+  paused: '已暂停',
+  'needs-replan': '待重排',
+  completed: '已完成',
+  failed: '失败',
+};
+
+function ProductionProgressPanel({ job, onDismiss }: { job: ShowJob; onDismiss: () => void }) {
+  const isActive = job.status === 'pending' || job.status === 'running';
+  const isFailed = job.status === 'failed';
+  const statusLabel = JOB_STATUS_LABELS[job.status] ?? job.status;
+  const recentLogs = job.logs.slice(-3);
+  const recentTrace = job.trace.slice(-4);
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: '10px 12px',
+        border: '1px solid var(--line)',
+        borderRadius: 6,
+        background: 'var(--ink-soft)',
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: recentLogs.length + recentTrace.length > 0 ? 8 : 0,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            letterSpacing: '0.22em',
+            color: 'var(--mute)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: isFailed ? '#c44' : isActive ? 'var(--text)' : '#4ade80',
+              animation: isActive ? 'fr-pulse 1.5s ease-in-out infinite' : 'none',
+            }}
+          />
+          节目编排 · {statusLabel}
+        </div>
+        <button
+          onClick={onDismiss}
+          aria-label="关闭编排进度"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--faint)',
+            cursor: 'pointer',
+            fontSize: 12,
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {isFailed && job.error && (
+        <div style={{ fontSize: 11, color: '#c44', lineHeight: 1.5, marginBottom: 6 }}>
+          {job.error}
+        </div>
+      )}
+
+      {recentLogs.map((log, i) => (
+        <div
+          key={`log-${i}`}
+          style={{
+            fontSize: 10.5,
+            lineHeight: 1.6,
+            color: log.level === 'error' ? '#c44' : 'var(--mute)',
+            fontFamily: 'var(--font-mono)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {log.phase ? `[${log.phase}] ` : ''}{log.message}
+        </div>
+      ))}
+
+      {recentTrace.length > 0 && (
+        <div style={{ marginTop: recentLogs.length > 0 ? 6 : 0 }}>
+          {recentTrace.map((entry, i) => (
+            <div
+              key={`trace-${i}`}
+              style={{
+                fontSize: 10.5,
+                lineHeight: 1.6,
+                color: entry.success ? 'var(--faint)' : '#c44',
+                fontFamily: 'var(--font-mono)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {entry.success ? '✓' : '✗'} {entry.operation}
+              {entry.durationMs !== undefined ? ` · ${(entry.durationMs / 1000).toFixed(1)}s` : ''}
+              {' — '}{entry.errorSummary ?? entry.summary}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ScheduleView — today's program blocks
+// ─────────────────────────────────────────────────────────────
+function ScheduleView() {
+  const [blocks, setBlocks] = useState<Array<{ at: string; label: string; moodHint: string }>>([]);
+  const [date, setDate] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [prewarmBlocks, setPrewarmBlocks] = useState<Array<{ at: string; ready: number; consumed: number; failed: number }>>([]);
+
+  useEffect(() => {
+    getTodayPlan()
+      .then((data) => {
+        setBlocks(data.blocks);
+        setDate(data.date);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+    getPrewarmStatus()
+      .then((data) => setPrewarmBlocks(data.blocks ?? []))
+      .catch(() => {});
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--mute)', letterSpacing: '0.15em' }}>
+          LOADING…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 460, margin: '0 auto', padding: '40px 0' }}>
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.28em',
+          color: 'var(--mute)',
+          textTransform: 'uppercase',
+          marginBottom: 32,
+        }}
+      >
+        DAILY SCHEDULE &nbsp;·&nbsp; {date}
+      </div>
+
+      {blocks.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
+          暂无节目安排
+        </div>
+      ) : (
+        <div>
+          {blocks.map((b, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '64px 1fr auto',
+                alignItems: 'baseline',
+                gap: 16,
+                padding: '16px 0',
+                borderTop: '1px solid var(--line)',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  color: 'var(--mute)',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                {b.at}
+              </span>
+              <div>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 20,
+                    lineHeight: 1.3,
+                    marginBottom: 4,
+                  }}
+                >
+                  {b.label}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.15em',
+                    color: 'var(--faint)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {b.moodHint}
+                </span>
+                {(() => {
+                  const pw = prewarmBlocks.find((p) => p.at === b.at);
+                  if (!pw) return null;
+                  return (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 8,
+                        letterSpacing: '0.1em',
+                        color: pw.ready > 0 ? 'var(--text)' : 'var(--faint)',
+                      }}
+                    >
+                      {pw.ready}R · {pw.consumed}C{pw.failed > 0 ? ` · ${pw.failed}F` : ''}
+                    </span>
+                  );
+                })()}
+              </div>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid var(--line)' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ExportView — show projects + export
+// ─────────────────────────────────────────────────────────────
+function ExportView() {
+  const [projects, setProjects] = useState<Array<{
+    id: string;
+    slug: string;
+    status: string;
+    briefId: string;
+    createdAt: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  // 今日电台导出：异步任务 + 轮询进度
+  const [todayTask, setTodayTask] = useState<TodayExportTask | null>(null);
+  const [todayStarting, setTodayStarting] = useState(false);
+  const todayPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (todayPollRef.current) clearInterval(todayPollRef.current);
+    };
+  }, []);
+
+  const handleExportToday = useCallback(async () => {
+    if (todayPollRef.current) {
+      clearInterval(todayPollRef.current);
+      todayPollRef.current = null;
+    }
+    setTodayStarting(true);
+    setTodayTask(null);
+    try {
+      const { taskId } = await exportTodayShow();
+      const poll = async () => {
+        try {
+          const task = await getExportTodayStatus(taskId);
+          setTodayTask(task);
+          if (task.status === 'completed' || task.status === 'failed') {
+            if (todayPollRef.current) {
+              clearInterval(todayPollRef.current);
+              todayPollRef.current = null;
+            }
+          }
+        } catch { /* 网络抖动时继续轮询 */ }
+      };
+      await poll();
+      todayPollRef.current = setInterval(poll, 1500);
+    } catch (e) {
+      setTodayTask({ status: 'failed', error: e instanceof Error ? e.message : '导出失败' });
+    } finally {
+      setTodayStarting(false);
+    }
+  }, []);
+
+  const isExportingToday =
+    todayStarting || todayTask?.status === 'pending' || todayTask?.status === 'running';
+
+  const loadProjects = useCallback(() => {
+    setLoading(true);
+    getShowProjects()
+      .then((data) => setProjects(data.projects ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  const handleExport = useCallback(async (projectId: string) => {
+    setExportingId(projectId);
+    setExportError(null);
+    setExportSuccess(null);
+    try {
+      const result = await exportProject(projectId) as { blocksCount?: number; showMp3Size?: number };
+      const parts = ['导出完成'];
+      if (typeof result.blocksCount === 'number') parts.push(`${result.blocksCount} 个区块`);
+      if (typeof result.showMp3Size === 'number' && result.showMp3Size > 0) {
+        parts.push(`show.mp3 ${(result.showMp3Size / 1024 / 1024).toFixed(1)} MB`);
+      }
+      setExportSuccess(`${parts.join(' · ')}，点击 DOWNLOAD 下载文件`);
+      loadProjects();
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : '导出失败');
+    } finally {
+      setExportingId(null);
+    }
+  }, [loadProjects]);
+
+  const handleDownload = useCallback(async (projectId: string) => {
+    setDownloadingId(projectId);
+    try {
+      const result = await getProjectExportFiles(projectId);
+      for (const file of result.files ?? []) {
+        const blob = await downloadProjectFile(projectId, file);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      // silent
+    } finally {
+      setDownloadingId(null);
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--mute)', letterSpacing: '0.15em' }}>
+          LOADING…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 460, margin: '0 auto', padding: '40px 0' }}>
+      {/* 今日电台导出 */}
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.28em',
+          color: 'var(--mute)',
+          textTransform: 'uppercase',
+          marginBottom: 16,
+        }}
+      >
+        TODAY&apos;S SHOW · 今日电台
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--mute)', lineHeight: 1.6, marginBottom: 16 }}>
+        把今天播放过的节目按顺序串成一期可发布的素材（show.mp3 + show notes）。
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <button
+          onClick={handleExportToday}
+          disabled={isExportingToday}
+          style={{
+            padding: '8px 20px',
+            border: '1px solid var(--line)',
+            borderRadius: 999,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            letterSpacing: '0.15em',
+            color: 'var(--text)',
+            cursor: isExportingToday ? 'wait' : 'pointer',
+            background: 'transparent',
+          }}
+        >
+          {isExportingToday ? 'EXPORTING…' : 'EXPORT TODAY'}
+        </button>
+        {todayTask?.status === 'completed' && todayTask.result && (
+          <a
+            href={buildApiUrl(todayTask.result.downloadUrl)}
+            download
+            style={{
+              padding: '8px 20px',
+              border: '1px solid var(--text)',
+              borderRadius: 999,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              letterSpacing: '0.15em',
+              color: 'var(--text)',
+              textDecoration: 'none',
+            }}
+          >
+            DOWNLOAD ZIP
+          </a>
+        )}
+      </div>
+      {isExportingToday && todayTask?.progress && (
+        <div style={{ fontSize: 11, color: 'var(--mute)', fontFamily: 'var(--font-mono)', marginBottom: 12 }}>
+          {(() => {
+            const p = todayTask.progress;
+            const labels: Record<string, string> = {
+              collecting: '收集当日曲目…',
+              mixing: '处理音频',
+              concatenating: '拼接节目音频…',
+              notes: '生成 show notes…',
+              packaging: '打包 ZIP…',
+              done: '完成',
+            };
+            const base = labels[p.phase] ?? p.phase;
+            return p.phase === 'mixing' && p.current && p.total
+              ? `${base} ${p.current}/${p.total}${p.trackTitle ? ` · ${p.trackTitle}` : ''}`
+              : base;
+          })()}
+        </div>
+      )}
+      {todayTask?.status === 'completed' && todayTask.result && (
+        <div style={{ fontSize: 12, color: '#4ade80', marginBottom: 12 }}>
+          导出完成 · {todayTask.result.trackCount} 首 · {todayTask.result.date}
+        </div>
+      )}
+      {todayTask?.status === 'failed' && (
+        <div style={{ fontSize: 12, color: '#c44', marginBottom: 12 }}>
+          {todayTask.error ?? '导出失败'}
+        </div>
+      )}
+
+      <div style={{ borderTop: '1px solid var(--line)', margin: '28px 0 32px' }} />
+
+      <div
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          letterSpacing: '0.28em',
+          color: 'var(--mute)',
+          textTransform: 'uppercase',
+          marginBottom: 32,
+        }}
+      >
+        SHOW PROJECTS
+      </div>
+
+      {exportError && (
+        <div style={{ fontSize: 12, color: '#c44', marginBottom: 16 }}>{exportError}</div>
+      )}
+      {exportSuccess && (
+        <div style={{ fontSize: 12, color: '#4ade80', marginBottom: 16 }}>{exportSuccess}</div>
+      )}
+
+      {projects.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
+          暂无节目项目
+        </div>
+      ) : (
+        <div>
+          {projects.map((p) => (
+            <div
+              key={p.id}
+              style={{
+                padding: '16px 0',
+                borderTop: '1px solid var(--line)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 18,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {p.slug}
+                </div>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.15em',
+                    color: p.status === 'exported' ? 'var(--text)' : 'var(--faint)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {p.status}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                <button
+                  onClick={() => handleExport(p.id)}
+                  disabled={exportingId === p.id}
+                  style={{
+                    padding: '8px 20px',
+                    border: '1px solid var(--line)',
+                    borderRadius: 999,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10,
+                    letterSpacing: '0.15em',
+                    color: 'var(--text)',
+                    cursor: exportingId === p.id ? 'wait' : 'pointer',
+                    background: 'transparent',
+                  }}
+                >
+                  {exportingId === p.id ? 'EXPORTING…' : 'EXPORT'}
+                </button>
+                {p.status === 'exported' && (
+                  <button
+                    onClick={() => handleDownload(p.id)}
+                    disabled={downloadingId === p.id}
+                    style={{
+                      padding: '8px 20px',
+                      border: '1px solid var(--line)',
+                      borderRadius: 999,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      letterSpacing: '0.15em',
+                      color: 'var(--mute)',
+                      cursor: downloadingId === p.id ? 'wait' : 'pointer',
+                      background: 'transparent',
+                    }}
+                  >
+                    {downloadingId === p.id ? 'DOWNLOADING…' : 'DOWNLOAD'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid var(--line)' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// VolumeControl
+// ─────────────────────────────────────────────────────────────
+function VolumeControl({ musicRef }: { musicRef: React.RefObject<HTMLAudioElement | null> }) {
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    setVolume(v);
+    setMuted(v === 0);
+    if (musicRef.current) {
+      musicRef.current.volume = v;
+      musicRef.current.muted = v === 0;
+    }
+  }, [musicRef]);
+
+  const toggleMute = useCallback(() => {
+    if (musicRef.current) {
+      const next = !muted;
+      setMuted(next);
+      musicRef.current.muted = next;
+    }
+  }, [musicRef, muted]);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button
+        onClick={toggleMute}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: 'var(--mute)',
+          cursor: 'pointer',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10,
+          letterSpacing: '0.1em',
+          padding: 0,
+          width: 16,
+          textAlign: 'center',
+        }}
+      >
+        {muted || volume === 0 ? 'M' : 'V'}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={muted ? 0 : volume}
+        onChange={handleChange}
+        style={{
+          flex: 1,
+          height: 2,
+          cursor: 'pointer',
+          accentColor: 'var(--text)',
+        }}
+      />
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          color: 'var(--faint)',
+          width: 28,
+          textAlign: 'right',
+          letterSpacing: '0.05em',
+        }}
+      >
+        {Math.round((muted ? 0 : volume) * 100)}
+      </span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// NeteaseLoginModal
+// ─────────────────────────────────────────────────────────────
+function NeteaseLoginModal({
+  status,
+  onClose,
+  onStatusChange,
+}: {
+  status: NeteaseLoginStatus | null;
+  onClose: () => void;
+  onStatusChange: (s: NeteaseLoginStatus) => void;
+}) {
+  const [tab, setTab] = useState<'cookie' | 'qr'>('cookie');
+  const [cookieInput, setCookieInput] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [qrData, setQrData] = useState<{ key: string; qrImageUrl: string } | null>(null);
+  const [qrChecking, setQrChecking] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const handleCookieSubmit = async () => {
+    if (!cookieInput.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await submitNeteaseCookie(cookieInput.trim());
+      if (result.success) {
+        const fresh = await getNeteaseLoginStatus();
+        onStatusChange(fresh);
+        onClose();
+      } else {
+        setError(result.message || '提交失败');
+      }
+    } catch {
+      setError('网络错误');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleStartQr = async () => {
+    setError(null);
+    try {
+      const challenge = await createNeteaseQrLogin();
+      setQrData(challenge);
+      setQrChecking(true);
+      // Poll for QR scan result
+      pollRef.current = setInterval(async () => {
+        try {
+          const result = await checkNeteaseQrLogin(challenge.key);
+          if (result.loggedIn) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            const fresh = await getNeteaseLoginStatus();
+            onStatusChange(fresh);
+            onClose();
+          }
+        } catch {
+          // silent, keep polling
+        }
+      }, 2000);
+    } catch {
+      setError('获取二维码失败');
+    }
+  };
+
+  const handleStopQr = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setQrChecking(false);
+    setQrData(null);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 200,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: 'var(--bg-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 12,
+          padding: 28,
+          width: 360,
+          maxWidth: '90vw',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div>
+            <h3 style={{ color: 'var(--text)', margin: 0, fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
+              网易云音乐登录
+            </h3>
+            {status?.loggedIn && (
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--mute)' }}>
+                当前: {status.nickname ?? '已登录'}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--mute)',
+              cursor: 'pointer',
+              fontSize: 18,
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Tab switch */}
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--line)' }}>
+          {(['cookie', 'qr'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => { setTab(t); setError(null); }}
+              style={{
+                flex: 1,
+                padding: '8px 0',
+                background: 'none',
+                borderTop: 'none',
+                borderLeft: 'none',
+                borderRight: 'none',
+                borderBottom: tab === t ? '2px solid var(--text)' : '2px solid transparent',
+                color: tab === t ? 'var(--text)' : 'var(--mute)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.15em',
+                cursor: 'pointer',
+              }}
+            >
+              {t === 'cookie' ? 'COOKIE' : 'QR 扫码'}
+            </button>
+          ))}
+        </div>
+
+        {/* Cookie tab */}
+        {tab === 'cookie' && (
+          <div>
+            <p style={{ fontSize: 12, color: 'var(--mute)', marginBottom: 12, lineHeight: 1.5 }}>
+              从浏览器开发者工具中复制网易云音乐的 Cookie，粘贴到下方。
+            </p>
+            <textarea
+              value={cookieInput}
+              onChange={(e) => setCookieInput(e.target.value)}
+              placeholder="MUSIC_U=...; __csrf=..."
+              rows={4}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 6,
+                border: '1px solid var(--line)',
+                background: 'var(--ink-soft)',
+                color: 'var(--text)',
+                fontSize: 12,
+                fontFamily: 'var(--font-mono)',
+                resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              onClick={handleCookieSubmit}
+              disabled={submitting || !cookieInput.trim()}
+              style={{
+                marginTop: 12,
+                width: '100%',
+                padding: '10px 16px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--accent)',
+                color: '#000',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: submitting ? 'wait' : 'pointer',
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              {submitting ? '提交中…' : '提交 Cookie'}
+            </button>
+          </div>
+        )}
+
+        {/* QR tab */}
+        {tab === 'qr' && (
+          <div style={{ textAlign: 'center' }}>
+            {!qrData ? (
+              <div>
+                <p style={{ fontSize: 12, color: 'var(--mute)', marginBottom: 16, lineHeight: 1.5 }}>
+                  生成二维码后，使用网易云音乐 App 扫码登录。
+                </p>
+                <button
+                  onClick={handleStartQr}
+                  style={{
+                    padding: '10px 24px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'var(--accent)',
+                    color: '#000',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  生成二维码
+                </button>
+              </div>
+            ) : (
+              <div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qrData.qrImageUrl}
+                  alt="QR Code"
+                  style={{
+                    width: 200,
+                    height: 200,
+                    borderRadius: 8,
+                    border: '1px solid var(--line)',
+                    marginBottom: 12,
+                  }}
+                />
+                <p style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 12 }}>
+                  {qrChecking ? '等待扫码…' : '已停止'}
+                </p>
+                <button
+                  onClick={handleStopQr}
+                  style={{
+                    padding: '6px 16px',
+                    borderRadius: 6,
+                    border: '1px solid var(--line)',
+                    background: 'transparent',
+                    color: 'var(--mute)',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <p style={{ marginTop: 12, fontSize: 12, color: '#c44', textAlign: 'center' }}>
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────
+function formatTime(d: Date): string {
+  return [
+    String(d.getHours()).padStart(2, '0'),
+    String(d.getMinutes()).padStart(2, '0'),
+    String(d.getSeconds()).padStart(2, '0'),
+  ].join(':');
+}
+
+function fmtTime(s: number | null | undefined): string {
+  if (s === null || s === undefined || !Number.isFinite(s) || s <= 0) return '--:--';
+  const m = Math.floor(s / 60);
+  const ss = Math.floor(s % 60);
+  return `${m}:${String(ss).padStart(2, '0')}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// MobileRadio — mobile layout (< 640px)
+// ─────────────────────────────────────────────────────────────
+type MobileRadioProps = {
+  theme: Theme;
+  isDark: boolean;
+  onToggleTheme: () => void;
+  track: Track | null;
+  progress: number;
+  durationSec: number | null;
+  isPlaying: boolean;
+  isLoading: boolean;
+  episodeState: string;
+  error: string | null;
+  isFavorited: boolean;
+  onPlayPause: () => void;
+  onNext: () => void;
+  onToggleFavorite: () => void;
+  musicRef: React.RefObject<HTMLAudioElement | null>;
+  typedText: string;
+  currentDjText: string;
+  djLineIndex: number;
+  messages: ChatMessage[];
+  inputDraft: string;
+  onInputChange: (v: string) => void;
+  onSend: (text: string) => void;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
+  timeStr: string;
+};
+
+function MobileRadio({
+  isDark, onToggleTheme,
+  track, progress, durationSec,
+  isPlaying, isLoading, error,
+  isFavorited, onPlayPause, onNext, onToggleFavorite, musicRef,
+  typedText, currentDjText,
+  messages, inputDraft, onInputChange, onSend, chatEndRef, timeStr,
+}: MobileRadioProps) {
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
+  const title = track?.title ?? '—';
+  const artist = track?.artist ?? '—';
+  const cnLabel = isDark ? 'EDITORIAL · DARK' : 'EDITORIAL · LIGHT';
+  const canSend = inputDraft.trim().length > 0;
+  const normalizedDjText = currentDjText.trim();
+  const chatMessages = messages.filter((message) => {
+    const text = message.text.trim();
+    return text.length > 0 && (message.origin !== 'broadcast' || text !== normalizedDjText);
+  });
+  const visualizer = useAudioReactiveVisualizer(musicRef, isPlaying);
+  const handleVisualizerPlayPause = useCallback(() => {
+    visualizer.resume();
+    onPlayPause();
+  }, [onPlayPause, visualizer]);
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100vh',
+        minHeight: 667,
+        position: 'relative',
+        background: 'var(--bg)',
+        color: 'var(--text)',
+        fontFamily: 'var(--font-body)',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Vignette */}
+      <div
+        style={{
+          position: 'absolute', inset: 0,
+          background: isDark
+            ? 'radial-gradient(120% 80% at 50% 100%, rgba(255,255,255,0.025), transparent 60%)'
+            : 'radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0.025), transparent 60%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Status bar */}
+      <div
+        style={{
+          position: 'absolute', top: 0, left: 0, right: 0,
+          padding: '14px 28px 0',
+          display: 'flex', justifyContent: 'space-between',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12,
+          color: 'var(--text)',
+          zIndex: 10,
+        }}
+      >
+        <span>{timeStr.slice(0, 5)}</span>
+        <span>•••</span>
+      </div>
+
+      {/* Header — channel label + theme toggle */}
+      <div
+        style={{
+          position: 'absolute', top: 44, left: 0, right: 0,
+          padding: '0 24px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)', fontSize: 11,
+            color: 'var(--mute)', letterSpacing: '0.2em',
+          }}
+        >
+          CH · {cnLabel}
+        </div>
+        <button
+          onClick={onToggleTheme}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '5px 9px 5px 7px',
+            background: 'transparent', border: '1px solid var(--line)',
+            borderRadius: 999, color: 'var(--text)',
+            fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.2em',
+            cursor: 'pointer',
+          }}
+        >
+          <span
+            style={{
+              width: 12, height: 12, borderRadius: '50%',
+              border: '1px solid var(--text)',
+              background: `linear-gradient(90deg, ${isDark ? '#0e0e10' : '#f4f1ea'} 50%, ${isDark ? '#f4f1ea' : '#0e0e10'} 50%)`,
+              flexShrink: 0,
+            }}
+          />
+          <span>{isDark ? '浅色' : '深色'}</span>
+        </button>
+      </div>
+
+      {/* Visualizer — 220×220 */}
+      <div
+        style={{
+          position: 'absolute', top: 82, left: 0, right: 0,
+          height: 230, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 5,
+        }}
+      >
+        <MiniVisualizer
+          size={204}
+          levels={visualizer.levels}
+          energy={visualizer.energy}
+          reactive={visualizer.reactive}
+        />
+      </div>
+
+      {/* Now playing — centered */}
+      <div
+        style={{
+          position: 'absolute', top: 326, left: 24, right: 24,
+          textAlign: 'center',
+          zIndex: 6,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-display)', fontSize: 'clamp(30px, 8vw, 34px)', fontWeight: 400,
+            lineHeight: 1.06, fontStyle: 'italic', letterSpacing: '-0.01em',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-serif-en)', fontStyle: 'italic',
+            fontSize: 13, color: 'var(--accent)', marginTop: 5,
+          }}
+        >
+          {artist}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ position: 'absolute', top: 402, left: 0, right: 0, padding: '0 24px', zIndex: 6 }}>
+        <div style={{ height: 1, background: 'var(--line)', position: 'relative' }}>
+          <div
+            style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0,
+              width: `${progress * 100}%`, background: 'var(--text)',
+              transition: 'width 0.3s ease',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute', left: `${progress * 100}%`, top: -2,
+              width: 1, height: 5, background: 'var(--text)',
+              transform: 'translateX(-50%)', transition: 'left 0.3s ease',
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: 'flex', justifyContent: 'space-between',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--mute)',
+            marginTop: 6, letterSpacing: '0.08em',
+          }}
+        >
+          <span>{fmtTime(durationSec ? progress * durationSec : null)}</span>
+          <span>{fmtTime(durationSec)}</span>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div
+        style={{
+          position: 'absolute', top: 434, left: 24, right: 24,
+          display: 'flex', gap: 10, justifyContent: 'center',
+          zIndex: 6,
+        }}
+      >
+        <button
+          onClick={handleVisualizerPlayPause}
+          disabled={isLoading}
+          style={{
+            padding: '8px 20px', border: '1px solid var(--line)', borderRadius: 999,
+            fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.15em',
+            color: 'var(--text)', background: 'transparent',
+            cursor: isLoading ? 'wait' : 'pointer',
+          }}
+        >
+          {isLoading ? '…' : isPlaying ? 'PAUSE' : 'PLAY'}
+        </button>
+        <button
+          onClick={onNext}
+          disabled={isLoading}
+          style={{
+            padding: '8px 20px', border: '1px solid var(--line)', borderRadius: 999,
+            fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.15em',
+            color: 'var(--mute)', background: 'transparent',
+            cursor: isLoading ? 'wait' : 'pointer',
+          }}
+        >
+          NEXT
+        </button>
+        <button
+          onClick={onToggleFavorite}
+          aria-label={isFavorited ? '取消收藏' : '收藏'}
+          style={{
+            padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 999,
+            background: 'transparent', cursor: 'pointer',
+            color: isFavorited ? 'var(--text)' : 'var(--faint)', fontSize: 16,
+          }}
+        >
+          {isFavorited ? '♥' : '♡'}
+        </button>
+      </div>
+
+      {/* DJ subtitle card */}
+      <div
+        style={{
+          position: 'absolute', top: 478, left: 24, right: 24,
+          padding: '14px 18px',
+          border: '1px solid var(--line)', borderRadius: 18,
+          zIndex: 6,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.22em',
+            color: 'var(--accent)', marginBottom: 6,
+          }}
+        >
+          DJ · 正在说话
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-display)', fontSize: 15,
+            lineHeight: 1.5, color: 'var(--text)', minHeight: '2em',
+          }}
+        >
+          {typedText || '等待播放…'}
+          <span
+            style={{
+              display: 'inline-block', width: '0.55em', height: '1em',
+              background: 'var(--text)', verticalAlign: '-0.12em',
+              marginLeft: '0.18em', opacity: 0.6,
+              animation: 'fr-caret 1.1s steps(1) infinite',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div style={{ position: 'absolute', top: 570, left: 24, right: 24, fontSize: 11, color: '#c44', zIndex: 7 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Chat drawer */}
+      <div
+        style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          background: 'var(--bg-2)',
+          borderTop: '1px solid var(--line)',
+          borderRadius: '24px 24px 0 0',
+          zIndex: 20,
+          height: drawerExpanded ? '60vh' : 204,
+          maxHeight: drawerExpanded ? '60vh' : 204,
+          padding: '14px 24px',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          transition: 'height 300ms ease, max-height 300ms ease',
+          display: 'flex', flexDirection: 'column',
+        }}
+      >
+        {/* Grab bar */}
+        <div
+          onClick={() => setDrawerExpanded((v) => !v)}
+          style={{
+            width: 38, height: 4, borderRadius: 2,
+            background: 'var(--mute)', margin: '0 auto 14px', opacity: 0.4,
+            cursor: 'pointer', flexShrink: 0,
+          }}
+          role="button"
+          aria-label={drawerExpanded ? '收起聊天' : '展开聊天'}
+        />
+
+        {/* Chat header */}
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginBottom: 12, flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: 'var(--accent)',
+              animation: 'fr-pulse 1.5s ease-in-out infinite',
+            }}
+          />
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10,
+              color: 'var(--mute)', letterSpacing: '0.18em',
+            }}
+          >
+            和 DJ 聊聊
+          </div>
+        </div>
+
+        {/* Last message preview (when collapsed) */}
+        {!drawerExpanded && chatMessages.length > 0 && (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--line)',
+              fontSize: 12, lineHeight: 1.5,
+              fontFamily: 'var(--font-display)', color: 'var(--text)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              marginBottom: 8,
+              flexShrink: 0,
+            }}
+          >
+            {chatMessages[chatMessages.length - 1]?.text ?? ''}
+          </div>
+        )}
+
+        {/* Messages (when expanded) */}
+        {drawerExpanded && (
+          <div
+            ref={chatEndRef}
+            style={{
+              flex: 1, overflowY: 'auto',
+              minHeight: 0,
+              padding: '0 0 8px',
+              display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+          >
+            {chatMessages.map((m) => (
+              <div key={m.id}>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 9,
+                    color: m.from === 'YOU' ? 'var(--faint)' : 'var(--mute)',
+                    letterSpacing: '0.22em', marginBottom: 3,
+                  }}
+                >
+                  {m.from}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13, lineHeight: 1.5,
+                    color: m.from === 'YOU' ? 'var(--mute)' : 'var(--text)',
+                    fontFamily: m.from === 'YOU' ? 'var(--font-body)' : 'var(--font-display)',
+                    fontStyle: m.from === 'YOU' ? 'normal' : 'italic',
+                  }}
+                >
+                  {m.text}
+                  {m.streaming && (
+                    <span
+                      style={{
+                        display: 'inline-block', width: '0.55em', height: '1em',
+                        background: 'var(--text)', verticalAlign: '-0.12em',
+                        marginLeft: '0.18em', opacity: 0.6,
+                        animation: 'fr-caret 1.1s steps(1) infinite',
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Input */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSend) onSend(inputDraft);
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 14px',
+            borderRadius: 999,
+            border: '1px solid var(--line)',
+            flexShrink: 0,
+          }}
+        >
+          <input
+            placeholder="说点什么…"
+            value={inputDraft}
+            onChange={(e) => onInputChange(e.target.value)}
+            onFocus={() => setDrawerExpanded(true)}
+            style={{
+              flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-body)',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!canSend}
+            style={{
+              width: 24, height: 24, borderRadius: '50%',
+              border: 'none', cursor: canSend ? 'pointer' : 'default',
+              background: canSend ? 'var(--accent)' : 'var(--line)',
+              color: 'var(--bg)', fontSize: 13, fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            ↑
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// MiniVisualizer — mobile (220 × 220)
+// ─────────────────────────────────────────────────────────────
+function MiniVisualizer({
+  size = 220,
+  levels = EMPTY_VISUALIZER_LEVELS,
+  energy = 0,
+  reactive = false,
+}: {
+  size?: number;
+  levels?: number[];
+  energy?: number;
+  reactive?: boolean;
+}) {
+  const bars = 72;
+  const ringOpacity = reactive ? 0.28 + energy * 0.34 : 0.4;
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      {[0.4, 0.65, 0.9].map((s, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute', inset: `${(1 - s) * 50}%`,
+            borderRadius: '50%', border: '1px solid var(--faint)',
+            opacity: Math.max(0.08, ringOpacity - i * 0.1),
+            transition: 'opacity 120ms linear',
+          }}
+        />
+      ))}
+      <div
+        style={{
+          position: 'absolute', inset: '46%',
+          borderRadius: '50%', border: '1px solid var(--text)',
+          transform: `scale(${1 + energy * 0.12})`,
+          transition: 'transform 80ms linear',
+        }}
+      />
+      <svg
+        width={size} height={size} viewBox="0 0 220 220"
+        style={{ animation: 'fr-spin 80s linear infinite' }}
+      >
+        {Array.from({ length: bars }).map((_, i) => {
+          const a = (i / bars) * Math.PI * 2;
+          const r = 72;
+          const idle = 3 + Math.abs(Math.sin(i * 0.4) * Math.cos(i * 0.2)) * 18;
+          const level = levels[i] ?? 0;
+          const h = reactive ? 3 + idle * 0.36 + level * 28 : idle;
+          const rd = (v: number) => Math.round(v * 100) / 100;
+          return (
+            <line
+              key={i}
+              x1={rd(110 + Math.cos(a) * r)}
+              y1={rd(110 + Math.sin(a) * r)}
+              x2={rd(110 + Math.cos(a) * (r + h))}
+              y2={rd(110 + Math.sin(a) * (r + h))}
+              stroke="currentColor"
+              strokeWidth={reactive ? 0.65 + level * 0.95 : 0.8}
+              strokeLinecap="round"
+              opacity={reactive ? 0.35 + level * 0.65 : 0.55 + (i % 4) * 0.1}
+              style={{
+                animation: reactive ? 'none' : `fr-wave ${1.3 + (i % 6) * 0.16}s ease-in-out infinite`,
+                animationDelay: reactive ? undefined : `${i * 0.025}s`,
+                transformOrigin: '110px 110px',
+                transition: 'opacity 80ms linear, stroke-width 80ms linear',
+              }}
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+}

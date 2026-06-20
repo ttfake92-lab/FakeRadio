@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Track } from "@fakeradio/shared";
 import {
-  createMockCalendarAdapter,
-  createMockDeviceAdapter,
-  createMockLlmAdapter,
-  createMockStorySourceAdapter,
-  createMockTtsAdapter,
-  createMockWeatherAdapter
-} from "../adapters/index.js";
+  createFakeCalendarAdapter,
+  createFakeDeviceAdapter,
+  createFakeLlmAdapter,
+  createFakeStorySourceAdapter,
+  createFakeTtsAdapter,
+  createFakeWeatherAdapter
+} from "../test/fake-adapters.js";
 import type { MusicAdapter } from "../adapters/types.js";
 import { createStateRepository } from "../state/state-repository.js";
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
@@ -22,42 +22,42 @@ const TRACKS: Track[] = [
     title: "Morning Signal",
     artist: "FakeRadio Session",
     durationMs: 184000,
-    source: "mock"
+    source: "local"
   },
   {
     id: "mock-track-002",
     title: "Quiet Compiler",
     artist: "FakeRadio Session",
     durationMs: 206000,
-    source: "mock"
+    source: "local"
   },
   {
     id: "mock-track-003",
     title: "Night Downshift",
     artist: "FakeRadio Session",
     durationMs: 221000,
-    source: "mock"
+    source: "local"
   },
   {
     id: "mock-track-004",
     title: "Afternoon Haze",
     artist: "FakeRadio Session",
     durationMs: 195000,
-    source: "mock"
+    source: "local"
   },
   {
     id: "mock-track-005",
     title: "Evening Protocol",
     artist: "FakeRadio Session",
     durationMs: 212000,
-    source: "mock"
+    source: "local"
   },
   {
     id: "mock-track-006",
     title: "Midnight Thread",
     artist: "FakeRadio Session",
     durationMs: 198000,
-    source: "mock"
+    source: "local"
   }
 ];
 
@@ -87,16 +87,16 @@ function createPrewarmDeps(): PrewarmDeps {
   };
 
   return {
-    llm: createMockLlmAdapter(),
+    llm: createFakeLlmAdapter(),
     music,
-    tts: createMockTtsAdapter(),
+    tts: createFakeTtsAdapter(),
     ttsCacheDir: join(baseDir, "tts"),
-    weather: createMockWeatherAdapter(),
-    calendar: createMockCalendarAdapter(),
-    devices: createMockDeviceAdapter(),
-    storySource: createMockStorySourceAdapter(),
-    publicMetadataAdapter: createMockStorySourceAdapter(),
-    webResearchAdapter: createMockStorySourceAdapter(),
+    weather: createFakeWeatherAdapter(),
+    calendar: createFakeCalendarAdapter(),
+    devices: createFakeDeviceAdapter(),
+    storySource: createFakeStorySourceAdapter(),
+    publicMetadataAdapter: createFakeStorySourceAdapter(),
+    webResearchAdapter: createFakeStorySourceAdapter(),
     likedSongs,
     stateRepo: createStateRepository(join(baseDir, "fakeradio.db")),
     nowProvider: () => new Date(2026, 3, 30, 23, 30, 0),
@@ -174,7 +174,7 @@ describe("runPrewarmForDate", () => {
       title: "Morning Signal",
       artist: "FakeRadio Session",
       album: null,
-      source: "mock",
+      source: "local",
       playedAt: new Date(2026, 3, 30, 10, 0, 0).toISOString()
     });
 

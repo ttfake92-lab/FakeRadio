@@ -5,17 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createMockCalendarAdapter,
-  createMockDeviceAdapter,
   createMusicAdapter,
-  createMockLlmAdapter,
-  createMockStorySourceAdapter,
-  createMockWeatherAdapter,
-  createWeatherAdapter,
-  createEdgeTtsAdapter,
-  createPublicMetadataAdapter,
-  createWebResearchAdapter,
-  createLarkCalendarAdapter,
 } from "../adapters/index.js";
 import {
   createNeteaseCookieStore,
@@ -23,8 +13,6 @@ import {
   type NeteaseAuthService,
 } from "../adapters/music/netease-auth.js";
 import { createNeteaseHttpClient } from "../adapters/music/netease-http-client.js";
-import { createDeepSeekAdapter } from "../adapters/llm/deepseek-llm-adapter.js";
-import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
 import type { CalendarAdapter, DeviceAdapter, StorySourceAdapter, TtsAdapter, WeatherAdapter } from "../adapters/types.js";
 import { env } from "../config/env.js";
 import { createStreamBroadcaster } from "../realtime/stream-bus.js";
@@ -52,6 +40,8 @@ import { createStateRecentPlayedRepository } from "../show/state-recent-played-r
 import { scheduleTonightBriefIfNeeded, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
+import { createRuntimeAdapterManager } from "./runtime-adapter-manager.js";
+import { SettingsSchema } from "@fakeradio/shared";
 
 function loadSystemPrompt(): string {
   try {
@@ -81,14 +71,8 @@ type CreateRadioServerOptions = {
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
   const app = Fastify({ logger: false });
-  const allowedOrigins = [
-    "http://localhost:3302",
-    "http://127.0.0.1:3302",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-  ];
   await app.register(cors, {
-    origin: allowedOrigins
+    origin: true
   });
   await app.register(websocket);
 
@@ -99,53 +83,59 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     return payload;
   });
 
-  // Adapters
-  const llm = options.llmAdapter ??
-    (env.FAKERADIO_DEEPSEEK_API_KEY
-      ? createDeepSeekAdapter({ apiKey: env.FAKERADIO_DEEPSEEK_API_KEY, model: env.FAKERADIO_DEEPSEEK_MODEL, baseUrl: env.FAKERADIO_DEEPSEEK_BASE_URL })
-      : createMockLlmAdapter());
-  const llmStatus = options.llmAdapter ? "ready" : env.FAKERADIO_DEEPSEEK_API_KEY ? "ready" : "mock";
-
   const systemPrompt = loadSystemPrompt();
+  const baseDir = options.baseDir ?? resolve(process.cwd());
   const ttsCacheDir = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
+  const stateRepo = createStateRepository(resolve(baseDir, "fakeradio.db"));
   const neteaseCookieStore = createNeteaseCookieStore(resolve(process.cwd(), env.FAKERADIO_NETEASE_COOKIE_FILE));
-  const { music, status: musicStatus } = options.musicAdapterResult ??
-    (await createMusicAdapter({
-      providerMode: env.FAKERADIO_PROVIDER_MODE,
-      baseUrl: env.FAKERADIO_NETEASE_API_BASE_URL,
-      timeoutMs: env.FAKERADIO_NETEASE_TIMEOUT_MS,
-      cookieProvider: () => neteaseCookieStore.read(),
-      audioLevel: env.FAKERADIO_NETEASE_AUDIO_LEVEL
-    }));
+  const defaultSettings = SettingsSchema.parse({
+    providerMode: "netease",
+    neteaseBaseUrl: env.FAKERADIO_NETEASE_API_BASE_URL,
+    neteaseTimeoutMs: env.FAKERADIO_NETEASE_TIMEOUT_MS,
+    neteaseAudioLevel: env.FAKERADIO_NETEASE_AUDIO_LEVEL,
+    ttsProvider: env.FAKERADIO_TTS_PROVIDER,
+    ttsVoice: env.FAKERADIO_TTS_VOICE,
+    mimoVoice: env.FAKERADIO_MIMO_TTS_VOICE
+  });
+  const savedSettings = await stateRepo.getPref<unknown>("show:settings");
+  const savedSettingsObject = savedSettings && typeof savedSettings === "object"
+    ? { ...(savedSettings as Record<string, unknown>), providerMode: "netease" }
+    : {};
+  const initialSettings = SettingsSchema.parse({
+    ...defaultSettings,
+    ...savedSettingsObject
+  });
+  const runtimeManager = await createRuntimeAdapterManager({
+    cookieStore: neteaseCookieStore,
+    ttsCacheDir,
+    settings: initialSettings,
+    overrides: {
+      ...(options.llmAdapter ? { llm: options.llmAdapter } : {}),
+      ...(options.musicAdapterResult ? { music: options.musicAdapterResult.music } : {}),
+      ...(options.ttsAdapter ? { tts: options.ttsAdapter } : {}),
+      ...(options.weatherAdapter ? { weather: options.weatherAdapter } : {}),
+      ...(options.calendarAdapter ? { calendar: options.calendarAdapter } : {}),
+      ...(options.deviceAdapter ? { devices: options.deviceAdapter } : {}),
+      ...(options.storySourceAdapter ? { storySource: options.storySourceAdapter } : {}),
+      ...(options.webResearchAdapter ? { webResearchAdapter: createCachedStorySourceAdapter(options.webResearchAdapter) } : {})
+    }
+  });
+  const llm = runtimeManager.llm;
+  const music = runtimeManager.music;
+  const tts = runtimeManager.tts;
+  const weather = runtimeManager.weather;
+  const calendar = runtimeManager.calendar;
+  const devices = runtimeManager.devices;
+  const storySource = runtimeManager.storySource;
+  const runtimeStatuses = runtimeManager.getStatuses();
   const neteaseAuth = options.neteaseAuthService ?? createNeteaseAuthService({
     cookieStore: neteaseCookieStore,
     fetchJson: createNeteaseHttpClient({
-      baseUrl: env.FAKERADIO_NETEASE_API_BASE_URL,
-      timeoutMs: env.FAKERADIO_NETEASE_TIMEOUT_MS,
+      baseUrl: initialSettings.neteaseBaseUrl,
+      timeoutMs: initialSettings.neteaseTimeoutMs,
       cookieProvider: () => neteaseCookieStore.read()
     }).fetchJson
   });
-
-  let ttsStatus: "ready" | "mock" = "mock";
-  const tts = options.ttsAdapter ?? (() => {
-    if (env.FAKERADIO_TTS_PROVIDER === "mimo" && env.FAKERADIO_MIMO_API_KEY) {
-      ttsStatus = "ready";
-      return createMimoTtsAdapter({ apiKey: env.FAKERADIO_MIMO_API_KEY, cacheDir: ttsCacheDir, baseUrl: env.FAKERADIO_MIMO_BASE_URL, voice: env.FAKERADIO_MIMO_TTS_VOICE });
-    }
-    ttsStatus = "ready";
-    return createEdgeTtsAdapter({ cacheDir: ttsCacheDir, voice: env.FAKERADIO_TTS_VOICE });
-  })();
-
-  const weather = options.weatherAdapter ?? (env.FAKERADIO_OPENWEATHER_API_KEY
-    ? createWeatherAdapter({ apiKey: env.FAKERADIO_OPENWEATHER_API_KEY, city: env.FAKERADIO_WEATHER_CITY })
-    : createMockWeatherAdapter());
-  const weatherStatus = options.weatherAdapter ? "ready" : env.FAKERADIO_OPENWEATHER_API_KEY ? "ready" : "mock";
-  const calendar = options.calendarAdapter ?? (env.FAKERADIO_LARK_CALENDAR_CLIENT_ID && env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET
-    ? createLarkCalendarAdapter({ clientId: env.FAKERADIO_LARK_CALENDAR_CLIENT_ID, clientSecret: env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET })
-    : createMockCalendarAdapter());
-  const calendarStatus = options.calendarAdapter ? "ready" : (env.FAKERADIO_LARK_CALENDAR_CLIENT_ID && env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET) ? "ready" : "mock";
-  const devices = options.deviceAdapter ?? createMockDeviceAdapter();
-  const storySource = options.storySourceAdapter ?? createMockStorySourceAdapter();
   const stream = createStreamBroadcaster();
   const memory = createInMemoryMemoryRepository();
   const nowProvider = options.now ?? (() => new Date());
@@ -158,21 +148,18 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const userPreferences = options.userPreferences ?? (await loadUserPreferences());
 
   // State
-  const stateRepo = createStateRepository(resolve(options.baseDir ?? process.cwd(), "fakeradio.db"));
   const { lastPlayedTracks, todayDjMessages, lastQueueSnapshot, latestPrefs } = await stateRepo.getStartupState();
   const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
   const currentPlanBlock = getCurrentPlanBlock(currentPlan, nowProvider());
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
-  const initialQueue = await music.recommend({ mood: currentMoodHint, limit: 3 });
-  const queueToRestore = (lastQueueSnapshot?.trackIds && lastQueueSnapshot.trackIds.length > 0) ? lastQueueSnapshot.trackIds : initialQueue;
+  const initialQueue = await music.recommend({ mood: currentMoodHint, limit: 10 }).catch(() => []);
+  const restoredQueue = (lastQueueSnapshot?.trackIds && lastQueueSnapshot.trackIds.length > 0)
+    ? lastQueueSnapshot.trackIds
+    : initialQueue;
+  const queueToRestore = restoredQueue.filter((track) => (track as { source?: string }).source !== "mock");
   const state = createPlaybackState(queueToRestore, lastPlayedTracks.map((track) => track.trackId));
 
-  const effectiveTtsStatus = options.ttsAdapter ? "mock" : ttsStatus;
-  const effectiveStorySourceStatus = options.storySourceAdapter ? "ready" : "mock";
-  const effectiveWebResearchStatus = (options.webResearchAdapter || env.FAKERADIO_BRAVE_API_KEY) ? "ready" : "disabled";
-
   // Routes
-  const baseDir = options.baseDir ?? resolve(process.cwd());
   const programsDir = resolve(baseDir, "user", "programs");
   const showsDir = resolve(baseDir, "user", "shows");
   const programBriefRepo = createProgramBriefRepository(programsDir);
@@ -182,15 +169,18 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const jobRegistry = createJobRegistry(programsDir);
   const showProjectRepo = createShowProjectRepository(showsDir);
   registerRoutes({
-    app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus,
-    ttsStatus: effectiveTtsStatus, tts, ttsCacheDir,
-    systemPrompt, userPreferences, weather, weatherStatus, calendar, calendarStatus, devices, storySource,
+    app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir,
+    llm, llmStatus: runtimeStatuses.llm, music, musicStatus: runtimeStatuses.music,
+    ttsStatus: runtimeStatuses.tts, tts, ttsCacheDir,
+    systemPrompt, userPreferences, weather, weatherStatus: runtimeStatuses.weather,
+    calendar, calendarStatus: runtimeStatuses.calendar, devices, storySource,
     publicMetadataAdapter: options.publicMetadataAdapter,
-    webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
+    webResearchAdapter: runtimeManager.getWebResearchAdapter(),
     currentMoodHint, nowProvider,
-    storySourceStatus: effectiveStorySourceStatus,
-    webResearchStatus: effectiveWebResearchStatus,
+    storySourceStatus: runtimeStatuses.storySource,
+    webResearchStatus: runtimeStatuses.webResearch,
     neteaseAuth,
+    runtimeManager,
     baseDir,
     programBriefRepo,
     showPlanRepo,
@@ -219,7 +209,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     devices,
     storySource,
     publicMetadataAdapter: options.publicMetadataAdapter,
-    webResearchAdapter: options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined,
+    webResearchAdapter: runtimeManager.getWebResearchAdapter(),
     likedSongs,
     stateRepo,
     nowProvider,
@@ -228,7 +218,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
 
   // 统一的默认适配器策略
   const defaultPublicMetadataAdapter = options.publicMetadataAdapter;
-  const defaultWebResearchAdapter = options.webResearchAdapter ? createCachedStorySourceAdapter(options.webResearchAdapter) : undefined;
+  const defaultWebResearchAdapter = runtimeManager.getWebResearchAdapter();
 
   const prewarmScheduler: PrewarmScheduler = createPrewarmScheduler({
     prewarmTime: env.FAKERADIO_PREWARM_TIME,

@@ -1,24 +1,26 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import type { Settings as SettingsType } from "@fakeradio/shared";
 import { getSettings, updateSettings } from "../../lib/api-client";
 
 export type SettingsPanelProps = {
   isExpanded: boolean;
   isOpen: boolean;
+  embedded?: boolean;
   onToggleExpand: () => void;
   onClose: () => void;
 };
 
-export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ isExpanded, isOpen, embedded = false, onToggleExpand, onClose }: SettingsPanelProps) {
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const pendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const settingsSnapshotRef = useRef<SettingsType | null>(null);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const response = await getSettings();
       setSettings(response.settings);
@@ -28,7 +30,7 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -48,6 +50,7 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
     value: SettingsType[K]
   ) => {
     if (!settings) return;
+    setSaveMessage(null);
     setSettings((prev) => {
       const updated = prev ? { ...prev, [key]: value } : prev;
       settingsSnapshotRef.current = updated;
@@ -63,9 +66,11 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
           const response = await updateSettings(currentSettings);
           setSettings(response.settings);
           settingsSnapshotRef.current = response.settings;
+          setSaveMessage("设置已生效");
         }
       } catch (e) {
         console.error("Failed to update settings", e);
+        setSaveMessage(e instanceof Error ? e.message : "设置应用失败");
         await loadSettings();
       } finally {
         setSaving(false);
@@ -87,19 +92,16 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
   return (
     <div
       style={{
-        position: "fixed",
-        bottom: 80,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
-        maxHeight: isExpanded ? "calc(100vh - 160px)" : "auto",
-        background: "rgba(10, 10, 10, 0.95)",
-        border: "1px solid rgba(255, 255, 255, 0.15)",
-        borderRadius: 12,
-        overflow: "hidden",
+        position: embedded ? "relative" : "fixed",
+        ...(embedded ? {} : { bottom: 80, left: "50%", transform: "translateX(-50%)" }),
+        width: embedded ? "100%" : isExpanded ? "min(400px, calc(100vw - 32px))" : "min(200px, calc(100vw - 32px))",
+        maxHeight: embedded ? "100%" : isExpanded ? "calc(100vh - 160px)" : "auto",
+        background: embedded ? "transparent" : "var(--bg-2)",
+        border: embedded ? "none" : "1px solid var(--line)",
+        borderRadius: 0,
+        overflow: "auto",
         transition: "width 0.2s ease, transform 0.2s ease",
-        zIndex: 100,
-        backdropFilter: "blur(12px)",
+        ...(embedded ? {} : { zIndex: 100 }),
       }}
     >
       <div
@@ -108,16 +110,22 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
           alignItems: "center",
           justifyContent: "space-between",
           padding: "12px 16px",
-          borderBottom: isExpanded ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
+          borderBottom: isExpanded ? "1px solid var(--line)" : "none",
           cursor: "pointer",
-          background: "rgba(255, 255, 255, 0.02)",
+          background: "var(--ink-soft)",
         }}
         onClick={onToggleExpand}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>⚙️</span>
-          <span style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>
-            {isExpanded ? "Settings" : "设置"}
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              color: "var(--text)",
+              fontSize: 20,
+              fontStyle: "italic",
+            }}
+          >
+            Settings
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -130,16 +138,25 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: "var(--mute)",
               cursor: "pointer",
-              fontSize: 16,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.15em",
               padding: 4,
             }}
           >
-            ✕
+            CLOSE
           </button>
-          <span style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11 }}>
-            {isExpanded ? "▼" : "▶"}
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--faint)",
+              fontSize: 9,
+              letterSpacing: "0.15em",
+            }}
+          >
+            {isExpanded ? "V" : ">"}
           </span>
         </div>
       </div>
@@ -148,13 +165,21 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
         <div style={{ padding: 16, maxHeight: "calc(100vh - 260px)", overflowY: "auto" }}>
           {loading ? (
             <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <p style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 13, margin: 0 }}>
-                加载中…
+              <p
+                style={{
+                  color: "var(--faint)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  letterSpacing: "0.15em",
+                  margin: 0,
+                }}
+              >
+                Loading…
               </p>
             </div>
           ) : settings ? (
             <>
-              <SettingSection title="研究设置">
+              <SettingSection title="Research">
                 <ToggleSetting
                   label="启用外部资料研究"
                   description="使用 web research 为节目收集背景信息"
@@ -164,22 +189,51 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
                 />
               </SettingSection>
 
-              <SettingSection title="音乐 Provider">
+              <SettingSection title="Music Provider">
                 <SelectSetting
                   label="Provider 模式"
                   description="选择音乐来源"
                   value={settings.providerMode}
                   options={[
-                    { value: "auto", label: "自动 (优先真实)" },
                     { value: "netease", label: "网易云音乐" },
-                    { value: "mock", label: "模拟数据" },
                   ]}
                   onChange={(v) => handleSettingChange("providerMode", v)}
                   disabled={saving}
                 />
+                <TextSetting
+                  label="网易云 API 地址"
+                  description="本地 NeteaseCloudMusicApi 服务地址"
+                  value={settings.neteaseBaseUrl}
+                  onChange={(v) => handleSettingChange("neteaseBaseUrl", v)}
+                  disabled={saving}
+                />
+                <TextSetting
+                  label="网易云超时 (ms)"
+                  description="探测和请求网易云服务的超时时间"
+                  value={String(settings.neteaseTimeoutMs)}
+                  onChange={(v) => {
+                    const next = Number.parseInt(v, 10);
+                    if (Number.isFinite(next) && next > 0) handleSettingChange("neteaseTimeoutMs", next);
+                  }}
+                  disabled={saving}
+                />
+                <SelectSetting
+                  label="网易云音质"
+                  description="歌曲 URL 解析时请求的音质级别"
+                  value={settings.neteaseAudioLevel}
+                  options={[
+                    { value: "standard", label: "standard" },
+                    { value: "higher", label: "higher" },
+                    { value: "exhigh", label: "exhigh" },
+                    { value: "lossless", label: "lossless" },
+                    { value: "hires", label: "hires" },
+                  ]}
+                  onChange={(v) => handleSettingChange("neteaseAudioLevel", v)}
+                  disabled={saving}
+                />
               </SettingSection>
 
-              <SettingSection title="TTS 语音">
+              <SettingSection title="TTS Voice">
                 <SelectSetting
                   label="TTS Provider"
                   description="选择语音合成引擎"
@@ -207,7 +261,7 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
                 />
               </SettingSection>
 
-              <SettingSection title="隐私">
+              <SettingSection title="Privacy">
                 <SelectSetting
                   label="Trace 隐私级别"
                   description="控制制作 trace 的展示程度"
@@ -222,7 +276,7 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
                 />
               </SettingSection>
 
-              <SettingSection title="节目制作">
+              <SettingSection title="Production">
                 <RangeSetting
                   label="外部曲目上限 (%)"
                   description="主题节目中外部来源曲目的最大比例"
@@ -248,25 +302,49 @@ export function SettingsPanel({ isExpanded, isOpen, onToggleExpand, onClose }: S
                   disabled={saving}
                 />
               </SettingSection>
+              {saveMessage && (
+                <p
+                  style={{
+                    color: saveMessage.includes("失败") || saveMessage.includes("failed") ? "var(--danger)" : "var(--accent)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    letterSpacing: "0.08em",
+                    margin: "8px 0 0",
+                  }}
+                >
+                  {saveMessage}
+                </p>
+              )}
             </>
           ) : (
             <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <p style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 13, margin: "0 0 8px" }}>
+              <p
+                style={{
+                  color: "var(--faint)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  margin: "0 0 8px",
+                }}
+              >
                 加载失败
               </p>
               <button
                 onClick={loadSettings}
                 style={{
                   padding: "6px 12px",
-                  borderRadius: 6,
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  borderRadius: 0,
+                  border: "1px solid var(--line)",
                   background: "transparent",
-                  color: "#fff",
-                  fontSize: 12,
+                  color: "var(--text)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 9,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
                   cursor: "pointer",
                 }}
               >
-                重试
+                Retry
               </button>
             </div>
           )}
@@ -287,12 +365,12 @@ function SettingSection({
     <div style={{ marginBottom: 20 }}>
       <div
         style={{
-          fontSize: 11,
-          color: "rgba(255, 255, 255, 0.4)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          color: "var(--faint)",
           marginBottom: 12,
-          fontWeight: 600,
+          letterSpacing: "0.22em",
           textTransform: "uppercase",
-          letterSpacing: "0.5px",
         }}
       >
         {title}
@@ -321,16 +399,32 @@ function ToggleSetting({
     <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>
       <input
         type="checkbox"
+        aria-label={label}
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         disabled={disabled}
         style={{ marginTop: 3, cursor: disabled ? "not-allowed" : "pointer" }}
       />
       <div style={{ flex: 1 }}>
-        <div style={{ color: "#fff", fontSize: 13, fontWeight: 500, marginBottom: 2 }}>
+        <div
+          style={{
+            color: "var(--text)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            marginBottom: 2,
+          }}
+        >
           {label}
         </div>
-        <div style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11 }}>
+        <div
+          style={{
+            color: "var(--faint)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            letterSpacing: "0.08em",
+          }}
+        >
           {description}
         </div>
       </div>
@@ -353,26 +447,48 @@ function SelectSetting({
   onChange: (v: any) => void;
   disabled?: boolean;
 }) {
+  const inputId = React.useId();
+
   return (
     <div style={{ opacity: disabled ? 0.5 : 1 }}>
-      <div style={{ color: "#fff", fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+      <label
+        htmlFor={inputId}
+        style={{
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          marginBottom: 4,
+        }}
+      >
         {label}
-      </div>
-      <div style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11, marginBottom: 6 }}>
+      </label>
+      <div
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          marginBottom: 6,
+        }}
+      >
         {description}
       </div>
       <select
+        id={inputId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         style={{
           width: "100%",
           padding: "8px 12px",
-          borderRadius: 8,
-          border: "1px solid rgba(255, 255, 255, 0.15)",
-          background: "rgba(255, 255, 255, 0.05)",
-          color: "#fff",
-          fontSize: 12,
+          borderRadius: 0,
+          border: "1px solid var(--line)",
+          background: "var(--ink-soft)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
           cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
@@ -399,15 +515,35 @@ function TextSetting({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const inputId = React.useId();
+
   return (
     <div style={{ opacity: disabled ? 0.5 : 1 }}>
-      <div style={{ color: "#fff", fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+      <label
+        htmlFor={inputId}
+        style={{
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          marginBottom: 4,
+        }}
+      >
         {label}
-      </div>
-      <div style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11, marginBottom: 6 }}>
+      </label>
+      <div
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          marginBottom: 6,
+        }}
+      >
         {description}
       </div>
       <input
+        id={inputId}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -415,11 +551,13 @@ function TextSetting({
         style={{
           width: "100%",
           padding: "8px 12px",
-          borderRadius: 8,
-          border: "1px solid rgba(255, 255, 255, 0.15)",
-          background: "rgba(255, 255, 255, 0.05)",
-          color: "#fff",
-          fontSize: 12,
+          borderRadius: 0,
+          border: "1px solid var(--line)",
+          background: "var(--ink-soft)",
+          color: "var(--text)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
           cursor: disabled ? "not-allowed" : "text",
         }}
       />
@@ -446,20 +584,46 @@ function RangeSetting({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
+  const inputId = React.useId();
+
   return (
     <div style={{ opacity: disabled ? 0.5 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <div style={{ color: "#fff", fontSize: 13, fontWeight: 500 }}>
+        <label
+          htmlFor={inputId}
+          style={{
+            color: "var(--text)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+          }}
+        >
           {label}
-        </div>
-        <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: 600 }}>
+        </label>
+        <div
+          style={{
+            color: "var(--accent)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+          }}
+        >
           {value}%
         </div>
       </div>
-      <div style={{ color: "rgba(255, 255, 255, 0.4)", fontSize: 11, marginBottom: 8 }}>
+      <div
+        style={{
+          color: "var(--faint)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          marginBottom: 8,
+        }}
+      >
         {description}
       </div>
       <input
+        id={inputId}
         type="range"
         value={value}
         min={min}
@@ -470,6 +634,7 @@ function RangeSetting({
         style={{
           width: "100%",
           cursor: disabled ? "not-allowed" : "pointer",
+          accentColor: "var(--text)",
         }}
       />
     </div>
