@@ -28,6 +28,7 @@ function createEmptyLikedSongsBaseDir() {
 function createTestRadioServer(options: Parameters<typeof createRadioServer>[0] = {}) {
   return createRadioServer({
     ...options,
+    skipStartupPrewarm: true,
     llmAdapter: options.llmAdapter ?? createFakeLlmAdapter(),
     baseDir: options.baseDir ?? createEmptyLikedSongsBaseDir()
   });

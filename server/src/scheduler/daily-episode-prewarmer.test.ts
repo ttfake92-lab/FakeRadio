@@ -100,7 +100,8 @@ function createPrewarmDeps(): PrewarmDeps {
     likedSongs,
     stateRepo: createStateRepository(join(baseDir, "fakeradio.db")),
     nowProvider: () => new Date(2026, 3, 30, 23, 30, 0),
-    audioDir: join(baseDir, "audio")
+    audioDir: join(baseDir, "audio"),
+    userPreferences: { taste: "", routines: "", moodRules: "", playlists: [] }
   };
 }
 

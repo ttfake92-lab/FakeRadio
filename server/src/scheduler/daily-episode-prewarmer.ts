@@ -2,10 +2,9 @@ import type { RadioEpisode, Track } from "@fakeradio/shared";
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 import type { StateRepository } from "../state/state-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
-import type { PlaybackState } from "../http/playback-state.js";
-import { gatherEpisodeSources, narrateStoryWithSources, synthesizeWithFallback } from "../http/episode-runner.js";
+import type { UserPreferences } from "../user/load-user-preference.js";
+import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
-import { env } from "../config/env.js";
 import { formatRadioDate } from "../utils/time.js";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -28,33 +27,8 @@ export type PrewarmDeps = {
   stateRepo: StateRepository;
   nowProvider(): Date;
   audioDir: string;
+  userPreferences: UserPreferences;
 };
-
-function buildPrewarmEpisodeState(): PlaybackState {
-  return {
-    getCurrentTrack: () => null,
-    getCurrentDj: () => ({ say: "Prewarm episode." }),
-    getQueue: () => [],
-    getRecentlySelectedTrackIds: () => [],
-    getLastPlanBlockAt: () => null,
-    setTrack: () => {},
-    setDj: () => {},
-    setQueue: () => {},
-    setLastPlanBlockAt: () => {},
-    rememberSelectedTrack: () => {},
-    selectCandidate: (tracks: Track[]) => tracks[0],
-    removeFromQueue: () => {},
-    queueSize: () => 0,
-    buildNowResponse: () => ({
-      playback: "idle" as const,
-      track: null,
-      dj: { say: "Prewarm episode." },
-      queue: [],
-      updatedAt: new Date().toISOString()
-    })
-  };
-}
-
 
 function selectFirstAvailableTrack(tracks: Track[], excludedTrackIds: Set<string>): Track | undefined {
   return tracks.find((track) => !excludedTrackIds.has(track.id));
@@ -155,38 +129,17 @@ async function generatePrewarmEpisode(
     return { error: "No track could be resolved" };
   }
 
-  // Gather sources
-  const sources = await gatherEpisodeSources(
-    storySource,
-    publicMetadataAdapter,
-    webResearchAdapter,
-    env.FAKERADIO_BRAVE_API_KEY,
-    track
-  );
-
-  // Generate narration
-  const { narration, storyType } = await narrateStoryWithSources(
-    llm,
-    track,
-    sources,
-    systemPrompt,
-    [],
-    { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
-    "",
-    "",
-    ""
-  );
-
-  // Synthesize TTS
-  const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
-
-  const episode: RadioEpisode = {
-    track,
-    story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
-    sources,
-    playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
-    fallbackReason
+  const composeDeps: ComposeEpisodeDeps = {
+    llm, tts, ttsCacheDir, storySource,
+    publicMetadataAdapter, webResearchAdapter,
+    weather, calendar, devices, systemPrompt
   };
+  const { episode } = await composeEpisodeFromTrack(track, composeDeps, {
+    recentMemory: [],
+    taste: deps.userPreferences.taste,
+    routines: deps.userPreferences.routines,
+    moodRules: deps.userPreferences.moodRules
+  });
 
   return { episode, audioDownloaded: false };
 }

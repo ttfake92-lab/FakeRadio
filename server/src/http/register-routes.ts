@@ -13,27 +13,7 @@ import {
   StreamEventSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema,
-  BriefsListResponseSchema,
-  BriefResponseSchema,
-  ShowPlansListResponseSchema,
-  ShowPlanResponseSchema,
-  ShowJobsListResponseSchema,
-  ShowJobResponseSchema,
-  StartJobRequestSchema,
-  GenerateNowRequestSchema,
-  GenerateNowResponseSchema,
-  ScheduleTonightRequestSchema,
-  ScheduleTonightResponseSchema,
-  AddConstraintsRequestSchema,
-  ShowProjectsListResponseSchema,
-  ShowProjectResponseSchema,
-  SettingsSchema,
-  SettingsResponseSchema,
-  UpdateSettingsRequestSchema,
-  type RadioEpisode,
-  type ProgramBrief,
-  type ShowPlan,
-  type Settings
+  type RadioEpisode
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
 import { access, stat } from "node:fs/promises";
@@ -45,17 +25,12 @@ import { formatRadioDate } from "../utils/time.js";
 import { proxyAndRecord, isAudioRecorded, getAudioFilePath } from "../audio/audio-recorder.js";
 import { startExportTask, getExportTask, getExportFilePath, exportShowProject } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
-import { executeScheduledJob, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import type { PlaybackState } from "./playback-state.js";
-import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
-import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
-import { createEdgeTtsAdapter } from "../adapters/tts/edge-tts-adapter.js";
+import { resolveNextTrackAndDecision, composeEpisodeFromTrack, synthesizeWithFallback, type EpisodeRunnerDeps, type ComposeEpisodeDeps } from "./episode-runner.js";
 import { handleChat } from "./chat-intent-router.js";
+import { registerShowRoutes } from "./routes/show-routes.js";
+import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import type { RegisterRoutesDeps } from "./types.js";
-
-function serializeProject<T>(project: T): T {
-  return project;
-}
 
 const LOCAL_WEB_ORIGINS = new Set([
   "http://localhost:3302",
@@ -73,39 +48,6 @@ function getCorsHeadersForOrigin(origin: unknown): Record<string, string> {
     "Vary": "Origin"
   };
 }
-
-const MIMO_VOICES = [
-  { value: "茉莉", label: "茉莉 · 中文女声" },
-  { value: "冰糖", label: "冰糖 · 中文女声" },
-  { value: "苏打", label: "苏打 · 中文男声" },
-  { value: "白桦", label: "白桦 · 中文男声" },
-  { value: "Mia", label: "Mia · 英文女声" },
-  { value: "Chloe", label: "Chloe · 英文女声" },
-  { value: "Milo", label: "Milo · 英文男声" },
-  { value: "Dean", label: "Dean · 英文男声" },
-  { value: "mimo_default", label: "mimo_default" },
-  { value: "default_zh", label: "default_zh" },
-  { value: "default_en", label: "default_en" }
-];
-
-const EDGE_VOICES = [
-  { value: "zh-CN-XiaoxiaoNeural", label: "晓晓 · 中文女声" },
-  { value: "zh-CN-YunxiNeural", label: "云希 · 中文男声" },
-  { value: "zh-CN-YunyangNeural", label: "云扬 · 中文男声(新闻)" },
-  { value: "zh-CN-XiaoyiNeural", label: "晓伊 · 中文女声(活泼)" },
-  { value: "zh-CN-YunjianNeural", label: "云健 · 中文男声(体育)" },
-  { value: "zh-CN-liaoning-XiaobeiNeural", label: "晓北 · 东北女声" },
-  { value: "en-US-JennyNeural", label: "Jenny · 英文女声" },
-  { value: "en-US-GuyNeural", label: "Guy · 英文男声" }
-];
-
-const TtsPreviewRequestSchema = z.object({
-  text: z.string().optional(),
-  provider: z.enum(["mimo", "edge"]),
-  voice: z.string().min(1),
-  style: z.string().optional(),
-  rate: z.number().int().min(-50).max(200).optional()
-});
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
@@ -131,6 +73,12 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, memory, state, systemPrompt,
     userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs
+  };
+
+  const composeEpisodeDeps: ComposeEpisodeDeps = {
+    llm, tts, ttsCacheDir, storySource,
+    publicMetadataAdapter, webResearchAdapter,
+    weather, calendar, devices, systemPrompt
   };
 
   let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
@@ -515,39 +463,18 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         playedAt: new Date().toISOString()
       });
 
-      const sources = await gatherEpisodeSources(
-        storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
+      const recentMemoryEntries = await memory.recent(5);
+      const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
+        track,
+        composeEpisodeDeps,
+        {
+          recentMemory: recentMemoryEntries.map((entry) => entry.content),
+          taste: userPreferences.taste,
+          routines: userPreferences.routines,
+          moodRules: userPreferences.moodRules
+        }
       );
 
-      const [weatherSnapshot, calendarItems, playbackDevices, recentMemoryEntries] = await Promise.all([
-        weather.current(),
-        calendar.upcoming(),
-        devices.list(),
-        memory.recent(5)
-      ]);
-      const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
-
-      const { narration, storyType } = await narrateStoryWithSources(
-        llm,
-        track,
-        sources,
-        systemPrompt,
-        recentMemoryEntries.map((entry) => entry.content),
-        contextEnv,
-        userPreferences.taste,
-        userPreferences.routines,
-        userPreferences.moodRules
-      );
-
-      const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
-
-      const episode: RadioEpisode = {
-        track,
-        story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
-        sources,
-        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
-        fallbackReason
-      };
       state.setDj({ say: narration, audioUrl: storyTtsResult.audioUrl });
       stream.broadcast({ type: "dj-speech", payload: { text: narration, audioUrl: storyTtsResult.audioUrl } });
       const hookText2 = narration.split(/[。！？.!?]/)[0]?.trim();
@@ -597,39 +524,17 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       // 否则下一次预取会再次选中同一首，导致每首歌播两遍
       state.rememberSelectedTrack(track);
 
-      const sources = await gatherEpisodeSources(
-        storySource, publicMetadataAdapter, webResearchAdapter, env.FAKERADIO_BRAVE_API_KEY, track
-      );
-
-      const [weatherSnapshot, calendarItems, playbackDevices, recentMemoryEntries] = await Promise.all([
-        weather.current(),
-        calendar.upcoming(),
-        devices.list(),
-        memory.recent(5)
-      ]);
-      const contextEnv = { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices };
-
-      const { narration, storyType } = await narrateStoryWithSources(
-        llm,
+      const recentMemoryEntries = await memory.recent(5);
+      const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
         track,
-        sources,
-        systemPrompt,
-        recentMemoryEntries.map((entry) => entry.content),
-        contextEnv,
-        userPreferences.taste,
-        userPreferences.routines,
-        userPreferences.moodRules
+        composeEpisodeDeps,
+        {
+          recentMemory: recentMemoryEntries.map((entry) => entry.content),
+          taste: userPreferences.taste,
+          routines: userPreferences.routines,
+          moodRules: userPreferences.moodRules
+        }
       );
-
-      const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
-
-      const episode: RadioEpisode = {
-        track,
-        story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
-        sources,
-        playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
-        fallbackReason
-      };
 
       // 预取的 episode 大概率会被前端接续播放，口播记录（含音频路径）
       // 要进 dj_messages，否则当日导出无法为这些歌混入口播
@@ -874,467 +779,14 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.send({ projectId: id, files: available });
   });
 
-  app.get("/api/briefs", async (_request, reply) => {
-    const briefs = await programBriefRepo.list();
-    return reply.send(BriefsListResponseSchema.parse({ briefs }));
+  registerShowRoutes({
+    app, programBriefRepo, showPlanRepo, showProjectRepo, jobRegistry,
+    showPlanGenerator, dailyShowPlanGenerator, nowProvider, userPreferences,
+    llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
+    publicMetadataAdapter, webResearchAdapter, likedSongs, systemPrompt
   });
 
-  app.get("/api/briefs/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const brief = await programBriefRepo.get(id);
-    if (!brief) {
-      return reply.status(404).send({ error: "brief not found" });
-    }
-    return reply.send(BriefResponseSchema.parse({ brief }));
-  });
-
-  app.get("/api/plans", async (request, reply) => {
-    const { briefId } = request.query as { briefId?: string };
-    const plans = await showPlanRepo.list(briefId ? { briefId } : undefined);
-    return reply.send(ShowPlansListResponseSchema.parse({ plans }));
-  });
-
-  app.get("/api/plans/:briefId", async (request, reply) => {
-    const { briefId } = request.params as { briefId: string };
-    const plans = await showPlanRepo.list({ briefId, activeOnly: false });
-    return reply.send(ShowPlansListResponseSchema.parse({ plans }));
-  });
-
-  app.get("/api/plans/:briefId/active", async (request, reply) => {
-    const { briefId } = request.params as { briefId: string };
-    const plans = await showPlanRepo.list({ briefId, activeOnly: true });
-    const activePlan = plans[0];
-    if (!activePlan) {
-      return reply.status(404).send({ error: "no active plan found for this brief" });
-    }
-    return reply.send(ShowPlanResponseSchema.parse({ plan: activePlan }));
-  });
-
-  app.post("/api/plans/add-constraints", async (request, reply) => {
-    const body = AddConstraintsRequestSchema.parse(request.body);
-    const planId = body.planId;
-    const constraints = body.constraints;
-
-    const existingPlan = await showPlanRepo.get(planId);
-    if (!existingPlan) {
-      return reply.status(404).send({ error: "plan not found" });
-    }
-
-    const brief = await programBriefRepo.get(existingPlan.briefId);
-    const newPlan = await showPlanGenerator.generateFromPlan(
-      existingPlan,
-      brief ?? existingPlan.briefSnapshot,
-      constraints as { preferEra?: string; avoidExplicit?: boolean; moodHint?: string } ?? {}
-    );
-
-    await showPlanRepo.save(newPlan);
-
-    return reply.send({ plan: newPlan });
-  });
-
-  app.post("/api/jobs", async (request, reply) => {
-    const body = StartJobRequestSchema.parse(request.body);
-    const job = await jobRegistry.create({ briefId: body.briefId, planId: body.planId });
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job created", phase: "init" });
-    return reply.status(201).send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  app.get("/api/jobs", async (request, reply) => {
-    const { briefId } = request.query as { briefId?: string };
-    const jobs = await jobRegistry.list(briefId ? { briefId } : undefined);
-    return reply.send(ShowJobsListResponseSchema.parse({ jobs }));
-  });
-
-  app.get("/api/jobs/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = await jobRegistry.get(id);
-    if (!job) {
-      return reply.status(404).send({ error: "job not found" });
-    }
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  app.post("/api/jobs/:id/start", async (request, reply) => {
-    const { id } = request.params as { id: string };
-
-    const existingJob = await jobRegistry.get(id);
-    if (!existingJob) {
-      return reply.status(400).send({ error: "cannot start job (not found)" });
-    }
-
-    const wasNeedsReplan = existingJob.status === "needs-replan";
-    const job = await jobRegistry.start(id);
-    if (!job) {
-      return reply.status(400).send({ error: "cannot start job (invalid state transition)" });
-    }
-
-    if (wasNeedsReplan) {
-      const executionDeps: SchedulerExecutionDeps = {
-        briefRepo: programBriefRepo,
-        planRepo: showPlanRepo,
-        showProjectRepo,
-        jobRegistry,
-        llm,
-        music,
-        tts,
-        ttsCacheDir,
-        weather,
-        calendar,
-        devices,
-        storySource,
-        publicMetadataAdapter,
-        webResearchAdapter,
-        likedSongs,
-        systemPrompt,
-        userPreferences
-      };
-
-      await programBriefRepo.updateStatus(job.briefId, "generating");
-      await executeScheduledJob(executionDeps, job.briefId, job.planId, job.id);
-
-      const finalJob = await jobRegistry.get(job.id);
-      const updatedJob = finalJob ?? job;
-
-      await jobRegistry.addLog(job.id, { level: "info", message: "Job restarted from needs-replan", phase: "running" });
-      return reply.send(ShowJobResponseSchema.parse({ job: updatedJob }));
-    }
-
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job started", phase: "running" });
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  app.post("/api/jobs/:id/pause", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = await jobRegistry.pause(id);
-    if (!job) {
-      return reply.status(400).send({ error: "cannot pause job (invalid state transition or not found)" });
-    }
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job paused", phase: "paused" });
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  app.post("/api/jobs/:id/resume", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = await jobRegistry.resume(id);
-    if (!job) {
-      return reply.status(400).send({ error: "cannot resume job (invalid state transition or not found)" });
-    }
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job resumed", phase: "running" });
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  app.post("/api/jobs/:id/cancel", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = await jobRegistry.cancel(id);
-    if (!job) {
-      return reply.status(400).send({ error: "cannot cancel job (invalid state transition or not found)" });
-    }
-    await jobRegistry.addLog(job.id, { level: "warn", message: "Job cancelled", phase: "cancelled" });
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  const NeedsReplanBodySchema = z.object({
-    reason: z.string().optional()
-  }).strict();
-
-  app.post("/api/jobs/:id/needs-replan", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const body = NeedsReplanBodySchema.parse(request.body ?? {});
-    const reason = body.reason ?? "User requested replan";
-    const job = await jobRegistry.markNeedsReplan(id, reason);
-    if (!job) {
-      return reply.status(400).send({ error: "cannot mark job as needs-replan (invalid state transition or not found)" });
-    }
-    await jobRegistry.addLog(job.id, { level: "warn", message: `Job needs replan: ${reason}`, phase: "needs-replan" });
-    return reply.send(ShowJobResponseSchema.parse({ job }));
-  });
-
-  // Show Projects API
-  app.get("/api/shows", async (_request, reply) => {
-    const projects = await showProjectRepo.list();
-    return reply.send(ShowProjectsListResponseSchema.parse({ projects: projects.map(serializeProject) }));
-  });
-
-  app.get("/api/shows/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const project = await showProjectRepo.get(id);
-    if (!project) {
-      return reply.status(404).send({ error: "project not found" });
-    }
-    return reply.send(ShowProjectResponseSchema.parse({ project: serializeProject(project) }));
-  });
-
-  app.delete("/api/shows/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const project = await showProjectRepo.get(id);
-    if (!project) {
-      return reply.status(404).send({ error: "project not found" });
-    }
-    await showProjectRepo.delete(id);
-    return reply.send({ success: true });
-  });
-
-  app.delete("/api/shows/:id/trace", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const project = await showProjectRepo.get(id);
-    if (!project) {
-      return reply.status(404).send({ error: "project not found" });
-    }
-    await showProjectRepo.deleteTrace(id);
-    return reply.send({ success: true });
-  });
-
-  // Generate Now API
-  app.post("/api/shows/generate-now", async (request, reply) => {
-    const body = GenerateNowRequestSchema.parse(request.body);
-    const brief = await programBriefRepo.get(body.briefId);
-    if (!brief) {
-      return reply.status(404).send({ error: "brief not found" });
-    }
-
-    // Check if there's an existing project for this brief
-    let project = await showProjectRepo.getByBriefId(brief.id);
-    if (!project) {
-      // Create a new project
-      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
-      project = await showProjectRepo.create({ briefId: brief.id, slug });
-    }
-
-    const runningStatuses = new Set(["pending", "running", "paused", "needs-replan"]);
-    const existingJobs = await jobRegistry.list({ briefId: brief.id });
-    const reusableJob = existingJobs.find((job) => runningStatuses.has(job.status));
-    if (reusableJob) {
-      project = await showProjectRepo.update(project.id, {
-        activeJobId: reusableJob.id,
-        status: "generating"
-      }) ?? project;
-      await jobRegistry.addLog(reusableJob.id, {
-        level: "info",
-        message: "Generate-now request reused existing active job",
-        phase: "init"
-      });
-      const refreshedJob = await jobRegistry.get(reusableJob.id);
-      return reply.status(202).send(GenerateNowResponseSchema.parse({
-        project,
-        job: refreshedJob ?? reusableJob
-      }));
-    }
-
-    // Check if there's an active plan, if not create one
-    let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
-    let activePlan = plans[0];
-    if (!activePlan) {
-      const draftPlan = brief.type === "daily-show" 
-        ? await dailyShowPlanGenerator.generate(brief) 
-        : await showPlanGenerator.generate(brief, userPreferences.taste);
-      activePlan = await showPlanRepo.save(draftPlan);
-    }
-
-    // Update project with active plan
-    project = await showProjectRepo.update(project.id, {
-      activePlanId: activePlan.id,
-      status: "generating"
-    }) ?? project;
-
-    // Save show plan to project
-    await showProjectRepo.saveShowPlan(project.id, activePlan);
-
-    // Create and start job
-    const job = await jobRegistry.create({ briefId: brief.id, planId: activePlan.id });
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job created for generate-now", phase: "init" });
-    const startedJob = await jobRegistry.start(job.id);
-    if (startedJob) {
-      await jobRegistry.addLog(startedJob.id, { level: "info", message: "Job started immediately", phase: "running" });
-    }
-
-    const targetJobId = startedJob?.id ?? job.id;
-
-    // Update project with active job
-    project = await showProjectRepo.update(project.id, {
-      activeJobId: targetJobId
-    }) ?? project;
-
-    await showProjectRepo.appendTrace(project.id, {
-      type: "job-started",
-      jobId: targetJobId,
-      briefId: brief.id,
-      planId: activePlan.id,
-      status: "generating"
-    });
-
-    // Execute the scheduled job to generate episodes
-    try {
-      const executionDeps: SchedulerExecutionDeps = {
-        briefRepo: programBriefRepo,
-        planRepo: showPlanRepo,
-        showProjectRepo,
-        jobRegistry,
-        llm,
-        music,
-        tts,
-        ttsCacheDir,
-        weather,
-        calendar,
-        devices,
-        storySource,
-        publicMetadataAdapter: publicMetadataAdapter,
-        webResearchAdapter: webResearchAdapter,
-        likedSongs,
-        systemPrompt,
-        userPreferences
-      };
-
-      await programBriefRepo.updateStatus(brief.id, "generating");
-      await executeScheduledJob(executionDeps, brief.id, activePlan.id, targetJobId);
-
-      const finalJob = await jobRegistry.get(targetJobId);
-      const projectWithTrace = await showProjectRepo.get(project.id);
-
-      if (finalJob && (finalJob.status === "completed" || finalJob.status === "failed")) {
-        await showProjectRepo.update(project.id, {
-          status: finalJob.status === "completed" ? "ready" : "failed"
-        });
-        if (finalJob.status === "completed") {
-          await programBriefRepo.updateStatus(brief.id, "completed");
-        }
-      }
-
-      const updatedProject = await showProjectRepo.get(project.id);
-
-      return reply.status(201).send(GenerateNowResponseSchema.parse({
-        project: updatedProject ?? projectWithTrace ?? project,
-        job: finalJob ?? startedJob ?? job
-      }));
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "unknown error";
-      await jobRegistry.addLog(targetJobId, { level: "error", message: `executeScheduledJob failed: ${errorMsg}`, phase: "execution" });
-      await jobRegistry.fail(targetJobId, errorMsg);
-      await programBriefRepo.updateStatus(brief.id, "failed");
-
-      const failedJob = await jobRegistry.get(targetJobId);
-      await showProjectRepo.update(project.id, { status: "failed" });
-      const projectWithTrace = await showProjectRepo.get(project.id);
-
-      return reply.status(500).send(GenerateNowResponseSchema.parse({
-        project: projectWithTrace ?? project,
-        job: failedJob ?? startedJob ?? job
-      }));
-    }
-  });
-
-  // Schedule Tonight API
-  app.post("/api/shows/schedule-tonight", async (request, reply) => {
-    const body = ScheduleTonightRequestSchema.parse(request.body);
-    const brief = await programBriefRepo.get(body.briefId);
-    if (!brief) {
-      return reply.status(404).send({ error: "brief not found" });
-    }
-
-    // Check if there's an existing project for this brief
-    let project = await showProjectRepo.getByBriefId(brief.id);
-    if (!project) {
-      // Create a new project
-      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
-      project = await showProjectRepo.create({ briefId: brief.id, slug });
-    }
-
-    // Check if there's an active plan, if not create one
-    let plans = await showPlanRepo.list({ briefId: brief.id, activeOnly: true });
-    let activePlan = plans[0];
-    if (!activePlan) {
-      const draftPlan = brief.type === "daily-show" 
-        ? await dailyShowPlanGenerator.generate(brief) 
-        : await showPlanGenerator.generate(brief, userPreferences.taste);
-      activePlan = await showPlanRepo.save(draftPlan);
-    }
-
-    // Update project with active plan
-    project = await showProjectRepo.update(project.id, { 
-      activePlanId: activePlan.id,
-      status: "draft"
-    }) ?? project;
-
-    // Save show plan to project
-    await showProjectRepo.saveShowPlan(project.id, activePlan);
-
-    // Update brief to scheduled
-    const updatedBrief = await programBriefRepo.update(brief.id, { status: "scheduled" });
-
-    const scheduledAt = nowProvider().toISOString();
-
-    await showProjectRepo.appendTrace(project.id, {
-      type: "scheduled",
-      briefId: brief.id,
-      planId: activePlan.id,
-      scheduledAt
-    });
-
-    const projectWithTrace = await showProjectRepo.get(project.id);
-
-    return reply.status(201).send(ScheduleTonightResponseSchema.parse({
-      project: projectWithTrace ?? project,
-      brief: updatedBrief ?? brief,
-      scheduledAt
-    }));
-  });
-
-  app.get("/api/settings", async (_request, reply) => {
-    return reply.send(SettingsResponseSchema.parse({
-      settings: runtimeManager?.getSettings() ?? SettingsSchema.parse({})
-    }));
-  });
-
-  app.put("/api/settings", async (request, reply) => {
-    const body = UpdateSettingsRequestSchema.parse(request.body);
-    const currentSettings = runtimeManager?.getSettings() ?? await stateRepo.getPref<Settings>("show:settings") ?? {};
-    const mergedSettings = SettingsSchema.parse({
-      ...currentSettings,
-      ...body
-    });
-    if (runtimeManager) {
-      try {
-        await runtimeManager.applySettings(mergedSettings);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "设置应用失败";
-        return reply.status(503).send({ error: message });
-      }
-    }
-    await stateRepo.upsertPref("show:settings", mergedSettings);
-    return reply.send(SettingsResponseSchema.parse({ settings: mergedSettings }));
-  });
-
-  app.get("/api/tts/voices", async (_request, reply) => {
-    return reply.send({ mimo: MIMO_VOICES, edge: EDGE_VOICES });
-  });
-
-  app.post("/api/tts/preview", async (request, reply) => {
-    const body = TtsPreviewRequestSchema.parse(request.body);
-    const text = body.text?.trim() || "欢迎收听 FakeRadio，这是当前音色的试听。";
-    if (body.provider === "mimo" && !env.FAKERADIO_MIMO_API_KEY) {
-      return reply.status(503).send({ error: "未配置 MiMo API key，无法试听" });
-    }
-    try {
-      const adapter = body.provider === "mimo"
-        ? createMimoTtsAdapter({
-            apiKey: env.FAKERADIO_MIMO_API_KEY ?? "",
-            cacheDir: ttsCacheDir,
-            baseUrl: env.FAKERADIO_MIMO_BASE_URL,
-            voice: body.voice,
-            ...(body.style !== undefined ? { style: body.style } : {}),
-            timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
-          })
-        : createEdgeTtsAdapter({
-            cacheDir: ttsCacheDir,
-            voice: body.voice,
-            ...(body.rate !== undefined ? { rate: body.rate } : {})
-          });
-      const result = await adapter.synthesize(text);
-      return reply.send({ audioUrl: result.audioUrl });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "试听生成失败";
-      return reply.status(503).send({ error: message });
-    }
-  });
+  registerSettingsRoutes({ app, stateRepo, runtimeManager, ttsCacheDir });
 
   app.get("/stream", { websocket: true }, (connection) => {
     const removeClient = stream.add(connection);

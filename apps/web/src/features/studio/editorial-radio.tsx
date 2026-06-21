@@ -2228,9 +2228,9 @@ function NeteaseLoginModal({
     for (const line of lines) {
       const parts = line.split('\t');
       if (parts.length >= 7) {
-        const domain = parts[0].toLowerCase();
-        const name = parts[5];
-        const value = parts[6];
+        const domain = (parts[0] ?? '').toLowerCase();
+        const name = parts[5] ?? '';
+        const value = parts[6] ?? '';
         if ((domain.includes('music.163.com') || domain.includes('163.com')) && NETEASE_KEYS.includes(name)) {
           cookies[name] = value;
         }

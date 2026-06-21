@@ -5,6 +5,9 @@ const DEFAULT_USER_TASTE = "喜欢低刺激、持续陪伴的音乐。";
 const DEFAULT_ROUTINES = "早晨低刺激启动，工作时段稳定少打扰。";
 const DEFAULT_MOOD_RULES = "晴天早晨温暖轻盈。";
 
+// taste-writer 复用同一默认值，避免双定义漂移
+export { DEFAULT_USER_TASTE };
+
 export const DEFAULT_PLAYLISTS: Playlist[] = [
   {
     id: "morning-soft-start",

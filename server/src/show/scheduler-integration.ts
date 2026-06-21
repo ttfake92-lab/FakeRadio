@@ -7,9 +7,8 @@ import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { DailyShowPlanGenerator } from "./daily-show-plan-generator.js";
 import type { DailySelectionEngine } from "./daily-selection-engine.js";
-import { gatherEpisodeSources, narrateStoryWithSources, synthesizeWithFallback } from "../http/episode-runner.js";
+import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
-import { env } from "../config/env.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -118,35 +117,17 @@ async function generateEpisodeForBlock(
     return { error: `No track available for block ${block.role}: ${block.title}` };
   }
 
-  const sources = await gatherEpisodeSources(
-    storySource,
-    publicMetadataAdapter,
-    webResearchAdapter,
-    env.FAKERADIO_BRAVE_API_KEY,
-    track
-  );
-
-  const { narration, storyType } = await narrateStoryWithSources(
-    llm,
-    track,
-    sources,
-    systemPrompt,
-    [],
-    { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
-    deps.userPreferences?.taste ?? "",
-    deps.userPreferences?.routines ?? "",
-    deps.userPreferences?.moodRules ?? ""
-  );
-
-  const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(tts, ttsCacheDir, narration);
-
-  const episode: RadioEpisode = {
-    track,
-    story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
-    sources,
-    playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
-    fallbackReason
+  const composeDeps: ComposeEpisodeDeps = {
+    llm, tts, ttsCacheDir, storySource,
+    publicMetadataAdapter, webResearchAdapter,
+    weather, calendar, devices, systemPrompt
   };
+  const { episode } = await composeEpisodeFromTrack(track, composeDeps, {
+    recentMemory: [],
+    taste: deps.userPreferences?.taste ?? "",
+    routines: deps.userPreferences?.routines ?? "",
+    moodRules: deps.userPreferences?.moodRules ?? ""
+  });
 
   return { episode, track };
 }

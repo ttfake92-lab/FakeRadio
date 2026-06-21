@@ -67,6 +67,7 @@ type CreateRadioServerOptions = {
   userPreferences?: UserPreferences;
   neteaseAuthService?: NeteaseAuthService;
   baseDir?: string;
+  skipStartupPrewarm?: boolean;
 };
 
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
@@ -215,7 +216,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     likedSongs,
     stateRepo,
     nowProvider,
-    audioDir
+    audioDir,
+    userPreferences
   };
 
   // 统一的默认适配器策略
@@ -253,7 +255,6 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowDate = formatRadioDate(tomorrow);
 
-      const dailyShowPlanGenerator = createDailyShowPlanGenerator();
       const recentPlayedRepo = createStateRecentPlayedRepository(stateRepo);
       const dailySelectionEngine = createDailySelectionEngine(recentPlayedRepo, { exclusionWindowDays: 7 });
 
@@ -291,60 +292,43 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       }
 
       const tomorrowPlan = buildTodayPlan(tomorrow, userPreferences.playlists);
-      const canRun = await shouldRunPrewarm(prewarmDeps, tomorrowDate);
-      if (!canRun) {
-        console.log(`[prewarm] Daily prewarm already ran for ${tomorrowDate}, skipping.`);
-        return;
-      }
-      console.log(`[prewarm] Starting daily prewarm for ${tomorrowDate}...`);
-      try {
-        const results = await runPrewarmForDate(
-          prewarmDeps,
-          tomorrowDate,
-          tomorrowPlan.blocks,
-          env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
-          systemPrompt
-        );
-        const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
-        const totalFailed = results.reduce((s, r) => s + r.failed, 0);
-        console.log(`[prewarm] Daily prewarm completed for ${tomorrowDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
-        await markPrewarmRunComplete(prewarmDeps, tomorrowDate);
-      } catch (err) {
-        console.error(`[prewarm] Daily prewarm failed for ${tomorrowDate}:`, err);
-      }
+      void prewarmForDate(tomorrowDate, tomorrow, "Daily");
     }
   });
   prewarmScheduler.start();
   app.addHook("onClose", () => prewarmScheduler.stop());
 
-  // 启动时预热今天：若今天还没预热过，异步跑一次（不阻塞启动）
-  // 解决"白天启动服务器今天永远 0 ready"的问题
-  (async () => {
-    if (!env.FAKERADIO_PREWARM_ENABLED) return;
+  // 预热某个日期：shouldRun → run → mark。startup prewarm 和定时 tick 共用。
+  const prewarmForDate = async (targetDate: string, target: Date, label: string) => {
+    const canRun = await shouldRunPrewarm(prewarmDeps, targetDate);
+    if (!canRun) {
+      console.log(`[prewarm] ${label} (${targetDate}) already prewarmed, skipping.`);
+      return;
+    }
+    console.log(`[prewarm] ${label}: prewarming ${targetDate}...`);
     try {
-      const todayDate = formatRadioDate(nowProvider());
-      const canRun = await shouldRunPrewarm(prewarmDeps, todayDate);
-      if (!canRun) {
-        console.log(`[prewarm] Startup: today (${todayDate}) already prewarmed, skipping.`);
-        return;
-      }
-      console.log(`[prewarm] Startup: prewarming today (${todayDate})...`);
-      const todayPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+      const plan = buildTodayPlan(target, userPreferences.playlists);
       const results = await runPrewarmForDate(
         prewarmDeps,
-        todayDate,
-        todayPlan.blocks,
+        targetDate,
+        plan.blocks,
         env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
         systemPrompt
       );
       const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
       const totalFailed = results.reduce((s, r) => s + r.failed, 0);
-      console.log(`[prewarm] Startup prewarm completed for ${todayDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
-      await markPrewarmRunComplete(prewarmDeps, todayDate);
+      console.log(`[prewarm] ${label} completed for ${targetDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
+      await markPrewarmRunComplete(prewarmDeps, targetDate);
     } catch (err) {
-      console.error(`[prewarm] Startup prewarm failed:`, err);
+      console.error(`[prewarm] ${label} failed for ${targetDate}:`, err);
     }
-  })();
+  };
+
+  // 启动时预热今天：若今天还没预热过，异步跑一次（不阻塞启动）
+  // 解决"白天启动服务器今天永远 0 ready"的问题
+  if (env.FAKERADIO_PREWARM_ENABLED && !options.skipStartupPrewarm) {
+    void prewarmForDate(formatRadioDate(nowProvider()), nowProvider(), "Startup");
+  }
 
   return app;
 }

@@ -25,15 +25,21 @@ function getSessionPath(baseDir: string, date: string): string {
 export function createSessionRepository(baseDir: string, nowProvider?: () => Date): SessionRepository {
   const now = nowProvider ?? (() => new Date());
   const withWriteLock = createWriteLock();
+  // 按日期缓存当日会话，避免 prewarm tick / taste 推断反复全量读 JSON
+  const cache = new Map<string, SessionEntry[]>();
 
   async function readSession(date: string): Promise<SessionEntry[]> {
+    const cached = cache.get(date);
+    if (cached) return cached;
     const path = getSessionPath(baseDir, date);
     const fileExists = await access(path).then(() => true, () => false);
     if (!fileExists) return [];
     try {
       const content = await readFile(path, "utf-8");
       const parsed = JSON.parse(content) as unknown;
-      return Array.isArray(parsed) ? (parsed as SessionEntry[]) : [];
+      const entries = Array.isArray(parsed) ? (parsed as SessionEntry[]) : [];
+      cache.set(date, entries);
+      return entries;
     } catch {
       return [];
     }
@@ -43,6 +49,7 @@ export function createSessionRepository(baseDir: string, nowProvider?: () => Dat
     const path = getSessionPath(baseDir, date);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(entries, null, 2), "utf-8");
+    cache.set(date, entries);
   }
 
 

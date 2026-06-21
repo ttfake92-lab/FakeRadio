@@ -15,9 +15,7 @@ import {
   getSourceKindLabel,
   getStorySourceDescription,
   getStoryTypeLabel,
-  getThemeLabel,
   getTrackSourceLabel,
-  ON_AIR_THEMES,
   shouldStartCrossfade,
   shouldWarnOnMockMusic,
   transitEpisodeStateSafely,
@@ -248,13 +246,6 @@ describe("getPlaybackControlText", () => {
 });
 
 describe("on air terminal view model", () => {
-  it("defines all theme labels", () => {
-    expect(ON_AIR_THEMES).toEqual([
-      "amber",
-    ]);
-    expect(getThemeLabel("amber")).toBe("Amber");
-  });
-
   it("formats on air clock for the terminal header", () => {
     const clock = buildOnAirClock(new Date("2026-04-20T13:11:00.000Z"), "UTC");
 

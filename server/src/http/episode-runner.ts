@@ -2,6 +2,7 @@ import type { DjDecision, RadioEpisode, Track, TtsResult } from "@fakeradio/shar
 import type { LlmAdapter, MusicAdapter, StorySourceAdapter, TtsAdapter } from "../adapters/types.js";
 import { buildContextWindow, type ContextEnvironment } from "../context/context-builder.js";
 import { createMacOsSayTtsAdapter } from "../adapters/index.js";
+import { env } from "../config/env.js";
 import type { MemoryRepository } from "../state/memory-repository.js";
 import type { PlaybackState } from "./playback-state.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
@@ -284,6 +285,80 @@ export async function gatherEpisodeSources(
   }
 
   return [...lyricSources, ...metadataSources, ...webSources];
+}
+
+export type ComposeEpisodeDeps = {
+  llm: LlmAdapter;
+  tts: TtsAdapter;
+  ttsCacheDir: string;
+  storySource: StorySourceAdapter;
+  publicMetadataAdapter?: StorySourceAdapter | undefined;
+  webResearchAdapter?: StorySourceAdapter | undefined;
+  weather: WeatherAdapter;
+  calendar: CalendarAdapter;
+  devices: DeviceAdapter;
+  systemPrompt: string;
+};
+
+export type EpisodeCompositionContext = {
+  recentMemory: string[];
+  taste: string;
+  routines: string;
+  moodRules: string;
+};
+
+export type ComposedEpisode = {
+  episode: RadioEpisode;
+  narration: string;
+  storyType: RadioEpisode["story"]["type"];
+  storyTtsResult: TtsResult;
+  fallbackReason: string | undefined;
+};
+
+// 统一的 episode 组装：给定已选好的 track，收集 sources、生成口播、合成 TTS、组装 episode。
+// 消除 live / prefetch / prewarm / theme-show 四处对 narrate+synthesize 的重复编排。
+export async function composeEpisodeFromTrack(
+  track: Track,
+  deps: ComposeEpisodeDeps,
+  context: EpisodeCompositionContext
+): Promise<ComposedEpisode> {
+  const sources = await gatherEpisodeSources(
+    deps.storySource,
+    deps.publicMetadataAdapter,
+    deps.webResearchAdapter,
+    env.FAKERADIO_BRAVE_API_KEY,
+    track
+  );
+
+  const [weatherSnapshot, calendarItems, playbackDevices] = await Promise.all([
+    deps.weather.current(),
+    deps.calendar.upcoming(),
+    deps.devices.list()
+  ]);
+
+  const { narration, storyType } = await narrateStoryWithSources(
+    deps.llm,
+    track,
+    sources,
+    deps.systemPrompt,
+    context.recentMemory,
+    { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
+    context.taste,
+    context.routines,
+    context.moodRules
+  );
+
+  const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(deps.tts, deps.ttsCacheDir, narration);
+
+  const episode: RadioEpisode = {
+    track,
+    story: { text: narration, audioUrl: storyTtsResult.audioUrl, type: storyType },
+    sources,
+    playback: { crossfadeStartOffsetMs: 3000, musicStartVolume: 0.2 },
+    fallbackReason
+  };
+
+  return { episode, narration, storyType, storyTtsResult, fallbackReason };
 }
 
 export function determineStoryType(sources: RadioEpisode["sources"]): RadioEpisode["story"]["type"] {
