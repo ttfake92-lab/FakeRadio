@@ -95,7 +95,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     neteaseAudioLevel: env.FAKERADIO_NETEASE_AUDIO_LEVEL,
     ttsProvider: env.FAKERADIO_TTS_PROVIDER,
     ttsVoice: env.FAKERADIO_TTS_VOICE,
-    mimoVoice: env.FAKERADIO_MIMO_TTS_VOICE
+    mimoVoice: env.FAKERADIO_MIMO_TTS_VOICE,
+    ttsStyle: "",
+    ttsRate: 0
   });
   const savedSettings = await stateRepo.getPref<unknown>("show:settings");
   const savedSettingsObject = savedSettings && typeof savedSettings === "object"
@@ -314,6 +316,35 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   });
   prewarmScheduler.start();
   app.addHook("onClose", () => prewarmScheduler.stop());
+
+  // 启动时预热今天：若今天还没预热过，异步跑一次（不阻塞启动）
+  // 解决"白天启动服务器今天永远 0 ready"的问题
+  (async () => {
+    if (!env.FAKERADIO_PREWARM_ENABLED) return;
+    try {
+      const todayDate = formatRadioDate(nowProvider());
+      const canRun = await shouldRunPrewarm(prewarmDeps, todayDate);
+      if (!canRun) {
+        console.log(`[prewarm] Startup: today (${todayDate}) already prewarmed, skipping.`);
+        return;
+      }
+      console.log(`[prewarm] Startup: prewarming today (${todayDate})...`);
+      const todayPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+      const results = await runPrewarmForDate(
+        prewarmDeps,
+        todayDate,
+        todayPlan.blocks,
+        env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
+        systemPrompt
+      );
+      const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
+      const totalFailed = results.reduce((s, r) => s + r.failed, 0);
+      console.log(`[prewarm] Startup prewarm completed for ${todayDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
+      await markPrewarmRunComplete(prewarmDeps, todayDate);
+    } catch (err) {
+      console.error(`[prewarm] Startup prewarm failed:`, err);
+    }
+  })();
 
   return app;
 }

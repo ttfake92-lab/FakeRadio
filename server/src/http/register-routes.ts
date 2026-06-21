@@ -48,6 +48,8 @@ import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import { executeScheduledJob, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
 import type { PlaybackState } from "./playback-state.js";
 import { resolveNextTrackAndDecision, synthesizeWithFallback, gatherEpisodeSources, narrateStoryWithSources, type EpisodeRunnerDeps } from "./episode-runner.js";
+import { createMimoTtsAdapter } from "../adapters/tts/mimo-tts-adapter.js";
+import { createEdgeTtsAdapter } from "../adapters/tts/edge-tts-adapter.js";
 import { handleChat } from "./chat-intent-router.js";
 import type { RegisterRoutesDeps } from "./types.js";
 
@@ -71,6 +73,39 @@ function getCorsHeadersForOrigin(origin: unknown): Record<string, string> {
     "Vary": "Origin"
   };
 }
+
+const MIMO_VOICES = [
+  { value: "茉莉", label: "茉莉 · 中文女声" },
+  { value: "冰糖", label: "冰糖 · 中文女声" },
+  { value: "苏打", label: "苏打 · 中文男声" },
+  { value: "白桦", label: "白桦 · 中文男声" },
+  { value: "Mia", label: "Mia · 英文女声" },
+  { value: "Chloe", label: "Chloe · 英文女声" },
+  { value: "Milo", label: "Milo · 英文男声" },
+  { value: "Dean", label: "Dean · 英文男声" },
+  { value: "mimo_default", label: "mimo_default" },
+  { value: "default_zh", label: "default_zh" },
+  { value: "default_en", label: "default_en" }
+];
+
+const EDGE_VOICES = [
+  { value: "zh-CN-XiaoxiaoNeural", label: "晓晓 · 中文女声" },
+  { value: "zh-CN-YunxiNeural", label: "云希 · 中文男声" },
+  { value: "zh-CN-YunyangNeural", label: "云扬 · 中文男声(新闻)" },
+  { value: "zh-CN-XiaoyiNeural", label: "晓伊 · 中文女声(活泼)" },
+  { value: "zh-CN-YunjianNeural", label: "云健 · 中文男声(体育)" },
+  { value: "zh-CN-liaoning-XiaobeiNeural", label: "晓北 · 东北女声" },
+  { value: "en-US-JennyNeural", label: "Jenny · 英文女声" },
+  { value: "en-US-GuyNeural", label: "Guy · 英文男声" }
+];
+
+const TtsPreviewRequestSchema = z.object({
+  text: z.string().optional(),
+  provider: z.enum(["mimo", "edge"]),
+  voice: z.string().min(1),
+  style: z.string().optional(),
+  rate: z.number().int().min(-50).max(200).optional()
+});
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
@@ -214,9 +249,17 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   app.post("/api/netease/login/cookie", async (request) => {
     const body = NeteaseCookieSubmitRequestSchema.parse(request.body);
     await neteaseAuth.saveCookie(body.cookie);
+    // 保存后立即验证：cookie 无效时如实返回失败，
+    // 不再让"保存成功"伪装成"登录成功"
+    const fresh = await neteaseAuth.getStatus();
+    const loggedIn = fresh.loggedIn;
     return NeteaseCookieSubmitResponseSchema.parse({
-      success: true,
-      message: "Cookie 已保存并生效"
+      success: loggedIn,
+      loggedIn,
+      message: loggedIn
+        ? `已登录${fresh.nickname ? ` · ${fresh.nickname}` : ""}`
+        : "Cookie 已保存但验证未通过，可能已过期或格式不对，请重新获取",
+      ...(fresh.nickname ? { nickname: fresh.nickname } : {})
     });
   });
 
@@ -520,9 +563,29 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     }
   });
 
-  // Prefetch endpoint: generates episode without updating playback state
+  // Prefetch endpoint: 预取下一集用于秒切。优先用 prewarm 填充的 prepared episodes,
+  // 没有才 fallback 到 live generation (LLM+TTS, 慢)。
   app.get("/api/episode/prefetch", async (request, reply) => {
     try {
+      // 优先 claim prepared episode（秒切核心：prewarm 已生成完整 episode，无需等待）
+      const today = formatRadioDate(nowProvider());
+      const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+      const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
+      const blockAt = currentBlock?.at ?? null;
+
+      if (blockAt !== null) {
+        const excludedTrackIds = await refreshRecentPlaybackMemory();
+        const claimed = await stateRepo.claimPreparedEpisode(today, blockAt, excludedTrackIds);
+        if (claimed !== null) {
+          const { episode } = claimed;
+          trackRegistry.register(episode.track);
+          // 预取的曲目会被前端接续播放，必须登记进"最近已选"
+          state.rememberSelectedTrack(episode.track);
+          return EpisodeNextResponseSchema.parse({ episode, source: "prepared" });
+        }
+      }
+
+      // 没有 prepared episode：fallback 到 live generation（慢，但保证有内容）
       await refreshRecentPlaybackMemory();
       const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
@@ -1238,6 +1301,39 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     }
     await stateRepo.upsertPref("show:settings", mergedSettings);
     return reply.send(SettingsResponseSchema.parse({ settings: mergedSettings }));
+  });
+
+  app.get("/api/tts/voices", async (_request, reply) => {
+    return reply.send({ mimo: MIMO_VOICES, edge: EDGE_VOICES });
+  });
+
+  app.post("/api/tts/preview", async (request, reply) => {
+    const body = TtsPreviewRequestSchema.parse(request.body);
+    const text = body.text?.trim() || "欢迎收听 FakeRadio，这是当前音色的试听。";
+    if (body.provider === "mimo" && !env.FAKERADIO_MIMO_API_KEY) {
+      return reply.status(503).send({ error: "未配置 MiMo API key，无法试听" });
+    }
+    try {
+      const adapter = body.provider === "mimo"
+        ? createMimoTtsAdapter({
+            apiKey: env.FAKERADIO_MIMO_API_KEY ?? "",
+            cacheDir: ttsCacheDir,
+            baseUrl: env.FAKERADIO_MIMO_BASE_URL,
+            voice: body.voice,
+            ...(body.style !== undefined ? { style: body.style } : {}),
+            timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
+          })
+        : createEdgeTtsAdapter({
+            cacheDir: ttsCacheDir,
+            voice: body.voice,
+            ...(body.rate !== undefined ? { rate: body.rate } : {})
+          });
+      const result = await adapter.synthesize(text);
+      return reply.send({ audioUrl: result.audioUrl });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "试听生成失败";
+      return reply.status(503).send({ error: message });
+    }
   });
 
   app.get("/stream", { websocket: true }, (connection) => {

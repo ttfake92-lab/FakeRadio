@@ -98,9 +98,17 @@ FAKERADIO_MIMO_BASE_URL=https://api.xiaomimimo.com/v1
 FAKERADIO_MIMO_TTS_VOICE=茉莉
 ```
 
-可用音色：`茉莉`（中文女声）、`冰糖`（中文女声）、`苏打`（中文男声）、`白桦`（中文男声）、`Mia`（英文女声）、`Chloe`（英文女声）、`Milo`（英文男声）、`Dean`（英文男声）、`mimo_default`、`default_zh`、`default_en`。
+可用音色：`茉莉`（中文女声）、`冰糖`（中文女声）、`苏打`（中文男声）、`白桦`（中文男声）、`Mia`（英文女声）、`Chloe`（英文女声）、`Milo`（英文男声）、`Dean`（英文男声）、`mimo_default`、`default_zh`、`default_en`。前端通过 `GET /api/tts/voices` 获取下拉列表，无需手填。
 
-缓存键与 provider、模型、音色绑定，同文案不同音色不会复用缓存。
+### 运行时音色 / 风格 / 语速
+
+除环境变量默认值外，音色、播报风格、语速可在运行时通过设置页（`GET/PUT /api/settings`）调整，`applySettings` 重建 adapter，无需重启：
+
+- `ttsVoice` / `mimoVoice`：音色，按当前 provider 生效。
+- `ttsStyle`：播报风格描述（中文自由文本，如「温柔治愈」「沉稳深夜」），**仅 MiMo 生效**，注入 MiMo chat/completions 的 user message 提示。空串回退默认 `warm, natural` 提示。
+- `ttsRate`：语速偏移百分比（-50~200，0 为正常），**仅 Edge 生效**，透传给 edge-tts 的 `rate`（如 `+50%`、`-20%`）。MiMo 未确认支持结构化语速参数，改用 `ttsStyle` 文本暗示（如「语速稍慢」）。
+
+缓存键纳入 provider/model/voice/style(或 rate)/text，同文案不同参数不会复用缓存。设置页提供试听按钮（`POST /api/tts/preview`），用当前表单值临时合成一句示例音频。
 
 ### 回退策略
 

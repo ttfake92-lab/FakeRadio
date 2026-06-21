@@ -271,7 +271,9 @@ export const NeteaseCookieSubmitRequestSchema = z.object({
 
 export const NeteaseCookieSubmitResponseSchema = z.object({
   success: z.boolean(),
-  message: z.string()
+  loggedIn: z.boolean(),
+  message: z.string(),
+  nickname: z.string().optional()
 });
 
 export const LikedSongsDiagnosticsSchema = z.object({
@@ -555,6 +557,8 @@ export const SettingsSchema = z.object({
   ttsProvider: z.enum(["edge", "mimo"]).default("edge"),
   ttsVoice: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
   mimoVoice: z.string().min(1).default("茉莉"),
+  ttsStyle: z.string().default(""),
+  ttsRate: z.number().int().min(-50).max(200).default(0),
   tracePrivacy: z.enum(["full", "summary", "off"]).default("summary"),
   externalTrackLimit: z.number().int().min(0).max(100).default(60),
   dailyShowAvoidRecentPlay: z.boolean().default(true),
@@ -576,6 +580,8 @@ export const UpdateSettingsRequestSchema = z.object({
   ttsProvider: z.enum(["edge", "mimo"]).optional(),
   ttsVoice: z.string().min(1).optional(),
   mimoVoice: z.string().min(1).optional(),
+  ttsStyle: z.string().optional(),
+  ttsRate: z.number().int().min(-50).max(200).optional(),
   tracePrivacy: z.enum(["full", "summary", "off"]).optional(),
   externalTrackLimit: z.number().int().min(0).max(100).optional(),
   dailyShowAvoidRecentPlay: z.boolean().optional(),

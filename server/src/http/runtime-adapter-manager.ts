@@ -103,10 +103,11 @@ async function buildSnapshot(
         cacheDir: ttsCacheDir,
         baseUrl: env.FAKERADIO_MIMO_BASE_URL,
         voice: settings.mimoVoice,
+        style: settings.ttsStyle,
         timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
       });
     }
-    return createEdgeTtsAdapter({ cacheDir: ttsCacheDir, voice: settings.ttsVoice });
+    return createEdgeTtsAdapter({ cacheDir: ttsCacheDir, voice: settings.ttsVoice, rate: settings.ttsRate });
   })();
 
   const weather = overrides.weather ?? (env.FAKERADIO_OPENWEATHER_API_KEY

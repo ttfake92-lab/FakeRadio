@@ -21,6 +21,8 @@ function createMockAudioElement(): HTMLAudioElement {
     duration: 60,
     play: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn(),
+    removeAttribute: vi.fn(),
+    load: vi.fn(),
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
     onended: null as (() => void) | null,

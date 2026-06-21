@@ -123,6 +123,57 @@ describe("createMimoTtsAdapter", () => {
     vi.restoreAllMocks();
   });
 
+  it("injects style prompt into user message when style provided", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ audio: { data: audioBase64 } })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir, voice: "茉莉", style: "温柔治愈" });
+    await adapter.synthesize("测试风格");
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.messages[0].content).toBe("以温柔治愈的风格、用茉莉音色朗读以下内容。");
+
+    vi.restoreAllMocks();
+  });
+
+  it("falls back to default warm prompt when style empty", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ audio: { data: audioBase64 } })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter = createMimoTtsAdapter({ apiKey: "test-key", cacheDir, voice: "茉莉", style: "   " });
+    await adapter.synthesize("测试默认");
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.messages[0].content).toBe("Speak in a warm, natural 茉莉 voice.");
+
+    vi.restoreAllMocks();
+  });
+
+  it("different styles produce different cache keys", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ audio: { data: audioBase64 } })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const adapter1 = createMimoTtsAdapter({ apiKey: "test-key", cacheDir, voice: "茉莉", style: "温柔治愈" });
+    const adapter2 = createMimoTtsAdapter({ apiKey: "test-key", cacheDir, voice: "茉莉", style: "沉稳深夜" });
+
+    const r1 = await adapter1.synthesize("同一句话");
+    const r2 = await adapter2.synthesize("同一句话");
+
+    expect(r1.cacheKey).not.toBe(r2.cacheKey);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    vi.restoreAllMocks();
+  });
+
   it("throws on API error", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,

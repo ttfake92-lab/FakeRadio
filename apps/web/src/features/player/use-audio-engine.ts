@@ -54,7 +54,12 @@ export function useAudioEngine(): AudioEngine {
       const p = el.play();
       if (p && typeof p.then === "function") {
         p.then(() => {
-          el.pause();
+          // 只有当 src 仍为空时才 pause。若此时 src 已非空，说明
+          // playEpisodeData 已经设入新 src 并接管了该元素——这次 resolve
+          // 是新 src 触发的，pause 会把刚启动的播放打断（音乐/口播无声卡住）。
+          if (!el.src) {
+            el.pause();
+          }
           el.muted = false;
         }).catch(() => {
           el.muted = false;

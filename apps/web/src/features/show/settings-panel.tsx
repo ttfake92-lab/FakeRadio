@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import type { Settings as SettingsType } from "@fakeradio/shared";
-import { getSettings, updateSettings } from "../../lib/api-client";
+import { getSettings, updateSettings, getTtsVoices, previewTts, buildMediaUrl, type TtsVoiceOption } from "../../lib/api-client";
 
 export type SettingsPanelProps = {
   isExpanded: boolean;
@@ -17,6 +17,10 @@ export function SettingsPanel({ isExpanded, isOpen, embedded = false, onToggleEx
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [voices, setVoices] = useState<{ mimo: TtsVoiceOption[]; edge: TtsVoiceOption[] } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const pendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const settingsSnapshotRef = useRef<SettingsType | null>(null);
 
@@ -35,6 +39,7 @@ export function SettingsPanel({ isExpanded, isOpen, embedded = false, onToggleEx
   useEffect(() => {
     if (isOpen) {
       loadSettings();
+      getTtsVoices().then(setVoices).catch(() => {});
     }
   }, [isOpen]);
 
@@ -79,6 +84,31 @@ export function SettingsPanel({ isExpanded, isOpen, embedded = false, onToggleEx
     }, 300);
     pendingTimersRef.current.set(key as string, timer);
   }, [settings, loadSettings]);
+
+  const handlePreview = useCallback(async () => {
+    if (!settings) return;
+    setPreviewing(true);
+    setPreviewError(null);
+    try {
+      const provider = settings.ttsProvider;
+      const voice = provider === "mimo" ? settings.mimoVoice : settings.ttsVoice;
+      const { audioUrl } = await previewTts({
+        provider,
+        voice,
+        ...(provider === "mimo" ? { style: settings.ttsStyle } : {}),
+        ...(provider === "edge" ? { rate: settings.ttsRate } : {})
+      });
+      const audio = previewAudioRef.current;
+      if (audio) {
+        audio.src = buildMediaUrl(audioUrl) ?? "";
+        await audio.play();
+      }
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : "试听失败");
+    } finally {
+      setPreviewing(false);
+    }
+  }, [settings]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -245,20 +275,68 @@ export function SettingsPanel({ isExpanded, isOpen, embedded = false, onToggleEx
                   onChange={(v) => handleSettingChange("ttsProvider", v)}
                   disabled={saving}
                 />
+                {(() => {
+                  const isMimo = settings.ttsProvider === "mimo";
+                  const presetVoices = isMimo ? (voices?.mimo ?? []) : (voices?.edge ?? []);
+                  const currentVoice = isMimo ? settings.mimoVoice : settings.ttsVoice;
+                  const voiceOptions = presetVoices.some((o) => o.value === currentVoice)
+                    ? presetVoices
+                    : [{ value: currentVoice, label: `${currentVoice} (自定义)` }, ...presetVoices];
+                  return (
+                    <SelectSetting
+                      label="音色"
+                      description={isMimo ? "MiMo TTS 音色" : "Edge TTS 音色"}
+                      value={currentVoice}
+                      options={voiceOptions}
+                      onChange={(v) => handleSettingChange(isMimo ? "mimoVoice" : "ttsVoice", v)}
+                      disabled={saving}
+                    />
+                  );
+                })()}
                 <TextSetting
-                  label="Edge TTS 语音"
-                  description="Edge TTS 的语音 ID"
-                  value={settings.ttsVoice}
-                  onChange={(v) => handleSettingChange("ttsVoice", v)}
-                  disabled={saving}
+                  label="播报风格"
+                  description="用自然语言描述口播语气，如「温柔治愈」「沉稳深夜」。仅 MiMo 支持。"
+                  value={settings.ttsStyle}
+                  onChange={(v) => handleSettingChange("ttsStyle", v)}
+                  disabled={saving || settings.ttsProvider !== "mimo"}
                 />
-                <TextSetting
-                  label="MIMO 语音"
-                  description="MIMO TTS 的语音名称"
-                  value={settings.mimoVoice}
-                  onChange={(v) => handleSettingChange("mimoVoice", v)}
-                  disabled={saving}
+                <RangeSetting
+                  label="语速"
+                  description="仅 Edge TTS 支持。0% 为正常语速。"
+                  value={settings.ttsRate}
+                  min={-50}
+                  max={200}
+                  step={10}
+                  onChange={(v) => handleSettingChange("ttsRate", v)}
+                  disabled={saving || settings.ttsProvider !== "edge"}
                 />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <button
+                    onClick={handlePreview}
+                    disabled={previewing || saving}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 0,
+                      border: "1px solid var(--line)",
+                      background: "transparent",
+                      color: "var(--text)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: "0.15em",
+                      textTransform: "uppercase",
+                      cursor: previewing || saving ? "not-allowed" : "pointer",
+                      opacity: previewing || saving ? 0.5 : 1,
+                    }}
+                  >
+                    {previewing ? "试听中…" : "试听"}
+                  </button>
+                  {previewError && (
+                    <span style={{ color: "#c44", fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em" }}>
+                      {previewError}
+                    </span>
+                  )}
+                  <audio ref={previewAudioRef} style={{ display: "none" }} />
+                </div>
               </SettingSection>
 
               <SettingSection title="Privacy">

@@ -36,6 +36,11 @@
 - `GET /api/netease/login/status`：查看当前网易云 cookie 登录状态。
 - `POST /api/netease/logout`：清除当前网易云登录 cookie。
 
+## TTS
+
+- `GET /api/tts/voices`：返回各 provider 可用音色列表，供设置页下拉。`{ mimo: [{value,label}...], edge: [{value,label}...] }`。
+- `POST /api/tts/preview`：用指定参数试听合成。请求体 `{ provider: "mimo"|"edge", voice, style?, rate?, text? }`，临时构造 adapter 合成示例文本（默认「欢迎收听 FakeRadio，这是当前音色的试听。」），返回 `{ audioUrl }`（音频落 TTS 缓存，复用 `/cache/tts/*` 路由 serve）。MiMo 未配 API key 或合成失败返回 503 + `{ error }`。
+
 ## Show Production（节目制作）
 
 ### ProgramBrief（节目构思）

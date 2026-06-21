@@ -4,23 +4,20 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { NowResponse, Track, FavoriteTrack, ProgramBrief, ShowPlan, ShowJob, ShowProject, NeteaseLoginStatus, TasteResponse } from '@fakeradio/shared';
 import {
   getNow,
-  getTodayPlan, getShowProjects, generateNow, exportProject, getProjectExportFiles, downloadProjectFile,
+  getShowProjects, generateNow,
   getFavorites, addFavorite, removeFavorite,
   getBriefs, getShowPlans, getShowJobs,
   getNeteaseLoginStatus, createNeteaseQrLogin, checkNeteaseQrLogin, submitNeteaseCookie,
-  getTaste, getPrewarmStatus,
-  exportTodayShow, getExportTodayStatus, buildApiUrl,
+  getTaste,
 } from '../../lib/api-client';
-import type { TodayExportTask } from '../../lib/api-client';
 import { useAudioEngine } from '../player/use-audio-engine';
 import { usePlaybackState } from '../player/use-playback-state';
 import { useStreamConnection } from '../player/use-stream-connection';
 import type { AgentMessage } from '../player/use-stream-connection';
 import { useChatSSE } from '../player/use-chat-sse';
 import { QUICK_PROMPTS } from '../player/skin-config';
-import { ProductionBoard } from '../show/production-board';
 import { SettingsPanel } from '../show/settings-panel';
-import { ShowLibrary } from '../show/show-library';
+import { LibraryView } from '../show/library-view';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -265,7 +262,7 @@ export function EditorialRadio() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
   const chatSSE = useChatSSE();
-  const [activeView, setActiveView] = useState<'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'library' | 'settings'>('main');
 
   // Netease login + taste
   const [neteaseStatus, setNeteaseStatus] = useState<NeteaseLoginStatus | null>(null);
@@ -574,15 +571,12 @@ export function EditorialRadio() {
   // Next
   const handleNext = useCallback(async () => {
     try {
-      audio.musicRef.current?.pause();
-      audio.speechRef.current?.pause();
-      playback.clearEpisodeState();
-      await playback.playEpisode();
+      await playback.skipToNext();
       setIsPlaying(true);
     } catch {
       setIsPlaying(false);
     }
-  }, [audio.musicRef, audio.speechRef, playback.clearEpisodeState, playback.playEpisode]);
+  }, [playback.skipToNext]);
 
   // Toggle favorite
   const handleToggleFavorite = useCallback(async () => {
@@ -643,7 +637,7 @@ export function EditorialRadio() {
             data.action?.type === 'show-cancelled'
           ) {
             const briefId = data.action.briefId ?? activeBriefId;
-            setActiveView('production');
+            setActiveView('library');
             refreshProductionData(briefId).catch(() => {});
             if (data.action.type === 'show-confirmed' && briefId) {
               startJobTracking(briefId);
@@ -662,7 +656,7 @@ export function EditorialRadio() {
     startJobTracking(briefId);
     await generateNow(briefId);
     await refreshProductionData(briefId);
-    setActiveView('production');
+    setActiveView('library');
   }, [refreshProductionData, startJobTracking]);
 
   // Derived display data
@@ -802,24 +796,19 @@ export function EditorialRadio() {
             isPlaying={isPlaying}
             bp={bp}
           />
-        ) : activeView === 'schedule' ? (
-          <ScheduleView />
-        ) : activeView === 'production' ? (
-          <ProductionBoard
+        ) : activeView === 'library' ? (
+          <LibraryView
             brief={activeBrief}
             briefs={briefs}
             showPlan={showPlan}
             jobs={jobs}
             projects={projects}
-            isExpanded
-            embedded
-            onToggleExpand={() => {}}
-            onClose={() => setActiveView('main')}
             onSwitchBrief={(id) => setActiveBriefId(id)}
             onProjectsChanged={refreshProjects}
             onGenerateNow={handleGenerateNow}
+            onClose={() => setActiveView('main')}
           />
-        ) : activeView === 'settings' ? (
+        ) : (
           <SettingsPanel
             isExpanded
             isOpen
@@ -827,18 +816,6 @@ export function EditorialRadio() {
             onToggleExpand={() => {}}
             onClose={() => setActiveView('main')}
           />
-        ) : activeView === 'library' ? (
-          <ShowLibrary
-            isExpanded
-            isOpen
-            embedded
-            projects={projects}
-            onToggleExpand={() => {}}
-            onClose={() => setActiveView('main')}
-            onRefresh={refreshProjects}
-          />
-        ) : (
-          <ExportView />
         )}
 
         {/* RIGHT — chat transcript */}
@@ -890,8 +867,8 @@ function TopBar({
   timeStr: string;
   isDark: boolean;
   onToggleTheme: () => void;
-  activeView: 'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library';
-  onNavigate: (view: 'main' | 'schedule' | 'export' | 'production' | 'settings' | 'library') => void;
+  activeView: 'main' | 'library' | 'settings';
+  onNavigate: (view: 'main' | 'library' | 'settings') => void;
   neteaseStatus: NeteaseLoginStatus | null;
   onOpenNeteaseLogin: () => void;
   bp: Breakpoint;
@@ -963,10 +940,7 @@ function TopBar({
       <nav style={{ display: 'flex', gap: isTablet ? 20 : 36, minWidth: 0, overflow: 'hidden' }}>
         {([
           { key: 'main' as const, label: '正在播放' },
-          { key: 'schedule' as const, label: '节目单' },
-          { key: 'production' as const, label: '制作' },
           { key: 'library' as const, label: '节目库' },
-          { key: 'export' as const, label: '导出' },
           { key: 'settings' as const, label: '设置' },
         ]).map((it) => (
           <button
@@ -2128,445 +2102,6 @@ function ProductionProgressPanel({ job, onDismiss }: { job: ShowJob; onDismiss: 
 }
 
 // ─────────────────────────────────────────────────────────────
-// ScheduleView — today's program blocks
-// ─────────────────────────────────────────────────────────────
-function ScheduleView() {
-  const [blocks, setBlocks] = useState<Array<{ at: string; label: string; moodHint: string }>>([]);
-  const [date, setDate] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [prewarmBlocks, setPrewarmBlocks] = useState<Array<{ at: string; ready: number; consumed: number; failed: number }>>([]);
-
-  useEffect(() => {
-    getTodayPlan()
-      .then((data) => {
-        setBlocks(data.blocks);
-        setDate(data.date);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    getPrewarmStatus()
-      .then((data) => setPrewarmBlocks(data.blocks ?? []))
-      .catch(() => {});
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--mute)', letterSpacing: '0.15em' }}>
-          LOADING…
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ maxWidth: 460, margin: '0 auto', padding: '40px 0' }}>
-      <div
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.28em',
-          color: 'var(--mute)',
-          textTransform: 'uppercase',
-          marginBottom: 32,
-        }}
-      >
-        DAILY SCHEDULE &nbsp;·&nbsp; {date}
-      </div>
-
-      {blocks.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
-          暂无节目安排
-        </div>
-      ) : (
-        <div>
-          {blocks.map((b, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '64px 1fr auto',
-                alignItems: 'baseline',
-                gap: 16,
-                padding: '16px 0',
-                borderTop: '1px solid var(--line)',
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  color: 'var(--mute)',
-                  letterSpacing: '0.08em',
-                }}
-              >
-                {b.at}
-              </span>
-              <div>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 20,
-                    lineHeight: 1.3,
-                    marginBottom: 4,
-                  }}
-                >
-                  {b.label}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.15em',
-                    color: 'var(--faint)',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {b.moodHint}
-                </span>
-                {(() => {
-                  const pw = prewarmBlocks.find((p) => p.at === b.at);
-                  if (!pw) return null;
-                  return (
-                    <span
-                      style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 8,
-                        letterSpacing: '0.1em',
-                        color: pw.ready > 0 ? 'var(--text)' : 'var(--faint)',
-                      }}
-                    >
-                      {pw.ready}R · {pw.consumed}C{pw.failed > 0 ? ` · ${pw.failed}F` : ''}
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
-          ))}
-          <div style={{ borderTop: '1px solid var(--line)' }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// ExportView — show projects + export
-// ─────────────────────────────────────────────────────────────
-function ExportView() {
-  const [projects, setProjects] = useState<Array<{
-    id: string;
-    slug: string;
-    status: string;
-    briefId: string;
-    createdAt: string;
-  }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [exportingId, setExportingId] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
-  // 今日电台导出：异步任务 + 轮询进度
-  const [todayTask, setTodayTask] = useState<TodayExportTask | null>(null);
-  const [todayStarting, setTodayStarting] = useState(false);
-  const todayPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (todayPollRef.current) clearInterval(todayPollRef.current);
-    };
-  }, []);
-
-  const handleExportToday = useCallback(async () => {
-    if (todayPollRef.current) {
-      clearInterval(todayPollRef.current);
-      todayPollRef.current = null;
-    }
-    setTodayStarting(true);
-    setTodayTask(null);
-    try {
-      const { taskId } = await exportTodayShow();
-      const poll = async () => {
-        try {
-          const task = await getExportTodayStatus(taskId);
-          setTodayTask(task);
-          if (task.status === 'completed' || task.status === 'failed') {
-            if (todayPollRef.current) {
-              clearInterval(todayPollRef.current);
-              todayPollRef.current = null;
-            }
-          }
-        } catch { /* 网络抖动时继续轮询 */ }
-      };
-      await poll();
-      todayPollRef.current = setInterval(poll, 1500);
-    } catch (e) {
-      setTodayTask({ status: 'failed', error: e instanceof Error ? e.message : '导出失败' });
-    } finally {
-      setTodayStarting(false);
-    }
-  }, []);
-
-  const isExportingToday =
-    todayStarting || todayTask?.status === 'pending' || todayTask?.status === 'running';
-
-  const loadProjects = useCallback(() => {
-    setLoading(true);
-    getShowProjects()
-      .then((data) => setProjects(data.projects ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { loadProjects(); }, [loadProjects]);
-
-  const handleExport = useCallback(async (projectId: string) => {
-    setExportingId(projectId);
-    setExportError(null);
-    setExportSuccess(null);
-    try {
-      const result = await exportProject(projectId) as { blocksCount?: number; showMp3Size?: number };
-      const parts = ['导出完成'];
-      if (typeof result.blocksCount === 'number') parts.push(`${result.blocksCount} 个区块`);
-      if (typeof result.showMp3Size === 'number' && result.showMp3Size > 0) {
-        parts.push(`show.mp3 ${(result.showMp3Size / 1024 / 1024).toFixed(1)} MB`);
-      }
-      setExportSuccess(`${parts.join(' · ')}，点击 DOWNLOAD 下载文件`);
-      loadProjects();
-    } catch (e) {
-      setExportError(e instanceof Error ? e.message : '导出失败');
-    } finally {
-      setExportingId(null);
-    }
-  }, [loadProjects]);
-
-  const handleDownload = useCallback(async (projectId: string) => {
-    setDownloadingId(projectId);
-    try {
-      const result = await getProjectExportFiles(projectId);
-      for (const file of result.files ?? []) {
-        const blob = await downloadProjectFile(projectId, file);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-    } catch {
-      // silent
-    } finally {
-      setDownloadingId(null);
-    }
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--mute)', letterSpacing: '0.15em' }}>
-          LOADING…
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ maxWidth: 460, margin: '0 auto', padding: '40px 0' }}>
-      {/* 今日电台导出 */}
-      <div
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.28em',
-          color: 'var(--mute)',
-          textTransform: 'uppercase',
-          marginBottom: 16,
-        }}
-      >
-        TODAY&apos;S SHOW · 今日电台
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--mute)', lineHeight: 1.6, marginBottom: 16 }}>
-        把今天播放过的节目按顺序串成一期可发布的素材（show.mp3 + show notes）。
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <button
-          onClick={handleExportToday}
-          disabled={isExportingToday}
-          style={{
-            padding: '8px 20px',
-            border: '1px solid var(--line)',
-            borderRadius: 999,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 10,
-            letterSpacing: '0.15em',
-            color: 'var(--text)',
-            cursor: isExportingToday ? 'wait' : 'pointer',
-            background: 'transparent',
-          }}
-        >
-          {isExportingToday ? 'EXPORTING…' : 'EXPORT TODAY'}
-        </button>
-        {todayTask?.status === 'completed' && todayTask.result && (
-          <a
-            href={buildApiUrl(todayTask.result.downloadUrl)}
-            download
-            style={{
-              padding: '8px 20px',
-              border: '1px solid var(--text)',
-              borderRadius: 999,
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              letterSpacing: '0.15em',
-              color: 'var(--text)',
-              textDecoration: 'none',
-            }}
-          >
-            DOWNLOAD ZIP
-          </a>
-        )}
-      </div>
-      {isExportingToday && todayTask?.progress && (
-        <div style={{ fontSize: 11, color: 'var(--mute)', fontFamily: 'var(--font-mono)', marginBottom: 12 }}>
-          {(() => {
-            const p = todayTask.progress;
-            const labels: Record<string, string> = {
-              collecting: '收集当日曲目…',
-              mixing: '处理音频',
-              concatenating: '拼接节目音频…',
-              notes: '生成 show notes…',
-              packaging: '打包 ZIP…',
-              done: '完成',
-            };
-            const base = labels[p.phase] ?? p.phase;
-            return p.phase === 'mixing' && p.current && p.total
-              ? `${base} ${p.current}/${p.total}${p.trackTitle ? ` · ${p.trackTitle}` : ''}`
-              : base;
-          })()}
-        </div>
-      )}
-      {todayTask?.status === 'completed' && todayTask.result && (
-        <div style={{ fontSize: 12, color: '#4ade80', marginBottom: 12 }}>
-          导出完成 · {todayTask.result.trackCount} 首 · {todayTask.result.date}
-        </div>
-      )}
-      {todayTask?.status === 'failed' && (
-        <div style={{ fontSize: 12, color: '#c44', marginBottom: 12 }}>
-          {todayTask.error ?? '导出失败'}
-        </div>
-      )}
-
-      <div style={{ borderTop: '1px solid var(--line)', margin: '28px 0 32px' }} />
-
-      <div
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 9,
-          letterSpacing: '0.28em',
-          color: 'var(--mute)',
-          textTransform: 'uppercase',
-          marginBottom: 32,
-        }}
-      >
-        SHOW PROJECTS
-      </div>
-
-      {exportError && (
-        <div style={{ fontSize: 12, color: '#c44', marginBottom: 16 }}>{exportError}</div>
-      )}
-      {exportSuccess && (
-        <div style={{ fontSize: 12, color: '#4ade80', marginBottom: 16 }}>{exportSuccess}</div>
-      )}
-
-      {projects.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
-          暂无节目项目
-        </div>
-      ) : (
-        <div>
-          {projects.map((p) => (
-            <div
-              key={p.id}
-              style={{
-                padding: '16px 0',
-                borderTop: '1px solid var(--line)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 18,
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {p.slug}
-                </div>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.15em',
-                    color: p.status === 'exported' ? 'var(--text)' : 'var(--faint)',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {p.status}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                <button
-                  onClick={() => handleExport(p.id)}
-                  disabled={exportingId === p.id}
-                  style={{
-                    padding: '8px 20px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 999,
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 10,
-                    letterSpacing: '0.15em',
-                    color: 'var(--text)',
-                    cursor: exportingId === p.id ? 'wait' : 'pointer',
-                    background: 'transparent',
-                  }}
-                >
-                  {exportingId === p.id ? 'EXPORTING…' : 'EXPORT'}
-                </button>
-                {p.status === 'exported' && (
-                  <button
-                    onClick={() => handleDownload(p.id)}
-                    disabled={downloadingId === p.id}
-                    style={{
-                      padding: '8px 20px',
-                      border: '1px solid var(--line)',
-                      borderRadius: 999,
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 10,
-                      letterSpacing: '0.15em',
-                      color: 'var(--mute)',
-                      cursor: downloadingId === p.id ? 'wait' : 'pointer',
-                      background: 'transparent',
-                    }}
-                  >
-                    {downloadingId === p.id ? 'DOWNLOADING…' : 'DOWNLOAD'}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          <div style={{ borderTop: '1px solid var(--line)' }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // VolumeControl
 // ─────────────────────────────────────────────────────────────
 function VolumeControl({ musicRef }: { musicRef: React.RefObject<HTMLAudioElement | null> }) {
@@ -2652,12 +2187,13 @@ function NeteaseLoginModal({
   onClose: () => void;
   onStatusChange: (s: NeteaseLoginStatus) => void;
 }) {
-  const [tab, setTab] = useState<'cookie' | 'qr'>('cookie');
+  const [tab, setTab] = useState<'cookie' | 'qr'>('qr');
   const [cookieInput, setCookieInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrData, setQrData] = useState<{ key: string; qrImageUrl: string } | null>(null);
   const [qrChecking, setQrChecking] = useState(false);
+  const [qrMessage, setQrMessage] = useState<string>('等待扫码…');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Cleanup polling on unmount
@@ -2667,18 +2203,89 @@ function NeteaseLoginModal({
     };
   }, []);
 
+  // 通用 Cookie 文件解析：支持 Netscape / JSON / Header 三种格式，
+  // 自动提取 music.163.com 的有效 Cookie 拼成请求头格式
+  const parseCookieFile = (content: string): string => {
+    const NETEASE_KEYS = ['MUSIC_U', '__csrf', 'MUSIC_A', 'MUSIC_R', 'NMTID', '_ntes_nuid', '__remember_me', 'os', 'appver', 'osver', 'channel', 'requestId', '__remember_me'];
+
+    // 尝试 JSON（EditThisCookie 导出格式：[{name,value,domain,...}])
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((c: any) => {
+          const d = (c.domain || '').toLowerCase();
+          return d.includes('music.163.com') || d.includes('163.com');
+        });
+        if (filtered.length > 0) {
+          return filtered.map((c: any) => `${c.name}=${c.value}`).join('; ');
+        }
+      }
+    } catch { /* not JSON, try next */ }
+
+    // 尝试 Netscape 格式（每行 tab 分隔：domain\tTRUE\tpath\tsecure\texpiry\tname\tvalue）
+    const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+    const cookies: Record<string, string> = {};
+    for (const line of lines) {
+      const parts = line.split('\t');
+      if (parts.length >= 7) {
+        const domain = parts[0].toLowerCase();
+        const name = parts[5];
+        const value = parts[6];
+        if ((domain.includes('music.163.com') || domain.includes('163.com')) && NETEASE_KEYS.includes(name)) {
+          cookies[name] = value;
+        }
+      }
+    }
+    const netscapeResult = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+    if (netscapeResult) return netscapeResult;
+
+    // 尝试 Header 格式（MUSIC_U=...; __csrf=...）
+    const headerMatch = content.match(/MUSIC_U=[^;]+/);
+    if (headerMatch) return content.trim();
+
+    return content.trim(); // fallback: 原样返回
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCookieFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result;
+      if (typeof text !== 'string') return;
+      const extracted = parseCookieFile(text);
+      if (extracted) {
+        setCookieInput(extracted);
+        // 自动检测到 MUSIC_U 就提示成功
+        if (extracted.includes('MUSIC_U')) {
+          setError(null);
+        } else {
+          setError('文件中未找到网易云有效 Cookie（需要 MUSIC_U）');
+        }
+      } else {
+        setError('无法解析该文件');
+      }
+    };
+    reader.readAsText(file);
+    // reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
   const handleCookieSubmit = async () => {
     if (!cookieInput.trim()) return;
     setSubmitting(true);
     setError(null);
     try {
       const result = await submitNeteaseCookie(cookieInput.trim());
-      if (result.success) {
-        const fresh = await getNeteaseLoginStatus();
-        onStatusChange(fresh);
+      // 服务端保存后已验证：loggedIn 才算登录成功
+      const fresh = await getNeteaseLoginStatus();
+      onStatusChange(fresh);
+      if (result.loggedIn) {
         onClose();
       } else {
-        setError(result.message || '提交失败');
+        setError(result.message || 'Cookie 验证未通过，请重新获取');
       }
     } catch {
       setError('网络错误');
@@ -2693,16 +2300,25 @@ function NeteaseLoginModal({
       const challenge = await createNeteaseQrLogin();
       setQrData(challenge);
       setQrChecking(true);
+      setQrMessage('等待扫码…');
       // Poll for QR scan result
       pollRef.current = setInterval(async () => {
         try {
           const result = await checkNeteaseQrLogin(challenge.key);
+          // 801 等待扫码 / 800 已扫码待确认 / 802 待确认 / 803 登录成功
+          setQrMessage(result.message || '等待扫码…');
           if (result.loggedIn) {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
             const fresh = await getNeteaseLoginStatus();
             onStatusChange(fresh);
-            onClose();
+            if (fresh.loggedIn) {
+              onClose();
+            } else {
+              // 扫码成功但 status 校验未通过：cookie 可能不完整
+              setError('扫码已完成，但登录状态校验未通过，请改用 Cookie 注入');
+              setQrChecking(false);
+            }
           }
         } catch {
           // silent, keep polling
@@ -2720,6 +2336,7 @@ function NeteaseLoginModal({
     }
     setQrChecking(false);
     setQrData(null);
+    setQrMessage('等待扫码…');
   };
 
   return (
@@ -2802,8 +2419,35 @@ function NeteaseLoginModal({
         {/* Cookie tab */}
         {tab === 'cookie' && (
           <div>
-            <p style={{ fontSize: 12, color: 'var(--mute)', marginBottom: 12, lineHeight: 1.5 }}>
-              从浏览器开发者工具中复制网易云音乐的 Cookie，粘贴到下方。
+            <p style={{ fontSize: 12, color: 'var(--mute)', marginBottom: 8, lineHeight: 1.5 }}>
+              扫码登录更方便，建议优先用「QR 扫码」。Cookie 注入作为备选：
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.json,.cookie,.cookies"
+              onChange={handleCookieFileImport}
+              style={{ display: 'none' }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                width: '100%',
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: '1px solid var(--line)',
+                background: 'var(--ink-soft)',
+                color: 'var(--text)',
+                fontSize: 12,
+                cursor: 'pointer',
+                marginBottom: 12,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              📂 导入 Cookies 文件（Netscape / JSON / Header 格式）
+            </button>
+            <p style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 12, lineHeight: 1.6 }}>
+              支持 EditThisCookie 导出的 Netscape 或 JSON 文件，自动提取 <code style={{ color: 'var(--mute)' }}>MUSIC_U</code>。也可手动粘贴 <code style={{ color: 'var(--mute)' }}>MUSIC_U=...; __csrf=...</code>
             </p>
             <textarea
               value={cookieInput}
@@ -2884,7 +2528,7 @@ function NeteaseLoginModal({
                   }}
                 />
                 <p style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 12 }}>
-                  {qrChecking ? '等待扫码…' : '已停止'}
+                  {qrChecking ? qrMessage : '已停止'}
                 </p>
                 <button
                   onClick={handleStopQr}

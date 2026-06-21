@@ -386,6 +386,38 @@ export async function updateSettings(settings: UpdateSettingsRequest) {
   return SettingsResponseSchema.parse(await response.json());
 }
 
+export type TtsVoiceOption = { value: string; label: string };
+export type TtsVoicesResponse = { mimo: TtsVoiceOption[]; edge: TtsVoiceOption[] };
+
+export async function getTtsVoices(): Promise<TtsVoicesResponse> {
+  const response = await fetch(buildApiUrl("/api/tts/voices"));
+  if (!response.ok) {
+    throw new Error(`Failed to get tts voices: ${response.status}`);
+  }
+  return response.json() as Promise<TtsVoicesResponse>;
+}
+
+export type TtsPreviewParams = {
+  provider: "mimo" | "edge";
+  voice: string;
+  style?: string;
+  rate?: number;
+  text?: string;
+};
+
+export async function previewTts(params: TtsPreviewParams): Promise<{ audioUrl: string }> {
+  const response = await fetch(buildApiUrl("/api/tts/preview"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `试听失败: ${response.status}`);
+  }
+  return response.json() as Promise<{ audioUrl: string }>;
+}
+
 export async function deleteProject(projectId: string) {
   const response = await fetch(buildApiUrl(`/api/shows/${projectId}`), {
     method: "DELETE",

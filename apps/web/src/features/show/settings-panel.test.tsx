@@ -8,6 +8,7 @@ vi.mock("../../lib/api-client");
 
 const mockGetSettings = apiClient.getSettings as ReturnType<typeof vi.fn>;
 const mockUpdateSettings = apiClient.updateSettings as ReturnType<typeof vi.fn>;
+const mockGetTtsVoices = apiClient.getTtsVoices as ReturnType<typeof vi.fn>;
 
 const defaultSettings = {
   researchEnabled: true,
@@ -18,6 +19,8 @@ const defaultSettings = {
   ttsProvider: "edge" as const,
   ttsVoice: "zh-CN-XiaoxiaoNeural",
   mimoVoice: "crimson",
+  ttsStyle: "",
+  ttsRate: 0,
   tracePrivacy: "summary" as const,
   externalTrackLimit: 60,
   dailyShowAvoidRecentPlay: true,
@@ -29,6 +32,7 @@ describe("SettingsPanel 用户流", () => {
     vi.clearAllMocks();
     mockGetSettings.mockResolvedValue({ settings: defaultSettings });
     mockUpdateSettings.mockResolvedValue({ settings: defaultSettings });
+    mockGetTtsVoices.mockResolvedValue({ mimo: [], edge: [] });
   });
 
   afterEach(() => {

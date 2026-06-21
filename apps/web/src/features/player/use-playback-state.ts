@@ -29,6 +29,7 @@ export type PlaybackState = {
   musicAudioUrl: string | undefined;
   episodeSource: "prepared" | "live" | null;
   playEpisode(): Promise<void>;
+  skipToNext(): Promise<void>;
   setError(error: string | null): void;
   clearEpisodeState(): void;
 };
@@ -119,17 +120,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     };
 
     musicAudio.onended = () => {
-      const next = nextEpisodeRef.current;
-      if (next) {
-        nextEpisodeRef.current = null;
-        setNextEpisode(null);
-        setNextEpisodeError(null);
-        playEpisodeData(next);
-        // 预取的 episode 是前端自行接续的，必须上报服务端，
-        // 否则服务端"当前曲目"停留在上一首，DJ 聊天会聊错歌
-        reportEpisodePlaying(next.track.id).catch(() => {});
-        return;
-      }
+      if (playNextEpisode()) return;
 
       if (isPrefetchingRef.current) {
         const pollInterval = setInterval(() => {
@@ -216,6 +207,22 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     }
   }, [episodeState]);
 
+  // 切到已预取的下一首（秒切，无需等待生成）。手动 NEXT 和自动 onended 共用，
+  // 避免两条路径不一致。返回 false 表示没有预取可用，调用方自行 fallback。
+  function playNextEpisode(): boolean {
+    const next = nextEpisodeRef.current;
+    if (!next) return false;
+    nextEpisodeRef.current = null;
+    setNextEpisode(null);
+    setNextEpisodeError(null);
+    playEpisodeData(next);
+    // 预取的 episode 是前端自行接续的，必须上报服务端，
+    // 否则服务端"当前曲目"停留在上一首，DJ 聊天会聊错歌
+    reportEpisodePlaying(next.track.id).catch(() => {});
+    return true;
+  }
+
+
   const prefetchNextEpisode = useCallback(async () => {
     if (isPrefetchingRef.current) return;
     isPrefetchingRef.current = true;
@@ -259,6 +266,12 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   }, []);
 
   const clearEpisodeState = useCallback(() => {
+    // 连音频元素一起清空：否则残留的旧 src 会被 unlock() 的 play() 重新触发，
+    // 表现为"切下一首时旧口播又播一遍"
+    const ma = audio.musicRef.current;
+    const sa = audio.speechRef.current;
+    if (ma) { ma.pause(); ma.removeAttribute("src"); ma.load(); }
+    if (sa) { sa.pause(); sa.removeAttribute("src"); sa.load(); }
     episodeStateRef.current = "idle";
     setEpisodeState("idle");
     setEpisodeData(null);
@@ -268,6 +281,13 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     setError(null);
     setEpisodeSource(null);
   }, []);
+
+  // 手动 NEXT：优先用预取秒切，没有才清状态重新生成。
+  const skipToNext = useCallback(async () => {
+    if (playNextEpisode()) return;
+    clearEpisodeState();
+    await playEpisode();
+  }, [clearEpisodeState, playEpisode]);
 
   return {
     episodeState,
@@ -282,6 +302,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     musicAudioUrl,
     episodeSource,
     playEpisode,
+    skipToNext,
     setError,
     clearEpisodeState
   };

@@ -8,13 +8,14 @@ export type CreateMimoTtsAdapterOptions = {
   baseUrl?: string;
   model?: string;
   voice?: string;
+  style?: string;
   format?: "wav" | "mp3";
   timeoutMs?: number;
 };
 
-function hashTtsPayload(text: string, provider: string, model: string, voice: string): string {
+function hashTtsPayload(text: string, provider: string, model: string, voice: string, style: string): string {
   return createHash("sha256")
-    .update(`${provider}:${model}:${voice}:${text}`)
+    .update(`${provider}:${model}:${voice}:${style}:${text}`)
     .digest("hex")
     .slice(0, 16);
 }
@@ -23,14 +24,18 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
   const baseUrl = (options.baseUrl ?? "https://api.xiaomimimo.com/v1").replace(/\/$/, "");
   const model = options.model ?? "mimo-v2.5-tts";
   const voice = options.voice ?? "茉莉";
+  const style = options.style?.trim() ?? "";
   const format = options.format ?? "wav";
   const timeoutMs = options.timeoutMs ?? 60_000;
   const ext = format === "mp3" ? "mp3" : "wav";
   const cacheManager = createTtsCacheManager(options.cacheDir);
+  const stylePrompt = style
+    ? `以${style}的风格、用${voice}音色朗读以下内容。`
+    : `Speak in a warm, natural ${voice} voice.`;
 
   return {
     async synthesize(text) {
-      const cacheKey = hashTtsPayload(text, "mimo", model, voice);
+      const cacheKey = hashTtsPayload(text, "mimo", model, voice, style);
 
       if (await cacheManager.exists(cacheKey, ext)) {
         return { text, audioUrl: `/cache/tts/${cacheKey}.${ext}`, cacheKey };
@@ -47,7 +52,7 @@ export function createMimoTtsAdapter(options: CreateMimoTtsAdapterOptions): TtsA
           body: JSON.stringify({
             model,
             messages: [
-              { role: "user", content: `Speak in a warm, natural ${voice} voice.` },
+              { role: "user", content: stylePrompt },
               { role: "assistant", content: text }
             ],
             audio: { format, voice }
