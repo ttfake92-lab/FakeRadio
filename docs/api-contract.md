@@ -14,7 +14,7 @@
 - `POST /api/export/today`：启动异步节目导出任务。立即返回 `202 { taskId, status: "pending" }`，后台执行音频混音、生成 show notes 和打包 ZIP。
 - `GET /api/export/status/:taskId`：查询导出任务状态。返回 `{ id, status, progress?, result?, error? }`，`status` 可能为 `pending` / `running` / `completed` / `failed`。任务完成后 `result` 中包含 `downloadUrl`。
 - `GET /api/export/download/:date`：下载指定日期（`YYYY-MM-DD`）的导出 ZIP。返回 `application/zip` 附件。
-- `GET /api/episode/next`：story-first 电台接口。返回 `RadioEpisode`，包含 `track`（下一首曲目）、`story`（故事文案、TTS 音频、故事类型）、`sources[]`（资料来源与证据摘要）、`playback`（crossfade 与音量参数）和 `fallbackReason`（TTS 或资料源回退原因）。故事类型按证据门槛分级：`background`（有公开元数据或网页研究支撑）→ `lyric-theme`（有歌词支撑）→ `mood-reading`（资料不足时的情绪解读）。服务端在返回响应前会调用 `state.setDj()` 更新 DJ 状态，并通过 WebSocket 广播 `dj-speech` 和 `agent-message` 事件。故事叙述包含 `narrationMentionsTrack` 安全守卫——LLM 生成的文案若未提及所选曲目，自动回退到确定性文案。
+- `GET /api/episode/next`：story-first 电台接口。返回 `RadioEpisode`，包含 `track`（下一首曲目）、`story`（故事文案、TTS 音频、故事类型）、`sources[]`（资料来源与证据摘要）、`playback`（crossfade 与音量参数）和 `fallbackReason`（TTS 或资料源回退原因）。服务端通过 `composeEpisodeFromTrack()` 统一完成资料收集、口播生成（含 `narrationMentionsTrack` 安全守卫）和 TTS 合成。故事类型按证据门槛分级：`background`（有公开元数据或网页研究支撑）→ `lyric-theme`（有歌词支撑）→ `mood-reading`（资料不足时的情绪解读）。
 
 ## 预热与调度
 

@@ -3,7 +3,7 @@
 FakeRadio 由四层组成：
 
 1. 外部上下文：用户语料、LLM、音乐 provider、TTS、天气、日历、UPnP。
-2. 本地大脑：intent router、context builder、DJ brain、scheduler、TTS cache、state。
+2. 本地大脑：context builder、DJ brain、scheduler、TTS cache、state。
 3. 运行时 context window：system prompt、用户语料、环境注入、记忆、输入和工具结果、执行轨迹。
 4. 交互层：Next.js PWA、HTTP contract、WebSocket stream、单一 audio 元素。
 
@@ -89,17 +89,14 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 
 1. 前端请求 `GET /api/episode/next`
 2. server 选择下一首曲目（复用现有 music adapter 搜索/队列/回退逻辑）
-3. `StorySourceAdapter` 收集歌词（网易云）、公开元数据（MusicBrainz）和网页研究（Brave Search）资料
-4. story composer 按证据门槛生成中文短故事（`background` / `lyric-theme` / `mood-reading`）
-5. `narrateStoryWithSources()` 包含 `narrationMentionsTrack` 安全守卫——LLM 生成的文案若未提及所选曲目标题或艺术家名，自动回退到 `buildGroundedFallbackNarration` 确定性文案
-6. TTS adapter 合成故事音频；真实 TTS 失败时，mock TTS 生成真实静音 WAV 文件回退
-7. server 调用 `state.setDj()` 更新 DJ 状态，并广播 `dj-speech` 和 `agent-message` WebSocket 事件
-8. 前端先播放 story
-9. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
-10. 音乐播放时后台预取下一集 episode
-11. 当前音乐结束后自动进入下一集 story，形成连续电台循环
+3. `composeEpisodeFromTrack()`（`server/src/http/episode-runner.ts`）统一完成：收集资料（`StorySourceAdapter` 聚合歌词/元数据/网页研究）→ 口播生成（含 `narrationMentionsTrack` 安全守卫，未提及曲目时回退确定性文案）→ TTS 合成（真实失败回退静音 WAV）
+4. server 更新播放状态、广播 `dj-speech` / `agent-message` WebSocket 事件
+5. 前端先播放 story
+6. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
+7. 音乐播放时后台预取下一集 episode（`/api/episode/prefetch`）
+8. 当前音乐结束后自动进入下一集 story，形成连续电台循环
 
-播放器支持 `idle → preparing → story → crossfade → music` 六状态机（含 `error`），crossfade 触发条件、音量 clamp 和并发控制均通过测试覆盖。
+播放器支持 `idle → preparing → story → crossfade → music` 六状态机（含 `error`），状态转移定义在 `episode-state-machine.ts`，crossfade 触发条件、音量 clamp 和并发控制均通过测试覆盖。
 
 `/api/health` 暴露 `storySource` 和 `webResearch` provider 状态。前端展示故事类型标签、资料来源说明和非创作背景免责提示。
 
@@ -129,7 +126,7 @@ FakeRadio 前端主界面为 **Editorial Radio**（`editorial-radio.tsx`），�
 
 ### 旧版皮肤系统（已清理）
 
-此前支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 渲染。2026-05-29 前端清理（T2）删除了 `skin-pixel.tsx`、`skin-terminal.tsx`、`skin-bento.tsx`、`skin-y2k.tsx` 和 `on-air-terminal.tsx`，仅保留 `skin-amber.tsx` 作为可选皮肤。`SkinId`、`SKINS`、`ON_AIR_THEMES` 已同步简化。`useRadioBridge` hook 和 `skin-stage.tsx` 仍保留。
+此前支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 渲染。2026-05-29 前端清理（T2）删除了 `skin-pixel.tsx`、`skin-terminal.tsx`、`skin-bento.tsx`、`skin-y2k.tsx` 和 `on-air-terminal.tsx`，仅保留 `skin-amber.tsx` 作为可选皮肤。2026-06-21 架构简化进一步删除了前端 `ON_AIR_THEMES`、`OnAirThemeId` 类型和 `getThemeLabel` 函数（单值孤儿系统）。`useRadioBridge` hook 和 `skin-stage.tsx` 仍保留。
 
 ## Show Production 链路
 
@@ -198,10 +195,12 @@ FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊
 
 ## 预热与调度
 
-FakeRadio 支持夜间预热，提前生成次日节目：
+FakeRadio 支持预热，提前生成 episode：
 
 - `FAKERADIO_PREWARM_ENABLED=true` 启用
-- `FAKERADIO_PREWARM_TIME` 控制触发时间（默认 `02:00`）
+- `FAKERADIO_PREWARM_TIME` 控制定时触发时间（默认 `23:30`）
+- 服务启动时若当天未预热过，自动补跑一次（`skipStartupPrewarm` 选项可禁用）
+- 预热和定时触发共用 `prewarmForDate()` 函数，统一 shouldRun → run → mark 流程
 - 每个 daypart block 生成 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 个 episode
 - 预热结果存入 `prepared_episodes` 表
 - `/api/episode/next` 优先领取 prepared episode（`source: "prepared"`），无可用时走实时生成（`source: "live"`）

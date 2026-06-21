@@ -89,14 +89,14 @@ FakeRadio 已实现 story-first 电台播放闭环：
 - 故事资料来自网易云歌词、MusicBrainz 公开元数据和 Brave Search 网页研究
 - 故事类型和资料来源在前端可见，非创作背景时有免责提示
 - TTS 失败时自动回退到真实可播放的静音音频，不阻断电台循环
-- 详细规划见 `.scratch/fakeradio-story-episode/PRD.md`
+- 详细规划见 `docs/superpowers/specs/`
 
 ## 结构
 
-- `apps/web`：Next.js PWA 播放器，含 5 套皮肤和 4 套 DJ Persona。
+- `apps/web`：Next.js PWA 播放器，Editorial Radio 主界面 + amber 可选皮肤。
 - `server`：Fastify 本地服务中枢，含 SQLite 持久层。
 - `packages/shared`：前后端共享 contract。
 - `user`：用户品味、日程、歌单、收藏和 mood rules。
 - `prompts`：DJ persona 和 context window 说明。
 - `docs`：架构、接口、adapter 和运行说明。
-- `.scratch/`：功能规划与 issue 跟踪。
+- `.scratch/`：临时笔记与存档。

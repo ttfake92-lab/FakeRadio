@@ -85,7 +85,7 @@ FakeRadio 的中枢。负责 HTTP API、WebSocket stream、DJ 决策编排、状
 ### 服务端边界
 
 - `server` 负责 orchestration。
-- intent router、context builder、DJ brain、scheduler、state、tts 和 realtime 各自承担单一职责。
+- context builder、DJ brain、scheduler、state、tts 和 realtime 各自承担单一职责。
 - 真实 provider 的差异由 adapter 吸收，不进入核心策略层。
 
 ### 共享 contract 边界
@@ -98,7 +98,7 @@ FakeRadio 的中枢。负责 HTTP API、WebSocket stream、DJ 决策编排、状
 FakeRadio 目前按四层理解：
 
 1. 外部上下文：用户语料、LLM、音乐、TTS、天气、日历、UPnP。
-2. 本地大脑：router、context builder、DJ brain、scheduler、state、tts cache。
+2. 本地大脑：context builder、DJ brain、scheduler、state、tts cache。
 3. 运行时 context window：六类 fragments 组装后的 prompt 输入。
 4. 交互层：PWA、HTTP contract、WebSocket stream、audio 播放管线。
 
@@ -179,8 +179,7 @@ FakeRadio 目前按四层理解：
 ### 播放器 UI
 
 - 主界面为 Editorial Radio（`editorial-radio.tsx`），三栏桌面布局，bone/graphite 双主题。
-- 旧版 5 套皮肤（pixel/terminal/bento/y2k/on-air-terminal）已在 2026-05-29 清理删除，仅保留 amber 作为可选皮肤。
-- `SkinId`、`SKINS`、`ON_AIR_THEMES` 已同步简化。
+- 旧版 5 套皮肤（pixel/terminal/bento/y2k/on-air-terminal）已在 2026-05-29 清理删除，仅保留 amber 作为可选皮肤。2026-06-21 进一步删除前端 `ON_AIR_THEMES`、`OnAirThemeId` 类型和 `getThemeLabel` 函数。
 
 ### 播放器诊断
 
@@ -216,15 +215,15 @@ FakeRadio 已实现 story-first 电台播放闭环。核心新增术语：
 
 #### 前端状态机
 
-Playback: `idle → preparing → story → crossfade → music`（含 `error`），支持自动预取下一集形成连续循环。
+Playback: `idle → preparing → story → crossfade → music`（含 `error`），状态转移定义在 `episode-state-machine.ts`，支持自动预取下一集形成连续循环。
 
 #### 播放参数
 
 `playback.crossfadeStartOffsetMs`（默认 3000）与 `playback.musicStartVolume`（默认 0.2），控制 story 快结束时音乐渐入。
 
 规划入口：
-- `.scratch/fakeradio-story-episode/PRD.md`
-- `.scratch/fakeradio-story-episode/issues/`
+- `docs/superpowers/specs/`（Story Episode 设计规格）
+- `docs/superpowers/plans/`（预热调度设计）
 
 ## 必须保持的约束
 
