@@ -55,9 +55,36 @@ FakeRadio 当前已经有最小连续性闭环：
 
 - `buildTodayPlan(playlists?)` 生成当天的时段计划；当传入 `user/playlists.json` 内容时，block 的 `label` 和 `moodHint` 取自对应 playlist 的 `name` 与首个 `seed`，未传入时回退到硬编码默认值
 - `getCurrentPlanBlock()` 选出当前时段 block
-- 初始队列、daypart 切换队列、实时 `/api/next` 和每日预热都通过 Recommendation Engine 生成候选；它会综合当前 block、天气、日程、用户品味、mood rules、playlist seeds、网易喜欢歌曲 seed、最近播放和当前队列
+- 初始队列、daypart 切换队列、实时 `/api/next` 都通过 Recommendation Engine (`server/src/recommendation/recommendation-engine.ts`) 生成候选；它会综合当前 block、天气、日程、用户品味、mood rules、playlist seeds、网易喜欢歌曲 seed、最近播放和当前队列。query 优先级：**艺术家 → 品味关键词 → 场景词**（不是按场景词倒推的简单路径）。网易云 adapter 走 `/simi/song` 时使用这些 `seeds`
 - 每次成功生成下一首后，server 追加 `playedTrack` 记忆
-- 后续 DJ 文案可引用上一首歌，形成连续过渡
+- 后续 DJ 口播可引用上一首歌，形成连续过渡
+
+### 用户偏好文件（`user/`）
+
+| 文件 | 用途 | 缺失行为 |
+|---|---|---|
+| `user/taste.md` | 用户品味，注入 DJ brain 的 `userTaste` 上下文 | 回退到默认品味描述 |
+| `user/routines.md` | 日常节奏，注入 DJ brain 的 `routines` 上下文 | 回退到默认日程描述 |
+| `user/mood-rules.md` | Mood 规则，注入 DJ brain 的 `moodRules` 上下文 | 回退到默认 mood 规则 |
+| `user/profile.md` | 个人画像（2026-06-22 新增，**已被 `.gitignore` 屏蔽不入仓**），注入 DJ brain 的 `profile` 上下文 | 不注入，不影响流程 |
+| `user/playlists.json` | 歌单定义，用于生成 `buildTodayPlan` 的时段 block 和选歌 seeds | 回退到仅包含 `morning-soft-start` 的默认歌单 |
+| `user/netease-liked-songs.raw.json` | 网易云收藏歌曲原始数据，作为推荐 seed | 诊断 API 返回 `loaded: false`，不影响播放 |
+
+> **`user/profile.md` 是私人内容**：写你的"你是谁"，不写音乐品味（已有 `taste.md`）。比如：身份、生活节奏、对话风格偏好、当前在意的事。LLM 会在口播文案里参考这个画像来调整语气，但不会硬塞。
+
+### 启动预热第一首
+
+服务端启动后，`create-server.prewarmFirstEpisode()` 会对 `initialQueue[0]` 异步生成完整 episode（resolve → compose → TTS → 存到 `prepared_episodes`）。目的是让首次 `/api/episode/next` 命中 `source: "prepared"` 而不是走 5-15s 的 live 生成。
+
+**关键步骤**：
+
+1. `music.resolve(track)` 必须先调——`/api/episode/next` 的 live 路径内部 resolve，但 `claimPreparedEpisode` 不会 resolve
+2. 然后 `composeEpisodeFromTrack` 生成口播文案 + TTS
+3. 存到 `prepared_episodes`，`status: "ready"`
+
+进度通过 `agent-message` WebSocket 事件广播到前端对话框，让用户看到"正在准备第一首歌的口播…"。失败时 fallback live（`/api/episode/next` 仍能正常返回）。
+
+> **不再做"明天夜间预热"**：`create-server` 不调用 `runPrewarmForDate`。`daily-episode-prewarmer.ts` 模块保留（日终品味推断 + tonight brief 仍用），但不再生成 episode 预存。详见 `local-runbook.md` 预热章节。
 
 当前 daypart block 与默认 playlist 对应关系：
 

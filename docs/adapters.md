@@ -34,6 +34,8 @@ FakeRadio 当前仍以 mock 为基础闭环，但 `music adapter` 已支持两�
 
 网易云 adapter 的策略是：有 `seeds` 时优先调用 `/simi/song` 扩展相似歌曲；相似歌曲不足时再用 `mood` 走 `/cloudsearch` 补足候选。
 
+> **踩坑**：`/simi/song` 端点返回的是**老版字段** `artists / album / duration`，而 `/cloudsearch` 等用紧凑字段 `ar / al / dt`。`mapSongToTrack` 必须同时支持两套字段，否则所有"相似歌"的 `artist` 会变成 `Unknown Artist`，LLM 据此生成的口播文案会胡说。详见 `local-runbook.md` 踩坑 #1。
+
 ## Provider 选择
 
 music provider 的选择由 `server/src/adapters/music/create-music-adapter.ts` 统一负责，而不是由 route 直接判断。
@@ -90,6 +92,8 @@ TTS 通过 `TtsAdapter` 边界接入。当前支持两种 provider：
 |----------|----------|------|
 | Grok TTS | `FAKERADIO_TTS_PROVIDER=grok`（默认） | 调用 xAI `POST /v1/tts`，返回原始 MP3 bytes |
 | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` | 小米 MiMo 开放平台语音合成 |
+
+> **境内网络**：Grok TTS 默认在境内不可达（`api.x.ai` 解析到 Meta CDN IP，被 GFW 阻断）。Node 的 `fetch` 不像 curl 会自动读 `HTTPS_PROXY`，**必须显式配代理**。Grok adapter 自动读 `.env` 的 `HTTPS_PROXY=http://...` 字段并通过 `undici.ProxyAgent` 走代理。无代理时听到的是 macOS 系统声（`synthesizeWithFallback` 兜底）。详见 `local-runbook.md` 踩坑 #5/#6。
 
 ### Grok TTS 配置
 

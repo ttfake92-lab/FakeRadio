@@ -106,7 +106,9 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
           signal: AbortSignal.timeout(timeoutMs),
           ...(dispatcher ? { dispatcher } : {})
         };
-        response = await fetchFn(`${baseUrl}/tts`, init);
+        // fetchFn 在 undiciFetch 和 globalThis.fetch 之间切换,TypeScript 无法
+        // 推断联合类型的具体重载,这里统一当 fetch 调用。
+        response = await (fetchFn as typeof undiciFetch)(`${baseUrl}/tts`, init);
       } catch (err) {
         if (err instanceof Error && err.name === "TimeoutError") {
           throw new Error(`Grok TTS 生成超时（${Math.round(timeoutMs / 1000)}s），请重试`);

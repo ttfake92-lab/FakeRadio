@@ -157,8 +157,12 @@ screen -S fakeradio-netease -X quit
 | `FAKERADIO_MIMO_BASE_URL` | MiMo API 地址 | `https://api.xiaomimimo.com/v1` | 否 |
 | `FAKERADIO_MIMO_TTS_VOICE` | MiMo 音色 | `茉莉` | 否 |
 | `FAKERADIO_BRAVE_API_KEY` | Brave Search API key（网页研究） | — | 否（无 key 时优雅降级） |
+| `FAKERADIO_GROK_HTTPS_PROXY` | Grok TTS 专用代理（`https://...` URL）。优先于下面两个 | — | 否 |
+| `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` | 系统级代理变量，Grok adapter 也会读。**境内用户**建议显式设 `HTTPS_PROXY=http://127.0.0.1:7897` | — | 否 |
 
-`.env` 示例：
+> **Grok TTS 在境内需要走代理**。Node 的 `fetch` 不像 curl 会自动读 `HTTPS_PROXY`——Grok adapter 显式读这些环境变量并通过 `undici.ProxyAgent` 走代理。详见踩坑 #5/#6。
+
+`.env` 示例（境内推荐配置）：
 
 ```bash
 FAKERADIO_BRAVE_API_KEY=your_brave_key
@@ -166,6 +170,7 @@ FAKERADIO_NETEASE_API_BASE_URL=http://127.0.0.1:3300
 FAKERADIO_DEEPSEEK_API_KEY=your_deepseek_key
 FAKERADIO_TTS_PROVIDER=grok
 FAKERADIO_XAI_API_KEY=your_xai_key
+HTTPS_PROXY=http://127.0.0.1:7897
 ```
 
 无 Brave API key 时，web-research-adapter 不报错，直接返回空数组。episode route 不受影响，走到现有降级链路（metadata → lyric → mood-reading）。
@@ -262,45 +267,49 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3301$(curl -s http://loc
 
 ## 每日节目预热（Prewarm）
 
-FakeRadio 支持在每天夜间自动生成次日完整节目，存储在本地 SQLite 中，播放时优先领取已准备好的 episode，减少实时生成延迟。
+> **重要变更（2026-06-22）**：此版本**取消了"明天夜间批量预热"**。`create-server` 不再调用 `runPrewarmForDate`，相应的 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 也只影响老的 `daily-episode-prewarmer.ts`（仍保留但不再调度）。当前预热策略只有一种：
+>
+> - **启动时预热第一首**（`create-server.prewarmFirstEpisode`）：服务端启动后，对 `initialQueue[0]` 异步生成完整 episode（含 resolve → compose → TTS），存到 `prepared_episodes`，供首次 `/api/episode/next` 命中。后续 episode 通过 `episode:prefetch` 后台生成。
+>
+> 取消批量预热的原因：之前会偶发"已选曲目又重播"（prefetch 漏登记），且夜间预热 + 启动预热双路径让口播等待时长不可控。改启动预热后，prefetch 单一通道更稳。
 
-### 环境变量
+### 环境变量（仅影响老的夜间预热模块）
 
 | 变量名 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
-| `FAKERADIO_PREWARM_ENABLED` | 是否启用夜间预热 | `false` | 否 |
-| `FAKERADIO_PREWARM_TIME` | 每日预热触发时间（HH:mm） | `02:00` | 否 |
-| `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` | 每个时段 block 准备的 episode 数量 | `3` | 否 |
+| `FAKERADIO_PREWARM_ENABLED` | 是否启用夜间预热（已不调度） | `false` | 否 |
+| `FAKERADIO_PREWARM_TIME` | 每日预热触发时间（HH:mm，已不调度） | `02:00` | 否 |
+| `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` | 每个时段 block 准备的 episode 数量（已不调度） | `3` | 否 |
 
-启用预热后，server 会在每天凌晨（默认 02:00）为明天的每个时段 block 生成指定数量的 episode，保存到 `prepared_episodes` 表。
+> **注意**：`/api/prewarm/status` 接口保留。`daily-episode-prewarmer.ts` 模块保留（提供日终品味推断 + tonight brief 调度），但**不再生成 episode 预存**。如果需要恢复旧行为，参见 `daily-episode-prewarmer.ts:runPrewarmForDate`。
 
 ### 验证预热是否工作
 
 ```bash
-# 查看今日预热状态
+# 查看今日预热状态（注意：ready 数量反映的是历史 prepared_episodes 记录，不会有新写入）
 curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRun, nextRunAt, blocks: .blocks[] | {at, label, ready, consumed, failed}}'
 ```
 
-返回示例（已启用且有 episode 准备就绪）：
+返回示例：
 
 ```json
 {
-  "enabled": true,
-  "targetDate": "2026-05-10",
-  "lastRun": "2026-05-09T02:00:00.000Z",
-  "nextRunAt": "2026-05-10T02:00:00.000Z",
+  "enabled": false,
+  "targetDate": "2026-06-22",
+  "lastRun": "2026-06-21T02:00:00.000Z",
+  "nextRunAt": "2026-06-22T02:00:00.000Z",
   "blocks": [
-    { "at": "00:00", "label": "午夜静谧", "ready": 3, "consumed": 0, "failed": 0 },
-    { "at": "07:00", "label": "早晨轻启动", "ready": 3, "consumed": 0, "failed": 0 }
+    { "at": "00:00", "label": "午夜静谧", "ready": 1, "consumed": 0, "failed": 0 },
+    { "at": "07:00", "label": "早晨轻启动", "ready": 1, "consumed": 0, "failed": 0 }
   ]
 }
 ```
 
 字段含义：
-- `enabled`：是否启用（`FAKERADIO_PREWARM_ENABLED`）
-- `targetDate`：预热目标日期（明天）
+- `enabled`：是否启用夜间预热（已固定为 `false`）
+- `targetDate`：预热目标日期
 - `lastRun`：上次运行时间
-- `nextRunAt`：下次计划运行时间
+- `nextRunAt`：下次计划运行时间（已不会触发）
 - `blocks[].ready`：该时段已准备就绪的 episode 数量
 - `blocks[].consumed`：已被播放器领取的 episode 数量
 - `blocks[].failed`：生成失败的 episode 数量
@@ -309,24 +318,104 @@ curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRu
 
 `/api/episode/next` 优先领取 prepared episode，命中时返回的 `source` 字段为 `"prepared"`；没有 ready episode 时走实时生成，`source` 为 `"live"`。前端根据 `source` 在播放器状态区显示"已就绪"（prepared）或当前播放状态（live）。
 
-### 本地歌曲音频预下载
-
-夜间预热生成 episode 后，server 会自动尝试预下载对应歌曲音频到 `user/audio/` 目录（`user/audio/<trackId>.mp3`）。播放时 `/api/audio/:trackId` 优先读取本地文件，本地缺失时自动代理远端音频。
-
-预下载状态记录在 `prepared_episodes.audio_downloaded` 字段，可通过 `/api/prewarm/status` 的各 block 统计间接观察。
-
-### 常见失败处理
-
-| 失败现象 | 可能原因 | 处理方式 |
-|---|---|---|
-| 所有 block ready = 0 | `FAKERADIO_PREWARM_ENABLED=false` 或预热未触发 | 检查环境变量，确认 server 重启后已加载 |
-| 部分 block failed > 0 | 单个 episode 生成失败（选歌/TTS/资料失败） | 查看 server 日志 `[prewarm]`，对应 block 的选歌种子或 provider 状态 |
-| 凌晨 02:00 未触发 | scheduler 未正确启动，或时间已过未到次日 | 重启 server，观察启动日志 `[prewarm] Starting prewarm` |
-| prepared episode 被跳过 | 时段 block 时间已过，领取条件不满足 | 确认当前时间在目标 block 的时间范围内 |
+**首首 episode** 几乎总是 `"prepared"`，因为 `prewarmFirstEpisode` 在启动时已经预热了 `initialQueue[0]`。
 
 ### 全天计划准备页
 
 独立页面（`/schedule`）展示每个时段 block 的 episode 准备状态、歌曲、文稿和 TTS 结果，供人工审计。不展示模型隐藏推理逐字稿，只展示系统记录和生成结果摘要。
+
+## 踩坑 / 已知问题
+
+这一节是接手者最容易踩的坑，**先读这一节再调试**。
+
+### 坑 1：网易云 `/simi/song` 端点返回的是**老版字段**
+
+`/cloudsearch`、`/song/url/v1` 等"主流"端点用紧凑字段 `ar / al / dt`（artist 数组 / album 对象 / duration 毫秒）；`/simi/song`（相似歌曲）等老端点用 `artists / album / duration`。
+
+`server/src/adapters/music/netease-http-music-adapter.ts` 的 `mapSongToTrack()` 已经同时支持两套字段，但**只对 `recommend()` 走 `/simi/song` 的路径生效**。症状：如果忘记兼容老字段，所有"相似歌"返回的 `artist` 全是 `Unknown Artist`，LLM 看到 `曲目: X - Unknown Artist` 就会顺着生成胡说的口播文案。
+
+**怎么验证**：
+
+```bash
+# 直接看 simi 返回的字段
+curl -s "http://127.0.0.1:3300/simi/song?id=2034742057" | python3 -c "import json,sys; s=json.load(sys.stdin)['songs'][0]; print(sorted(s.keys())[:10])"
+# 应该看到 'artists' / 'album' / 'duration'，不是 'ar' / 'al' / 'dt'
+```
+
+**以后接新端点时**：永远先 wire 出去看实际 payload，不要假设字段名跟 `/cloudsearch` 一致。
+
+### 坑 2：prepared episode 必须先 `music.resolve`
+
+`/api/episode/next` 走两条路径：
+
+- **live 路径**：`resolveNextTrackAndDecision` 内部会调 `music.resolve(track)` 拿到 `audioUrl`
+- **prepared 路径**：`claimPreparedEpisode` 直接从 db 拿 `episode`，不会再 resolve
+
+启动预热 `prewarmFirstEpisode()` 必须显式 `await music.resolve(track)` 之后再 `composeEpisodeFromTrack`，否则存进 db 的 episode.track 没有 `audioUrl`，播放时 `/api/audio/:trackId` 404，提示"音乐加载失败"。
+
+### 坑 3：prewarm 与 first-play 的 race condition
+
+`prewarmFirstEpisode` 是 `void` 异步，不阻塞 server 启动。如果用户在 250ms 内点播放：
+
+1. 第一次 `/api/episode/next` 走 live 路径，`recordPlayedTrack` + `rememberSelectedTrack` 把这首歌的 id 写进 `recently selected`
+2. prewarm 完成后存好的 prepared 永远被 `claimPreparedEpisode` 的 `excludeTrackIds` 过滤掉
+3. 用户再点下一首，prewarm 等于白做，路径上还得走 live（更慢）
+
+**测试**已经在 `create-server.test.ts:212` 加了 250ms 等待。生产环境用户从不会在 250ms 内点播放，所以这不是用户痛点，是测试特例。
+
+### 坑 4：Node `fetch` 错误的根因在 `error.cause`
+
+`fetch failed` 是 undici 的通用包装外壳。真正原因（DNS / TLS / 代理 / 超时）藏在 `error.cause` 里。`synthesizeWithFallback` 现在的 catch 块**必须**打 `error.cause.name + error.cause.message`，否则永远不知道为什么 TTS 失败、为什么听到 macOS 系统声。
+
+```typescript
+} catch (error) {
+  const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+  const causeMsg = cause instanceof Error ? `${cause.name}: ${cause.message}` : "(no cause)";
+  console.error(`[tts] primary synthesis failed: ${error.message} | cause=${causeMsg}`);
+}
+```
+
+**调试 TTS 故障时**：第一件事就是看 `cause=...` 那行。常见值：
+
+- `ConnectTimeoutError` — TCP 连接超时（GFW 阻断或代理配错）
+- `UND_ERR_SOCKET` — TLS 握手失败（代理协议不匹配）
+- `ENOTFOUND` — DNS 解析失败
+- `HTTPError 401/403/400` — API key 错或参数错（不是网络问题）
+
+### 坑 5：undici 版本兼容
+
+Node 22 的 `globalThis.fetch` 来自**内置** undici（更老的版本）。如果代码用了项目装的 `undici@7+` 的 `ProxyAgent` 当 dispatcher 给 `globalThis.fetch`，会抛 `InvalidArgumentError: invalid onRequestStart method`——这是 undici 在 5.x→6.x→7.x 之间的内部回调接口变动。
+
+**修法**：`undici.ProxyAgent` **必须**配套 `undici.fetch`（同一实例）：
+
+```typescript
+import { ProxyAgent, fetch as undiciFetch } from "undici";
+const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+const fetchFn = dispatcher ? undiciFetch : fetch;  // 有代理才用 undici
+const response = await fetchFn(url, { ..., ...(dispatcher ? { dispatcher } : {}) });
+```
+
+**测试单测**的 `vi.stubGlobal("fetch", ...)` 只在 `dispatcher` 为空时生效，因为非代理路径仍然走 `globalThis.fetch`。如果测试发现 `dispatcher` 非空导致 stub 不生效，需要在 `beforeEach` 显式 `delete process.env.HTTPS_PROXY` 等环境变量（vitest 继承 shell 的代理变量）。
+
+### 坑 6：Grok TTS 默认在境内不可达
+
+`api.x.ai` DNS 解析到 Meta CDN IP（`157.240.12.36` 等），被 GFW 阻断。Node 的 `fetch` 不像 curl 会自动读 `HTTPS_PROXY` 环境变量——必须显式传 `dispatcher`。
+
+**境内用户**必须在 `.env` 显式配：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7897
+```
+
+`tsx` 启动时不一定继承 shell 的代理环境变量，写到 `.env` 是最稳的。如果切到 Grok 后听到 macOS 系统声，先看 server 日志有没有 `[grok-tts] init: ... proxy=(direct)`——如果是 `(direct)` 说明没读到代理。
+
+### 坑 7：TTS 缓存键
+
+`grok-tts-adapter.ts:40` 的 `hashGrokPayload` 把 `voice/language/speed/style/text` 一起 hash 作为缓存键。**换音色后立刻生效**，但**同样文本 + 同样参数**永远命中缓存。TTS 调试时如果怀疑"没生效"，先确认文本不同 / 或 cacheKey 不同。
+
+### 坑 8：TTS preview 路由不走 runtime manager
+
+`server/src/http/routes/settings-routes.ts` 的 `/api/tts/preview` 临时构造 adapter（不走 `runtimeManager`），所以**它会读 `process.env` 找代理**，跟主路径一致。但**如果 preview 走 Grok 通而主路径不通**，说明 runtime manager 的 snapshot 没被刷新——重启 server 或显式 `applySettings` 即可。
 
 ## 故障排查
 
