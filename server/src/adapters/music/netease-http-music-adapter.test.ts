@@ -164,6 +164,42 @@ describe("createNeteaseHttpMusicAdapter", () => {
     ]);
   });
 
+  it("maps simi/song legacy artists/album/duration fields (real netease shape)", async () => {
+    // /simi/song 实际返回的是老版字段 artists/album/duration,跟 /cloudsearch 的
+    // ar/al/dt 不一样。曾经因为只解析 ar/al/dt,simi 命中的歌全部艺术家=Unknown,
+    // 直接导致口播文案胡说八道。
+    const fetchJson = vi.fn().mockResolvedValue({
+      songs: [
+        {
+          id: 303,
+          name: "Legacy Shape",
+          duration: 240000,
+          album: { name: "Legacy Album", picUrl: "https://img.example/legacy.jpg" },
+          artists: [{ name: "Artist A" }, { name: "Artist B" }]
+        }
+      ]
+    });
+    const adapter = createNeteaseHttpMusicAdapter({ fetchJson });
+
+    const tracks = await adapter.recommend({
+      mood: "any",
+      limit: 1,
+      seeds: [{ id: "101", title: "Seed", artist: "Seed Artist", source: "netease" }]
+    });
+
+    expect(tracks).toEqual([
+      {
+        id: "303",
+        title: "Legacy Shape",
+        artist: "Artist A, Artist B",
+        album: "Legacy Album",
+        durationMs: 240000,
+        artworkUrl: "https://img.example/legacy.jpg",
+        source: "netease"
+      }
+    ]);
+  });
+
   it("resolves audioUrl from the preferred high quality song url endpoint", async () => {
     const fetchJson = vi.fn().mockResolvedValue({
       data: [{ id: 101, url: "https://music.example/101.mp3" }]

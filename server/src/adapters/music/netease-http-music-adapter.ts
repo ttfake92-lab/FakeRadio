@@ -9,12 +9,22 @@ import {
 type NeteaseSong = {
   id: number;
   name: string;
+  // /cloudsearch 用紧凑字段 dt/al/ar; /simi/song、/recommend/songs 等老接口
+  // 用 duration/album/artists。两套都接,否则 simi 命中的歌全是 Unknown Artist。
   dt?: number;
+  duration?: number;
   al?: {
     name?: string;
     picUrl?: string;
   };
+  album?: {
+    name?: string;
+    picUrl?: string;
+  };
   ar?: Array<{
+    name?: string;
+  }>;
+  artists?: Array<{
     name?: string;
   }>;
 };
@@ -148,15 +158,18 @@ export function createNeteaseHttpMusicAdapter(
 }
 
 function mapSongToTrack(song: NeteaseSong): Track {
-  const artist = song.ar?.map(({ name }) => name).filter(Boolean).join(", ") ?? "";
+  const artistList = song.ar ?? song.artists ?? [];
+  const artist = artistList.map(({ name }) => name).filter(Boolean).join(", ");
+  const albumInfo = song.al ?? song.album;
+  const duration = song.dt ?? song.duration;
 
   return {
     id: String(song.id),
     title: song.name,
     artist: artist || "Unknown Artist",
-    album: song.al?.name || "Unknown Album",
-    durationMs: typeof song.dt === "number" && song.dt > 0 ? song.dt : undefined,
-    artworkUrl: song.al?.picUrl,
+    album: albumInfo?.name || "Unknown Album",
+    durationMs: typeof duration === "number" && duration > 0 ? duration : undefined,
+    artworkUrl: albumInfo?.picUrl,
     source: "netease"
   };
 }
