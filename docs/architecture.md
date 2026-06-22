@@ -72,19 +72,21 @@ FakeRadio 当前已经有最小连续性闭环：
 
 > **`user/profile.md` 是私人内容**：写你的"你是谁"，不写音乐品味（已有 `taste.md`）。比如：身份、生活节奏、对话风格偏好、当前在意的事。LLM 会在口播文案里参考这个画像来调整语气，但不会硬塞。
 
-### 启动预热第一首
+### 启动批量预热
 
-服务端启动后，`create-server.prewarmFirstEpisode()` 会对 `initialQueue[0]` 异步生成完整 episode（resolve → compose → TTS → 存到 `prepared_episodes`）。目的是让首次 `/api/episode/next` 命中 `source: "prepared"` 而不是走 5-15s 的 live 生成。
+服务端启动后，`create-server.prewarmStartupEpisodes()` 对当前 block 调 `runPrewarmForDate`，后台异步预生成 N 首（`FAKERADIO_PREWARM_STARTUP_EPISODES`，默认 10）完整 episode（resolve → compose → TTS → 存到 `prepared_episodes`）。目的是让 `/api/episode/next` 和 `/api/episode/prefetch` 命中 `source: "prepared"` 秒切，而不是每首走 5-15s 的 live 生成。
 
-**关键步骤**：
+**关键步骤**（`daily-episode-prewarmer.generatePrewarmEpisode`）：
 
 1. `music.resolve(track)` 必须先调——`/api/episode/next` 的 live 路径内部 resolve，但 `claimPreparedEpisode` 不会 resolve
-2. 然后 `composeEpisodeFromTrack` 生成口播文案 + TTS
+2. 然后 `composeEpisodeFromTrack` 生成口播文案 + TTS（注入 `profile` + `personalHistory`，与 live 路径对齐，否则预热口播质量退化）
 3. 存到 `prepared_episodes`，`status: "ready"`
 
-进度通过 `agent-message` WebSocket 事件广播到前端对话框，让用户看到"正在准备第一首歌的口播…"。失败时 fallback live（`/api/episode/next` 仍能正常返回）。
+进度通过 `agent-message` WebSocket 事件广播到前端对话框，让用户看到"正在准备 N 首口播…"。后台 `void` 异步，不阻塞启动和首次播放；第一首就绪后即可播，其余陆续准备。失败时 fallback live（`/api/episode/next` 仍能正常返回）。
 
-> **不再做"明天夜间预热"**：`create-server` 不调用 `runPrewarmForDate`。`daily-episode-prewarmer.ts` 模块保留（日终品味推断 + tonight brief 仍用），但不再生成 episode 预存。详见 `local-runbook.md` 预热章节。
+**低水位补生成**：`register-routes.ensurePreparedEpisodes()` 在 next/prefetch 消费一首 prepared 后触发；当前 block ready 数 < `FAKERADIO_PREWARM_LOW_WATER_MARK`（默认 2）时后台补到 N 首。防重入，不阻塞响应。这是"播到最后一首时再加载下一批"的真正落点——prepared 才是秒切关键，不是内存 queue 的 track。
+
+> **历史**：2026-06-22 早些版本曾取消批量预热、只预热第一首（`prewarmFirstEpisode`），因当时批量预热引发"已选曲目又重播"（prefetch 漏登记）。该 bug 后由优先槽 + prefetch 不清槽修复，消费链路干净，故重新启用批量预热。详见 `local-runbook.md` 预热章节。
 
 当前 daypart block 与默认 playlist 对应关系：
 
@@ -106,9 +108,11 @@ PWA 目前不是纯展示壳，而是本地运行态面板。它直接展示：
 播放器的音频管线当前遵循四条稳定性规则：
 
 - DJ 口播播放时可以 duck 当前音乐音量，但播放失败后必须恢复音乐音量。
-- story audio（`speechAudio`）播放失败时不自动回退到纯音乐，进入 `error` 状态并提示用户「口播加载失败」。
+- story audio（`speechAudio`）播放失败（`onerror` 或 `play()` reject）时**自动切下一首**（偶发失败），连续 3 次失败才停在 `error` 状态提示「连续多首口播加载失败，请检查网络或 TTS 服务」。避免单次口播加载失败就把用户卡在"口播加载失败"等手动点。
+- 切歌（`playEpisodeData`）时先 `pause()` 两个 audio 元素再设新 src，防止旧口播/旧音乐尾音与新口播并行（"两个音频打架"根因）。
 - 写入 `HTMLMediaElement.volume` 前，计算结果必须限制在 `[0, 1]`，避免浏览器抛出越界错误。
 - `dj-speech` WebSocket 事件到达时，若 episode story 正在播放（`speechAudio` 未暂停），仅更新 DJ 文字但不播放音频，避免覆盖正在进行的 story 口播。
+- 可视化动效（`useAudioReactiveVisualizer`）的 `reactive`（真实频谱 vs CSS 假波形）只由 `!audio.paused && !audio.ended` 决定，不看能量阈值——前奏/弱段能量本就低，用阈值当开关会在暂停恢复后卡在假动效。
 
 ## Story Episode 链路
 
@@ -198,6 +202,19 @@ FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊
 
 对话上下文通过 `SessionRepository`（当日会话记录）推断，不引入独立的 conversation state 存储，保持无状态架构。
 
+### DJ 聊天推荐歌曲
+
+聊天里"给我来点摇滚"、"推荐 Pink Floyd"这类点歌请求走 `/api/chat/stream` 的默认路径（非节目编排、非快捷指令），由 `chat-sse-handler` 处理：
+
+1. **LLM 决策**：`computeDjDecision` 出 `decision.say`（口播文字）+ `decision.play.query`（搜索意图）。DJ 人设 prompt 约束：用户提到具体艺术家/歌曲/专辑名时，`play.query` 必须原样保留该名字，不翻译成风格词；没有要听新歌的意思时留空。
+2. **实体提取**：`extractMentionedEntities(msg)` 从用户原话提取明确实体名（引号/书名号内容、多词英文专有名词如 "Pink Floyd"、带变音符的非 ASCII 名如 "Sigur Rós"），与 LLM 的 `playQuery` 并列进推荐 queries 最前。**用户原话 + LLM 翻译双保险**——网易云搜索靠原名命中，LLM 翻译成 "classic rock" 会搜不到 Pink Floyd。
+3. **候选生成**：`selectRecommendedCandidates` 走推荐引擎，queries 顺序为 `[用户实体, playQuery, taste, 场景]`，limit 5。搜索/simi 全空时**兜底用收藏曲库**（过滤已排除的），保证尽量有候选。
+4. **返回 `track-suggestion`**：前端展示候选卡片，用户点击 → `POST /api/queue/insert-next` 写优先槽。不点即抛弃。
+5. **候选空反馈**：候选仍空时打 `console.warn`（暴露 msg/playQuery/queries）并回复用户"没找到合适的，换个说法，比如直接报歌名或歌手名"，不再静默吞掉装没事。
+
+> **历史坑**：旧实现 `playQuery` 是 LLM 自由生成的"二手翻译"，用户提的艺术家名从不进搜索（代码层无实体提取），且候选空时走空 `catch {}` 静默退化成纯文字回复，用户以为 DJ 不想理。2026-06-22 修复：prompt 约束 + 代码提取 + 收藏兜底 + 空结果反馈。
+
+
 ## 天气与日历 Adapter
 
 ### Weather Adapter
@@ -222,15 +239,15 @@ FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊
 
 ## 预热与调度
 
-FakeRadio 支持预热，提前生成 episode：
+FakeRadio 通过预热提前生成完整 episode（含口播 TTS），让切歌秒切而非每首等 live 生成：
 
-- `FAKERADIO_PREWARM_ENABLED=true` 启用
-- `FAKERADIO_PREWARM_TIME` 控制定时触发时间（默认 `23:30`）
-- 服务启动时若当天未预热过，自动补跑一次（`skipStartupPrewarm` 选项可禁用）
-- 预热和定时触发共用 `prewarmForDate()` 函数，统一 shouldRun → run → mark 流程
-- 每个 daypart block 生成 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 个 episode
+- **启动批量预热**：`FAKERADIO_PREWARM_STARTUP_EPISODES`（默认 10）控制启动时为当前 block 预生成多少首。后台 `void` 异步，不阻塞启动和首次播放
+- **低水位补生成**：`FAKERADIO_PREWARM_LOW_WATER_MARK`（默认 2）控制剩余 ready 低于此值时触发后台补生成
+- `FAKERADIO_PREWARM_ENABLED` / `FAKERADIO_PREWARM_TIME` 仅控制定时调度（日终品味推断 + tonight brief），不再批量生成 episode
 - 预热结果存入 `prepared_episodes` 表
-- `/api/episode/next` 选歌优先级：**优先槽（用户"插到下一首"）→ prepared episode（`source: "prepared"`）→ live 推荐（`source: "live"`）**。无可用 prepared episode 时走实时生成
+- `/api/episode/next` 和 `/api/episode/prefetch` 选歌优先级：**优先槽（用户"插到下一首"）→ prepared episode（`source: "prepared"`）→ live 推荐（`source: "live"`）**。无可用 prepared episode 时走实时生成
+- 消费 prepared 后调 `ensurePreparedEpisodes()` 后台补生成（防重入，不阻塞响应）
+- `appendRecommendedTracks` 只补 track 元数据进内存 queue，不生成口播；改为 fire-and-forget 不阻塞响应
 - 预热后自动尝试下载歌曲音频到 `user/audio/` 目录
 
 ### 优先槽（priority next track）

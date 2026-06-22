@@ -267,50 +267,39 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3301$(curl -s http://loc
 
 ## 每日节目预热（Prewarm）
 
-> **重要变更（2026-06-22）**：此版本**取消了"明天夜间批量预热"**。`create-server` 不再调用 `runPrewarmForDate`，相应的 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 也只影响老的 `daily-episode-prewarmer.ts`（仍保留但不再调度）。当前预热策略只有一种：
+> **当前策略（2026-06-22 起）**：**启动批量预热 + 低水位补生成**。`create-server` 启动时调 `runPrewarmForDate` 为当前 block 后台预生成 N 首完整 episode（含 resolve → compose → TTS），存入 `prepared_episodes`；`/api/episode/next` 和 `/api/episode/prefetch` 每消费一首 prepared 后，若剩余 ready 低于低水位，后台异步补生成到 N 首。
 >
-> - **启动时预热第一首**（`create-server.prewarmFirstEpisode`）：服务端启动后，对 `initialQueue[0]` 异步生成完整 episode（含 resolve → compose → TTS），存到 `prepared_episodes`，供首次 `/api/episode/next` 命中。后续 episode 通过 `episode:prefetch` 后台生成。
->
-> 取消批量预热的原因：之前会偶发"已选曲目又重播"（prefetch 漏登记），且夜间预热 + 启动预热双路径让口播等待时长不可控。改启动预热后，prefetch 单一通道更稳。
+> **历史**：2026-06-22 早些版本曾取消批量预热、只预热第一首。原因是当时批量预热引发"已选曲目又重播"（prefetch 漏登记）。后来该 bug 已由优先槽（`priorityNextTrack`）+ prefetch 不清槽修复，消费链路干净，故重新启用批量预热。`prewarmFirstEpisode`（单首）已删除，由 `prewarmStartupEpisodes`（批量）取代。
 
-### 环境变量（仅影响老的夜间预热模块）
+### 工作机制
+
+1. **启动预热**：`create-server.prewarmStartupEpisodes()` 对当前 block 调 `runPrewarmForDate`，生成 `FAKERADIO_PREWARM_STARTUP_EPISODES` 首完整 episode。后台 `void` 异步，不阻塞启动、不阻塞首次播放；第一首就绪后即可播，其余陆续准备（每首 5-15s LLM+TTS，10 首约 1-2 分钟）。
+2. **低水位补生成**：`register-routes.ensurePreparedEpisodes()` 在 next/prefetch 消费 prepared 成功后触发；当前 block ready 数 < `FAKERADIO_PREWARM_LOW_WATER_MARK` 时后台补到 `FAKERADIO_PREWARM_STARTUP_EPISODES` 首。防重入（`prewarmRefilling` 标志），不阻塞响应。
+3. **`appendRecommendedTracks` 异步化**：原来 `await appendRecommendedTracks(10)` 阻塞 next/prefetch 响应（9 次网易云搜索），现改为 `void ... .catch()` fire-and-forget。它只补 track 元数据进内存 queue，不生成口播——真正秒切靠 prepared_episodes。
+4. **`/api/episode/next`、`/api/episode/prefetch` 选歌优先级**：优先槽（用户"插到下一首"）→ prepared episode（`source: "prepared"`）→ live 推荐（`source: "live"`）。
+
+### 环境变量
 
 | 变量名 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
-| `FAKERADIO_PREWARM_ENABLED` | 是否启用夜间预热（已不调度） | `false` | 否 |
-| `FAKERADIO_PREWARM_TIME` | 每日预热触发时间（HH:mm，已不调度） | `02:00` | 否 |
-| `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` | 每个时段 block 准备的 episode 数量（已不调度） | `3` | 否 |
+| `FAKERADIO_PREWARM_ENABLED` | 是否启用定时预热调度（日终品味推断 + tonight brief） | `true` | 否 |
+| `FAKERADIO_PREWARM_TIME` | 定时触发时间（HH:mm，仅品味推断/节目调度，不再批量生成 episode） | `23:30` | 否 |
+| `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` | 老 `runPrewarmForDate` 内部每 block 上限（兼容保留） | `3` | 否 |
+| `FAKERADIO_PREWARM_STARTUP_EPISODES` | **启动时为当前 block 预生成的完整 episode 数（秒切关键）** | `10` | 否 |
+| `FAKERADIO_PREWARM_LOW_WATER_MARK` | **prepared 剩余 ready 低于此值时触发后台补生成** | `2` | 否 |
 
-> **注意**：`/api/prewarm/status` 接口保留。`daily-episode-prewarmer.ts` 模块保留（提供日终品味推断 + tonight brief 调度），但**不再生成 episode 预存**。如果需要恢复旧行为，参见 `daily-episode-prewarmer.ts:runPrewarmForDate`。
+> **测试开关**：`RegisterRoutesDeps.prewarmRefillEnabled`（默认 `true`）控制运行时补生成；`createRadioServer({ skipStartupPrewarm: true })` 同时禁用启动预热和补生成，测试用避免后台写入污染断言。
 
 ### 验证预热是否工作
 
 ```bash
-# 查看今日预热状态（注意：ready 数量反映的是历史 prepared_episodes 记录，不会有新写入）
+# 查看今日预热状态（启动后 ready 应逐渐增长到 STARTUP_EPISODES）
 curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRun, nextRunAt, blocks: .blocks[] | {at, label, ready, consumed, failed}}'
 ```
 
-返回示例：
-
-```json
-{
-  "enabled": false,
-  "targetDate": "2026-06-22",
-  "lastRun": "2026-06-21T02:00:00.000Z",
-  "nextRunAt": "2026-06-22T02:00:00.000Z",
-  "blocks": [
-    { "at": "00:00", "label": "午夜静谧", "ready": 1, "consumed": 0, "failed": 0 },
-    { "at": "07:00", "label": "早晨轻启动", "ready": 1, "consumed": 0, "failed": 0 }
-  ]
-}
-```
-
 字段含义：
-- `enabled`：是否启用夜间预热（已固定为 `false`）
-- `targetDate`：预热目标日期
-- `lastRun`：上次运行时间
-- `nextRunAt`：下次计划运行时间（已不会触发）
-- `blocks[].ready`：该时段已准备就绪的 episode 数量
+- `enabled`：是否启用定时预热调度
+- `blocks[].ready`：该时段已准备就绪的 episode 数量（启动后会增长）
 - `blocks[].consumed`：已被播放器领取的 episode 数量
 - `blocks[].failed`：生成失败的 episode 数量
 
@@ -318,7 +307,7 @@ curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRu
 
 `/api/episode/next` 优先领取 prepared episode，命中时返回的 `source` 字段为 `"prepared"`；没有 ready episode 时走实时生成，`source` 为 `"live"`。前端根据 `source` 在播放器状态区显示"已就绪"（prepared）或当前播放状态（live）。
 
-**首首 episode** 几乎总是 `"prepared"`，因为 `prewarmFirstEpisode` 在启动时已经预热了 `initialQueue[0]`。
+prepared 池充足时，连续切歌应秒切不等口播；池空时（如刚启动预热未完成）走 live，单首 5-15s。
 
 ### 全天计划准备页
 
@@ -351,17 +340,17 @@ curl -s "http://127.0.0.1:3300/simi/song?id=2034742057" | python3 -c "import jso
 - **live 路径**：`resolveNextTrackAndDecision` 内部会调 `music.resolve(track)` 拿到 `audioUrl`
 - **prepared 路径**：`claimPreparedEpisode` 直接从 db 拿 `episode`，不会再 resolve
 
-启动预热 `prewarmFirstEpisode()` 必须显式 `await music.resolve(track)` 之后再 `composeEpisodeFromTrack`，否则存进 db 的 episode.track 没有 `audioUrl`，播放时 `/api/audio/:trackId` 404，提示"音乐加载失败"。
+批量预热 `runPrewarmForDate` → `generatePrewarmEpisode` 内部已显式 `await music.resolve(track)` 之后再 `composeEpisodeFromTrack`。若以后改动 prewarmer，务必保留这步：否则存进 db 的 episode.track 没有 `audioUrl`，播放时 `/api/audio/:trackId` 404，提示"音乐加载失败"。
 
 ### 坑 3：prewarm 与 first-play 的 race condition
 
-`prewarmFirstEpisode` 是 `void` 异步，不阻塞 server 启动。如果用户在 250ms 内点播放：
+启动预热 `prewarmStartupEpisodes` 是 `void` 异步，不阻塞 server 启动。如果用户在预热未完成时点播放：
 
 1. 第一次 `/api/episode/next` 走 live 路径，`recordPlayedTrack` + `rememberSelectedTrack` 把这首歌的 id 写进 `recently selected`
 2. prewarm 完成后存好的 prepared 永远被 `claimPreparedEpisode` 的 `excludeTrackIds` 过滤掉
 3. 用户再点下一首，prewarm 等于白做，路径上还得走 live（更慢）
 
-**测试**已经在 `create-server.test.ts:212` 加了 250ms 等待。生产环境用户从不会在 250ms 内点播放，所以这不是用户痛点，是测试特例。
+生产环境用户从不会在启动 1-2 分钟内点播放，所以这不是用户痛点，是测试特例。
 
 ### 坑 4：Node `fetch` 错误的根因在 `error.cause`
 
