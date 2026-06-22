@@ -274,7 +274,10 @@ export async function synthesizeWithFallback(
   try {
     return { result: await tts.synthesize(text) };
   } catch (error) {
-    console.error("[tts] primary synthesis failed, falling back to macOS say:", error instanceof Error ? error.message : error);
+    const msg = error instanceof Error ? error.message : String(error);
+    const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+    const causeMsg = cause instanceof Error ? `${cause.name}: ${cause.message}` : cause !== undefined ? String(cause) : "(no cause)";
+    console.error(`[tts] primary synthesis failed, falling back to macOS say: ${msg} | cause=${causeMsg}`);
     console.error("[tts] text was:", text.slice(0, 120));
     try {
       const audibleFallback = options.audibleFallback ?? createMacOsSayTtsAdapter({ cacheDir: ttsCacheDir });
