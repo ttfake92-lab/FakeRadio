@@ -72,3 +72,6 @@ TASKS.md
 
 # User data backups
 user/taste.md.bak
+
+# Personal profile — loaded into LLM prompt at runtime, content kept local.
+user/profile.md
