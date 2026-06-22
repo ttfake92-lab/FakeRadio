@@ -25,6 +25,13 @@ type CloudSearchResponse = {
   };
 };
 
+type SimilarSongResponse = {
+  songs?: NeteaseSong[];
+  result?: {
+    songs?: NeteaseSong[];
+  };
+};
+
 type SongUrlResponse = {
   data?: Array<{
     id?: number;
@@ -66,9 +73,39 @@ export function createNeteaseHttpMusicAdapter(
       return (response.result?.songs ?? []).map(mapSongToTrack);
     },
 
-    async recommend({ mood, limit }) {
-      const tracks = await this.search(mood);
-      return tracks.slice(0, limit);
+    async recommend({ mood, limit, seeds = [], excludeTrackIds = [] }) {
+      const excluded = new Set<string>([
+        ...excludeTrackIds,
+        ...seeds.map((seed) => seed.id)
+      ]);
+      const tracks: Track[] = [];
+      const seen = new Set<string>();
+
+      for (const seed of seeds.slice(0, 3)) {
+        try {
+          const response = (await fetchJson("/simi/song", {
+            method: "POST",
+            query: { id: seed.id }
+          })) as SimilarSongResponse;
+          for (const track of (response.songs ?? response.result?.songs ?? []).map(mapSongToTrack)) {
+            if (excluded.has(track.id) || seen.has(track.id)) continue;
+            seen.add(track.id);
+            tracks.push(track);
+            if (tracks.length >= limit) return tracks;
+          }
+        } catch {
+          // Similar song endpoints are best-effort; mood search below keeps playback alive.
+        }
+      }
+
+      const searchTracks = await this.search(mood);
+      for (const track of searchTracks) {
+        if (excluded.has(track.id) || seen.has(track.id)) continue;
+        seen.add(track.id);
+        tracks.push(track);
+        if (tracks.length >= limit) break;
+      }
+      return tracks;
     },
 
     async resolve(track) {

@@ -104,10 +104,28 @@ function buildDeps(overrides: Partial<EpisodeRunnerDeps> & { likedSongs?: LikedS
 
 describe("resolveNextTrackAndDecision favorites-backed candidate selection", () => {
   describe("candidateSource", () => {
-    it("is 'favorites' when a favorite candidate is available and resolved", async () => {
+    it("selects curated recommendations before directly replaying a liked song", async () => {
+      const favTrack = makeTrack("fav-001", "Favorite Queen Song", "Queen");
+      const curatedTrack = makeTrack("sim-001", "Curated Bowie Song", "David Bowie");
+      const likedSongs = createMockLikedSongsRepo([favTrack]);
+      const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([curatedTrack]);
+      const deps = buildDeps({ likedSongs, music });
+
+      const result = await resolveNextTrackAndDecision(deps);
+
+      expect(result.candidateSource).toBe("curated");
+      expect(result.track.id).toBe("sim-001");
+      expect(music.resolve).toHaveBeenCalledWith(curatedTrack);
+      expect(music.resolve).not.toHaveBeenCalledWith(favTrack);
+    });
+
+    it("falls back to 'favorites' only when curated and search candidates are unavailable", async () => {
       const favTrack = makeTrack("fav-001", "Favorite Track");
       const likedSongs = createMockLikedSongsRepo([favTrack]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
       const deps = buildDeps({ likedSongs, music });
 
       const result = await resolveNextTrackAndDecision(deps);
@@ -120,6 +138,7 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
     it("is 'search' when favorites list is empty", async () => {
       const likedSongs = createMockLikedSongsRepo([]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
       const deps = buildDeps({ likedSongs, music });
 
       const result = await resolveNextTrackAndDecision(deps);
@@ -135,6 +154,7 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       // Use createFakeMusicAdapter as base (works in other tests) and override resolve
       // to reject only for the favorite track, succeed for search track
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
       music.search = vi.fn().mockResolvedValue([searchTrack]);
       music.resolve = vi.fn().mockImplementation(async (track: Track) => {
         if (track.id === "fav-001") {
@@ -185,6 +205,8 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const favTrack2 = makeTrack("fav-002", "Available Favorite");
       const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
       const state = createPlaybackState([]);
       // Simulate favTrack1 was recently selected
       state.rememberSelectedTrack(favTrack1);
@@ -201,6 +223,8 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const favTrack2 = makeTrack("fav-002", "Next Favorite");
       const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
       const state = createPlaybackState([]);
       state.setTrack(favTrack1);
       const deps = buildDeps({ likedSongs, music, state });
@@ -216,6 +240,8 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const favTrack2 = makeTrack("fav-002", "Available Favorite");
       const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
       const state = createPlaybackState([]);
       state.rememberSelectedTrack(favTrack1);
       const llm = {
@@ -249,6 +275,7 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const searchTrack = makeTrack("search-001", "Fresh Search Result");
       const likedSongs = createMockLikedSongsRepo([favTrack1, favTrack2]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
       music.search = vi.fn().mockResolvedValue([searchTrack]);
       const state = createPlaybackState([]);
       state.rememberSelectedTrack(favTrack1);
@@ -301,6 +328,8 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
           })
       };
       const deps = buildDeps({ likedSongs, music, llm: llm as EpisodeRunnerDeps["llm"] });
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
 
       const result = await resolveNextTrackAndDecision(deps);
 
@@ -317,6 +346,8 @@ describe("resolveNextTrackAndDecision favorites-backed candidate selection", () 
       const favTrack = makeTrack("fav-001", "Resolved Favorite");
       const likedSongs = createMockLikedSongsRepo([favTrack]);
       const music = createFakeMusicAdapter();
+      music.recommend = vi.fn().mockResolvedValue([]);
+      music.search = vi.fn().mockResolvedValue([]);
       const deps = buildDeps({ likedSongs, music });
 
       const result = await resolveNextTrackAndDecision(deps);

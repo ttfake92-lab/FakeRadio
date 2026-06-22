@@ -128,6 +128,42 @@ describe("createNeteaseHttpMusicAdapter", () => {
     ]);
   });
 
+  it("calls the Netease similar song endpoint when recommend receives seed tracks", async () => {
+    const fetchJson = vi.fn().mockResolvedValue({
+      songs: [
+        {
+          id: 202,
+          name: "Similar Song",
+          dt: 2000,
+          al: { name: "Similar Album" },
+          ar: [{ name: "Similar Artist" }]
+        }
+      ]
+    });
+    const adapter = createNeteaseHttpMusicAdapter({ fetchJson });
+
+    const tracks = await adapter.recommend({
+      mood: "rainy classic rock",
+      limit: 1,
+      seeds: [{ id: "101", title: "Seed", artist: "Seed Artist", source: "netease" }]
+    });
+
+    expect(fetchJson).toHaveBeenCalledWith("/simi/song", {
+      method: "POST",
+      query: { id: "101" }
+    });
+    expect(tracks).toEqual([
+      {
+        id: "202",
+        title: "Similar Song",
+        artist: "Similar Artist",
+        album: "Similar Album",
+        durationMs: 2000,
+        source: "netease"
+      }
+    ]);
+  });
+
   it("resolves audioUrl from the preferred high quality song url endpoint", async () => {
     const fetchJson = vi.fn().mockResolvedValue({
       data: [{ id: 101, url: "https://music.example/101.mp3" }]

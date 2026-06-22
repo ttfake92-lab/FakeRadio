@@ -153,7 +153,7 @@ describe("ChatSSEHandler intent routing", () => {
     expect(response.headers.vary).toContain("Origin");
   });
 
-  it("queues music suggested during chat instead of switching playback immediately", async () => {
+  it("returns music suggestions for user confirmation instead of enqueuing immediately", async () => {
     app = await createTestRadioServer(Array.from({ length: 14 }, (_, index) => ({
       id: `fake-track-${String(index + 1).padStart(3, "0")}`,
       title: `Fake Track ${index + 1}`,
@@ -171,11 +171,12 @@ describe("ChatSSEHandler intent routing", () => {
     expect(response.statusCode).toBe(200);
     const done = parseLastSseDone(response.payload);
     expect(done?.action).toMatchObject({
-      type: "queue-updated",
-      trackId: expect.any(String)
+      type: "track-suggestion"
     });
+    expect((done?.action as { tracks?: unknown[] } | undefined)?.tracks?.length).toBeGreaterThan(0);
     expect(done?.action?.type).not.toBe("next-track");
 
+    // 候选名单只返回对话框，不直接改播放队列或切歌。
     const nowResponse = await app.inject({ method: "GET", url: "/api/now" });
     const now = nowResponse.json();
     expect(now.track).toBeNull();

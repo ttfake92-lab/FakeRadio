@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
+import type { Track } from "@fakeradio/shared";
 import { buildApiUrl } from "../../lib/api-client";
 
 export type ChatSSEOptions = {
   onChunk(text: string): void;
-  onDone(data: { text: string; action?: { type: string; trackId?: string; title?: string; artist?: string; briefId?: string } | null }): void;
+  onDone(data: { text: string; action?: { type: string; trackId?: string; title?: string; artist?: string; briefId?: string; tracks?: Track[] } | null }): void;
 };
 
 export type ChatMessage = {

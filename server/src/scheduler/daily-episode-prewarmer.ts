@@ -6,6 +6,7 @@ import type { UserPreferences } from "../user/load-user-preference.js";
 import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { formatRadioDate } from "../utils/time.js";
+import { buildRecommendationContext, selectRecommendedCandidates } from "../recommendation/recommendation-engine.js";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -30,10 +31,6 @@ export type PrewarmDeps = {
   userPreferences: UserPreferences;
 };
 
-function selectFirstAvailableTrack(tracks: Track[], excludedTrackIds: Set<string>): Track | undefined {
-  return tracks.find((track) => !excludedTrackIds.has(track.id));
-}
-
 async function prefetchTrackAudio(
   audioDir: string,
   track: Track
@@ -57,6 +54,7 @@ async function prefetchTrackAudio(
 async function generatePrewarmEpisode(
   deps: PrewarmDeps,
   blockAt: string,
+  blockLabel: string,
   moodHint: string,
   systemPrompt: string,
   excludedTrackIds: Set<string>
@@ -64,9 +62,7 @@ async function generatePrewarmEpisode(
   const { llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource, publicMetadataAdapter, webResearchAdapter, likedSongs, stateRepo, nowProvider } = deps;
   const now = nowProvider();
 
-  // Gather candidates
   const favoritesTracks = await likedSongs.list();
-  const uniqueCandidates = favoritesTracks.slice(0, 20);
 
   // Get weather/calendar/devices for context
   const [weatherSnapshot, calendarItems, playbackDevices] = await Promise.all([
@@ -74,15 +70,35 @@ async function generatePrewarmEpisode(
     calendar.upcoming(),
     devices.list()
   ]);
+  const recommendationContext = buildRecommendationContext({
+    now,
+    block: {
+      at: blockAt,
+      label: blockLabel,
+      moodHint
+    },
+    weather: weatherSnapshot,
+    calendar: calendarItems,
+    userPreferences: deps.userPreferences,
+    likedSongs: favoritesTracks,
+    recentTrackIds: excludedTrackIds,
+    queuedTrackIds: new Set()
+  });
+  const recommendedEntries = await selectRecommendedCandidates({
+    music,
+    context: recommendationContext,
+    limit: 20
+  });
+  const uniqueCandidates = recommendedEntries.map((entry) => entry.track);
 
   // Compute DJ decision
   const draftDecision = await computeDjDecision({
     llm,
     now,
     systemPrompt,
-    userTaste: "",
-    routines: "",
-    moodRules: "",
+    userTaste: deps.userPreferences.taste,
+    routines: deps.userPreferences.routines,
+    moodRules: deps.userPreferences.moodRules,
     recentMemory: [],
     toolResults: [],
     executionState: "prewarm-episode",
@@ -106,21 +122,11 @@ async function generatePrewarmEpisode(
   }
 
   if (!track) {
-    const candidates = await music.search(draftDecision.play.query ?? moodHint);
-    const first = selectFirstAvailableTrack(candidates, excludedTrackIds);
-    if (first) {
+    for (const candidate of recommendedEntries) {
+      if (excludedTrackIds.has(candidate.track.id)) continue;
       try {
-        track = await music.resolve(first);
-      } catch { /* fall through */ }
-    }
-  }
-
-  if (!track) {
-    const recommended = await music.recommend({ mood: moodHint, limit: 5 });
-    const first = selectFirstAvailableTrack(recommended, excludedTrackIds);
-    if (first) {
-      try {
-        track = await music.resolve(first);
+        track = await music.resolve(candidate.track);
+        break;
       } catch { /* fall through */ }
     }
   }
@@ -178,7 +184,7 @@ export async function runPrewarmForDate(
     for (let i = 0; i < needed; i++) {
       try {
         const excludedTrackIds = new Set<string>([...recentlyPlayedTrackIds, ...dateSelectedTrackIds]);
-        const result = await generatePrewarmEpisode(deps, block.at, block.moodHint, systemPrompt, excludedTrackIds);
+        const result = await generatePrewarmEpisode(deps, block.at, block.label, block.moodHint, systemPrompt, excludedTrackIds);
         if ("error" in result) {
           await stateRepo.savePreparedEpisode({
             radioDate: targetDate,

@@ -4,6 +4,7 @@ export * from "./music/create-music-adapter.js";
 export * from "./music/disabled-music-adapter.js";
 export * from "./music/netease-http-music-adapter.js";
 export * from "./tts/edge-tts-adapter.js";
+export * from "./tts/grok-tts-adapter.js";
 export * from "./tts/mimo-tts-adapter.js";
 export * from "./tts/macos-say-tts-adapter.js";
 export * from "./io/disabled-io-adapters.js";

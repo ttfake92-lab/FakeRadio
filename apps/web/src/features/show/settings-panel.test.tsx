@@ -16,8 +16,8 @@ const defaultSettings = {
   neteaseBaseUrl: "http://127.0.0.1:3300",
   neteaseTimeoutMs: 2500,
   neteaseAudioLevel: "higher" as const,
-  ttsProvider: "edge" as const,
-  ttsVoice: "zh-CN-XiaoxiaoNeural",
+  ttsProvider: "grok" as const,
+  ttsVoice: "eve",
   mimoVoice: "crimson",
   ttsStyle: "",
   ttsRate: 0,
@@ -31,8 +31,8 @@ describe("SettingsPanel 用户流", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetSettings.mockResolvedValue({ settings: defaultSettings });
-    mockUpdateSettings.mockResolvedValue({ settings: defaultSettings });
-    mockGetTtsVoices.mockResolvedValue({ mimo: [], edge: [] });
+    mockUpdateSettings.mockImplementation(async (settings) => ({ settings }));
+    mockGetTtsVoices.mockResolvedValue({ mimo: [], grok: [], grokStyles: [{ value: "", label: "自然" }] });
   });
 
   afterEach(() => {
@@ -82,6 +82,7 @@ describe("SettingsPanel 用户流", () => {
 
     const input = screen.getByLabelText("网易云 API 地址");
     fireEvent.change(input, { target: { value: "http://127.0.0.1:3301" } });
+    fireEvent.blur(input);
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
@@ -108,6 +109,37 @@ describe("SettingsPanel 用户流", () => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
         ...defaultSettings,
         ttsProvider: "mimo",
+      });
+    });
+  });
+
+  it("Grok TTS 显示官方音色和风格下拉", async () => {
+    mockGetTtsVoices.mockResolvedValue({
+      mimo: [],
+      grok: [{ value: "ara", label: "Ara · 温暖、友好" }],
+      grokStyles: [{ value: "whisper", label: "耳语 <whisper>" }]
+    });
+    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("音色")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("音色"), { target: { value: "ara" } });
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith({
+        ...defaultSettings,
+        ttsVoice: "ara",
+      });
+    });
+
+    fireEvent.change(screen.getByLabelText("播报风格"), { target: { value: "whisper" } });
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith({
+        ...defaultSettings,
+        ttsVoice: "ara",
+        ttsStyle: "whisper",
       });
     });
   });

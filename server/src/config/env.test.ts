@@ -11,8 +11,12 @@ describe("parseEnv", () => {
     expect(env.FAKERADIO_NETEASE_TIMEOUT_MS).toBe(2500);
     expect(env.FAKERADIO_NETEASE_COOKIE_FILE).toBe("user/secrets/netease-cookie.txt");
     expect(env.FAKERADIO_NETEASE_AUDIO_LEVEL).toBe("exhigh");
-    expect(env.FAKERADIO_TTS_VOICE).toBe("zh-CN-XiaoxiaoNeural");
+    expect(env.FAKERADIO_TTS_PROVIDER).toBe("grok");
+    expect(env.FAKERADIO_TTS_VOICE).toBe("eve");
     expect(env.FAKERADIO_TTS_CACHE_DIR).toBe("cache/tts");
+    expect(env.FAKERADIO_XAI_TTS_BASE_URL).toBe("https://api.x.ai/v1");
+    expect(env.FAKERADIO_XAI_TTS_LANGUAGE).toBe("zh");
+    expect(env.FAKERADIO_XAI_TTS_TIMEOUT_MS).toBe(60_000);
     expect(env.FAKERADIO_MIMO_TTS_TIMEOUT_MS).toBe(60_000);
   });
 
@@ -37,13 +41,17 @@ describe("parseEnv", () => {
 
   it("supports custom tts voice and cache dir", () => {
     const env = parseEnv({
-      FAKERADIO_TTS_VOICE: "en-US-JennyNeural",
+      FAKERADIO_TTS_VOICE: "ara",
       FAKERADIO_TTS_CACHE_DIR: "/tmp/tts",
+      FAKERADIO_XAI_API_KEY: "xai-key",
+      FAKERADIO_XAI_TTS_LANGUAGE: "auto",
       FAKERADIO_MIMO_TTS_TIMEOUT_MS: "90000"
     });
 
-    expect(env.FAKERADIO_TTS_VOICE).toBe("en-US-JennyNeural");
+    expect(env.FAKERADIO_TTS_VOICE).toBe("ara");
     expect(env.FAKERADIO_TTS_CACHE_DIR).toBe("/tmp/tts");
+    expect(env.FAKERADIO_XAI_API_KEY).toBe("xai-key");
+    expect(env.FAKERADIO_XAI_TTS_LANGUAGE).toBe("auto");
     expect(env.FAKERADIO_MIMO_TTS_TIMEOUT_MS).toBe(90_000);
   });
 

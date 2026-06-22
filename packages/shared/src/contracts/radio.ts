@@ -55,12 +55,15 @@ export const NowResponseSchema = z.object({
 });
 
 export const RecommendationDiagnosticsSchema = z.object({
-  candidateSource: z.enum(["favorites", "search", "queue"]),
+  candidateSource: z.enum(["curated", "favorites", "search", "queue"]),
   rerankSource: z.enum(["llm-pick", "fallback"]),
   favoritesAvailable: z.number().int().nonnegative(),
   candidatesCount: z.number().int().nonnegative(),
   isFallback: z.boolean(),
-  musicProvider: z.string()
+  musicProvider: z.string(),
+  signals: z.array(z.string()).optional(),
+  queries: z.array(z.string()).optional(),
+  seedCount: z.number().int().nonnegative().optional()
 });
 
 export const NextResponseSchema = z.object({
@@ -108,13 +111,18 @@ export const ChatResponseSchema = z.object({
   message: z.string().min(1),
   decision: DjDecisionSchema,
   action: z.object({
-    type: z.enum(["next-track", "add-favorite", "queue-updated", "show-brief-created", "show-plan-refined", "show-confirmed", "show-cancelled"]),
+    type: z.enum(["next-track", "add-favorite", "queue-updated", "show-brief-created", "show-plan-refined", "show-confirmed", "show-cancelled", "track-suggestion"]),
     trackId: z.string().optional(),
     title: z.string().optional(),
     artist: z.string().optional(),
-    briefId: z.string().optional()
+    briefId: z.string().optional(),
+    tracks: z.array(TrackSchema).optional()
   }).optional(),
   brief: ProgramBriefSchema.optional()
+});
+
+export const InsertNextRequestSchema = z.object({
+  track: TrackSchema
 });
 
 export const TasteResponseSchema = z.object({
@@ -554,8 +562,8 @@ export const SettingsSchema = z.object({
   neteaseBaseUrl: z.string().url().default("http://127.0.0.1:3300"),
   neteaseTimeoutMs: z.number().int().positive().default(2500),
   neteaseAudioLevel: z.enum(["standard", "higher", "exhigh", "lossless", "hires"]).default("exhigh"),
-  ttsProvider: z.enum(["edge", "mimo"]).default("edge"),
-  ttsVoice: z.string().min(1).default("zh-CN-XiaoxiaoNeural"),
+  ttsProvider: z.enum(["grok", "mimo"]).default("grok"),
+  ttsVoice: z.string().min(1).default("eve"),
   mimoVoice: z.string().min(1).default("茉莉"),
   ttsStyle: z.string().default(""),
   ttsRate: z.number().int().min(-50).max(200).default(0),
@@ -577,7 +585,7 @@ export const UpdateSettingsRequestSchema = z.object({
   neteaseBaseUrl: z.string().url().optional(),
   neteaseTimeoutMs: z.number().int().positive().optional(),
   neteaseAudioLevel: z.enum(["standard", "higher", "exhigh", "lossless", "hires"]).optional(),
-  ttsProvider: z.enum(["edge", "mimo"]).optional(),
+  ttsProvider: z.enum(["grok", "mimo"]).optional(),
   ttsVoice: z.string().min(1).optional(),
   mimoVoice: z.string().min(1).optional(),
   ttsStyle: z.string().optional(),

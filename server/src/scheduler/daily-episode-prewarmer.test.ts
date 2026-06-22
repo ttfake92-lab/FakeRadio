@@ -199,4 +199,54 @@ describe("runPrewarmForDate", () => {
     expect(trackIds).not.toContain("mock-track-001");
     expect(new Set(trackIds).size).toBe(3);
   });
+
+  it("uses liked songs as recommendation seeds instead of prewarming the liked songs directly", async () => {
+    const deps = createPrewarmDeps();
+    const likedTrack: Track = {
+      id: "fav-queen",
+      title: "Somebody To Love",
+      artist: "Queen",
+      durationMs: 180000,
+      source: "netease"
+    };
+    const curatedTrack: Track = {
+      id: "sim-bowie",
+      title: "Life On Mars?",
+      artist: "David Bowie",
+      durationMs: 190000,
+      source: "netease"
+    };
+    deps.likedSongs = {
+      async list() {
+        return [likedTrack];
+      },
+      async refreshFromRawExport() {
+        return [likedTrack];
+      }
+    };
+    deps.music = {
+      async search() {
+        return [];
+      },
+      async recommend(input) {
+        return input.seeds?.length ? [curatedTrack] : [];
+      },
+      async resolve(track) {
+        return track;
+      }
+    };
+
+    const results = await runPrewarmForDate(
+      deps,
+      "2026-05-01",
+      [{ at: "21:00", label: "晚间降速", moodHint: "ambient pop night" }],
+      1,
+      "你是 FakeRadio DJ。"
+    );
+
+    expect(results).toEqual([{ blockAt: "21:00", prepared: 1, failed: 0, errors: [] }]);
+
+    const claimed = await deps.stateRepo.claimPreparedEpisode("2026-05-01", "21:00");
+    expect(claimed?.episode.track.id).toBe("sim-bowie");
+  });
 });

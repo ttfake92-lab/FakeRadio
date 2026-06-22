@@ -22,7 +22,7 @@ export type LlmAdapter = {
 /** Searches, recommends, and resolves audio URLs for tracks. */
 export type MusicAdapter = {
   search(query: string): Promise<Track[]>;
-  recommend(input: { mood: string; limit: number }): Promise<Track[]>;
+  recommend(input: { mood: string; limit: number; seeds?: Track[]; excludeTrackIds?: string[] }): Promise<Track[]>;
   resolve(track: Track): Promise<Track>;
 };
 

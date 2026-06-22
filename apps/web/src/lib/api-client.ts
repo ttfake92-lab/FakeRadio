@@ -22,7 +22,8 @@ import {
   TodayPlanResponseSchema,
   SettingsResponseSchema,
   type Settings,
-  type UpdateSettingsRequest
+  type UpdateSettingsRequest,
+  type Track
 } from "@fakeradio/shared";
 
 export function getServerBaseUrl() {
@@ -65,6 +66,17 @@ export async function getHealth() {
 export async function getNext() {
   const response = await fetch(buildApiUrl("/api/next"));
   return NextResponseSchema.parse(await response.json());
+}
+
+export async function insertNextTrack(track: Track): Promise<void> {
+  const response = await fetch(buildApiUrl("/api/queue/insert-next"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ track })
+  });
+  if (!response.ok) {
+    throw new Error(`insert-next failed: ${response.status}`);
+  }
 }
 
 export async function sendChat(message: string) {
@@ -387,7 +399,11 @@ export async function updateSettings(settings: UpdateSettingsRequest) {
 }
 
 export type TtsVoiceOption = { value: string; label: string };
-export type TtsVoicesResponse = { mimo: TtsVoiceOption[]; edge: TtsVoiceOption[] };
+export type TtsVoicesResponse = {
+  mimo: TtsVoiceOption[];
+  grok: TtsVoiceOption[];
+  grokStyles: TtsVoiceOption[];
+};
 
 export async function getTtsVoices(): Promise<TtsVoicesResponse> {
   const response = await fetch(buildApiUrl("/api/tts/voices"));
@@ -398,7 +414,7 @@ export async function getTtsVoices(): Promise<TtsVoicesResponse> {
 }
 
 export type TtsPreviewParams = {
-  provider: "mimo" | "edge";
+  provider: "mimo" | "grok";
   voice: string;
   style?: string;
   rate?: number;

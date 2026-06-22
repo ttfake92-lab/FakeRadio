@@ -3,8 +3,8 @@ import {
   createDisabledCalendarAdapter,
   createDisabledLlmAdapter,
   createDisabledWeatherAdapter,
-  createEdgeTtsAdapter,
   createEmptyStorySourceAdapter,
+  createGrokTtsAdapter,
   createLarkCalendarAdapter,
   createLocalBrowserDeviceAdapter,
   createMimoTtsAdapter,
@@ -26,6 +26,14 @@ import type {
 import { createDeepSeekAdapter } from "../adapters/llm/deepseek-llm-adapter.js";
 import type { NeteaseCookieStore } from "../adapters/music/netease-auth.js";
 import { env } from "../config/env.js";
+
+function getXaiApiKey() {
+  return env.FAKERADIO_XAI_API_KEY ?? env.XAI_API_KEY;
+}
+
+function rateToGrokSpeed(rate: number): number {
+  return Math.min(1.5, Math.max(0.7, 1 + rate / 100));
+}
 
 export type RuntimeAdapterStatuses = {
   llm: AdapterStatus;
@@ -107,7 +115,21 @@ async function buildSnapshot(
         timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
       });
     }
-    return createEdgeTtsAdapter({ cacheDir: ttsCacheDir, voice: settings.ttsVoice, rate: settings.ttsRate });
+    const xaiApiKey = getXaiApiKey();
+    if (!xaiApiKey) {
+      ttsStatus = "disabled";
+      return createDisabledTtsAdapter("FAKERADIO_XAI_API_KEY or XAI_API_KEY is not configured");
+    }
+    return createGrokTtsAdapter({
+      apiKey: xaiApiKey,
+      cacheDir: ttsCacheDir,
+      baseUrl: env.FAKERADIO_XAI_TTS_BASE_URL,
+      voice: settings.ttsVoice,
+      language: env.FAKERADIO_XAI_TTS_LANGUAGE,
+      speed: rateToGrokSpeed(settings.ttsRate),
+      style: settings.ttsStyle,
+      timeoutMs: env.FAKERADIO_XAI_TTS_TIMEOUT_MS
+    });
   })();
 
   const weather = overrides.weather ?? (env.FAKERADIO_OPENWEATHER_API_KEY

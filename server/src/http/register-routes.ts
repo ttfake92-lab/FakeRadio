@@ -4,6 +4,7 @@ import {
   EpisodePlayingRequestSchema,
   FavoriteRequestSchema,
   FavoritesResponseSchema,
+  InsertNextRequestSchema,
   HealthResponseSchema,
   LikedSongsDiagnosticsSchema,
   NeteaseCookieSubmitRequestSchema,
@@ -31,6 +32,7 @@ import { handleChat } from "./chat-intent-router.js";
 import { registerShowRoutes } from "./routes/show-routes.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
 import type { RegisterRoutesDeps } from "./types.js";
+import { buildRecommendationContext, selectRecommendedCandidates } from "../recommendation/recommendation-engine.js";
 
 const LOCAL_WEB_ORIGINS = new Set([
   "http://localhost:3302",
@@ -38,6 +40,9 @@ const LOCAL_WEB_ORIGINS = new Set([
   "http://localhost:3000",
   "http://127.0.0.1:3000"
 ]);
+
+const RECENT_PLAY_EXCLUSION_DAYS = 14;
+const RECENT_PLAY_EXCLUSION_LIMIT = 200;
 
 function getCorsHeadersForOrigin(origin: unknown): Record<string, string> {
   if (typeof origin !== "string" || !LOCAL_WEB_ORIGINS.has(origin)) {
@@ -93,23 +98,50 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     }, 500);
   }
 
-  async function ensureQueueSize(targetSize = 10) {
-    const currentQueue = state.getQueue();
-    if (currentQueue.length >= targetSize) return currentQueue;
-
-    const refillRaw = await deps.music.recommend({ mood: currentMoodHint, limit: Math.max(targetSize * 2, 10) }).catch(() => []);
+  async function recommendTracksForQueue(block: { at: string; label: string; moodHint: string } | null, limit: number) {
     const currentTrack = state.getCurrentTrack();
-    const excludedForRefill = new Set([
-      ...state.getRecentlySelectedTrackIds(),
-      ...(currentTrack ? [currentTrack.id] : []),
-      ...currentQueue.map((track) => track.id)
+    const [weatherSnapshot, calendarItems, likedSongTracks] = await Promise.all([
+      weather.current().catch(() => ({ summary: "unknown", moodHint: block?.moodHint ?? currentMoodHint })),
+      calendar.upcoming().catch(() => []),
+      likedSongs.list().catch(() => [])
     ]);
-    const refill = refillRaw
-      .filter((track) => !excludedForRefill.has(track.id))
-      .slice(0, targetSize - currentQueue.length);
-    if (refill.length === 0) return currentQueue;
+    const context = buildRecommendationContext({
+      now: nowProvider(),
+      block: block ?? {
+        at: "runtime",
+        label: "当前时段",
+        moodHint: currentMoodHint
+      },
+      weather: weatherSnapshot,
+      calendar: calendarItems,
+      userPreferences,
+      likedSongs: likedSongTracks,
+      recentTrackIds: new Set([
+        ...state.getRecentlySelectedTrackIds(),
+        ...(currentTrack ? [currentTrack.id] : [])
+      ]),
+      queuedTrackIds: new Set(state.getQueue().map((track) => track.id))
+    });
+    const candidates = await selectRecommendedCandidates({ music: deps.music, context, limit });
+    return candidates.map((candidate) => candidate.track);
+  }
 
-    const queue = [...currentQueue, ...refill];
+  // 播到最后一首时续推：固定 append 新的 count 首到队尾（区别于补差额式 refill）。
+  async function appendRecommendedTracks(count = 10) {
+    const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+    const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
+    const recommendedRaw = await recommendTracksForQueue(currentBlock, Math.max(count * 2, 10)).catch(() => []);
+    const currentQueue = state.getQueue();
+    const currentTrack = state.getCurrentTrack();
+    const seenIds = new Set([
+      ...currentQueue.map((track) => track.id),
+      ...state.getRecentlySelectedTrackIds(),
+      ...(currentTrack ? [currentTrack.id] : [])
+    ]);
+    const fresh = recommendedRaw.filter((track) => !seenIds.has(track.id)).slice(0, count);
+    if (fresh.length === 0) return currentQueue;
+
+    const queue = [...currentQueue, ...fresh];
     state.setQueue(queue);
     stream.broadcast({ type: "queue-updated", payload: { queue } });
     scheduleQueueSnapshot(queue);
@@ -117,7 +149,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   }
 
   async function refreshRecentPlaybackMemory(): Promise<string[]> {
-    const persistedRecent = await stateRepo.getRecentlyPlayed(30);
+    const since = new Date(nowProvider().getTime() - RECENT_PLAY_EXCLUSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const persistedRecent = await stateRepo.getRecentlyPlayed(RECENT_PLAY_EXCLUSION_LIMIT, since);
     for (const played of persistedRecent.slice().reverse()) {
       state.rememberSelectedTrack({
         id: played.trackId,
@@ -219,8 +252,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     const blockAt = currentBlock?.at ?? null;
     if (blockAt !== null && blockAt !== state.getLastPlanBlockAt()) {
       state.setLastPlanBlockAt(blockAt);
-      const newQueueRaw = await deps.music.recommend({ mood: currentBlock?.moodHint ?? currentMoodHint, limit: 20 }).catch(() => []);
       const excludedForQueue = await refreshRecentPlaybackMemory();
+      const newQueueRaw = await recommendTracksForQueue(currentBlock, 20).catch(() => []);
       const currentQueueIds = new Set(state.getQueue().map(t => t.id));
       const newQueue = newQueueRaw.filter(t => !excludedForQueue.includes(t.id) && !currentQueueIds.has(t.id)).slice(0, 10);
       state.setQueue(newQueue);
@@ -230,13 +263,23 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
     await refreshRecentPlaybackMemory();
     episodeRunnerDeps.musicStatus = getAdapterStatuses().music;
-    const { track, decision, isFallback, candidates, candidateSource, rerankSource } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+    const {
+      track,
+      decision,
+      isFallback,
+      candidates,
+      candidateSource,
+      rerankSource,
+      recommendationSignals,
+      recommendationQueries,
+      recommendationSeedCount
+    } = await resolveNextTrackAndDecision(episodeRunnerDeps);
     const { result: ttsResult } = await synthesizeWithFallback(tts, ttsCacheDir, decision.say);
     trackRegistry.register(track);
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
-    if (state.queueSize() < 2) await ensureQueueSize(10);
+    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
     state.setDj({
       say: decision.say,
       audioUrl: ttsResult.audioUrl,
@@ -271,7 +314,10 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         favoritesAvailable: candidates.length,
         candidatesCount: candidates.length,
         isFallback,
-        musicProvider: getAdapterStatuses().music
+        musicProvider: getAdapterStatuses().music,
+        signals: recommendationSignals,
+        queries: recommendationQueries,
+        seedCount: recommendationSeedCount
       }
     });
     } catch (err) {
@@ -414,7 +460,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           state.setTrack(episode.track);
           state.rememberSelectedTrack(episode.track);
           state.removeFromQueue(episode.track.id);
-          if (state.queueSize() < 2) await ensureQueueSize(10);
+          if (state.queueSize() <= 1) await appendRecommendedTracks(10);
           state.setDj({ say: episode.story.text, audioUrl: episode.story.audioUrl });
           stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
           stream.broadcast({ type: "dj-speech", payload: { text: episode.story.text, audioUrl: episode.story.audioUrl } });
@@ -451,7 +497,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       state.setTrack(track);
       state.rememberSelectedTrack(track);
       state.removeFromQueue(track.id);
-      if (state.queueSize() < 2) await ensureQueueSize(10);
+      if (state.queueSize() <= 1) await appendRecommendedTracks(10);
       stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
       await stateRepo.recordPlayedTrack({
         id: randomUUID(),
@@ -559,7 +605,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
-    if (state.queueSize() < 2) await ensureQueueSize(10);
+    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
     stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
     await stateRepo.recordPlayedTrack({
       id: randomUUID(),
@@ -572,6 +618,16 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     });
 
     return reply.send({ ok: true });
+  });
+
+  // DJ 推荐确认插入：把用户选中的曲目插到队首（下一首播放）。
+  app.post("/api/queue/insert-next", async (request, reply) => {
+    const { track } = InsertNextRequestSchema.parse(request.body);
+    state.insertNext(track);
+    const queue = state.getQueue();
+    stream.broadcast({ type: "queue-updated", payload: { queue } });
+    scheduleQueueSnapshot(queue);
+    return reply.send({ ok: true, queue });
   });
 
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(nowProvider(), userPreferences.playlists)));

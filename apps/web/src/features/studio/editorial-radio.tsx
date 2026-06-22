@@ -9,6 +9,7 @@ import {
   getBriefs, getShowPlans, getShowJobs,
   getNeteaseLoginStatus, createNeteaseQrLogin, checkNeteaseQrLogin, submitNeteaseCookie,
   getTaste,
+  insertNextTrack,
 } from '../../lib/api-client';
 import { useAudioEngine } from '../player/use-audio-engine';
 import { usePlaybackState } from '../player/use-playback-state';
@@ -260,7 +261,10 @@ export function EditorialRadio() {
   const [latestChatDjText, setLatestChatDjText] = useState<string | null>(null);
   const [streamingChatDjText, setStreamingChatDjText] = useState<string | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [pendingSuggestions, setPendingSuggestions] = useState<Track[]>([]);
   const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
+  // 记录最近一条进对话框的口播文案，去重避免同一首被 next/prefetch 重复广播刷屏。
+  const lastBroadcastDjTextRef = useRef<string | null>(null);
   const chatSSE = useChatSSE();
   const [activeView, setActiveView] = useState<'main' | 'library' | 'settings'>('main');
 
@@ -416,9 +420,11 @@ export function EditorialRadio() {
     },
     (dj) => {
       setNow((prev) => (prev ? { ...prev, dj } : null));
-      // episode 播放期间，后台整轨旁白不灌入对话流（DJ 文案已在中栏展示），
-      // 否则会淹没用户与 DJ 的真实对话。
-      if (dj.say && !episodeActiveRef.current) {
+      // 每首歌的介绍口播文案无条件进对话框（互动感）。
+      // 之前用 episodeActiveRef 门控会因 setEpisodeData 与 dj-speech 广播的竞争
+      // 把口播一起挡掉，导致文案时有时无。这里去掉门控，仅做去重防刷屏。
+      if (dj.say && dj.say !== lastBroadcastDjTextRef.current) {
+        lastBroadcastDjTextRef.current = dj.say;
         setMessages((prev) => [
           ...prev,
           { id: `dj-${Date.now()}`, from: 'DJ', text: dj.say, origin: 'broadcast' },
@@ -600,6 +606,7 @@ export function EditorialRadio() {
       if (!text.trim()) return;
       const trimmed = text.trim();
       setInputDraft('');
+      setPendingSuggestions([]);
       const userMsg: ChatMessage = { id: `u-${Date.now()}`, from: 'YOU', text: trimmed };
       const djId = `dj-${Date.now()}`;
       const djPlaceholder: ChatMessage = { id: djId, from: 'DJ', text: '', streaming: true, origin: 'chat' };
@@ -630,6 +637,10 @@ export function EditorialRadio() {
             return;
           }
 
+          if (data.action?.type === 'track-suggestion' && data.action.tracks?.length) {
+            setPendingSuggestions(data.action.tracks);
+          }
+
           if (
             data.action?.type === 'show-brief-created' ||
             data.action?.type === 'show-plan-refined' ||
@@ -651,6 +662,19 @@ export function EditorialRadio() {
     },
     [activeBriefId, chatSSE, handleNext, refreshProductionData, startJobTracking],
   );
+
+  const handleConfirmSuggestion = useCallback(async (track: Track) => {
+    try {
+      await insertNextTrack(track);
+      setPendingSuggestions([]);
+      setMessages((prev) => [
+        ...prev,
+        { id: `dj-${Date.now()}`, from: 'DJ', text: `好，把《${track.title}》插到下一首了。`, origin: 'chat' },
+      ]);
+    } catch {
+      // 插入失败保留候选名单，用户可重试。
+    }
+  }, []);
 
   const handleGenerateNow = useCallback(async (briefId: string) => {
     startJobTracking(briefId);
@@ -833,6 +857,9 @@ export function EditorialRadio() {
           trackedJob={trackedJob}
           bp={bp}
           onDismissJob={() => { stopJobTracking(); setTrackedJob(null); }}
+          pendingSuggestions={pendingSuggestions}
+          onConfirmSuggestion={handleConfirmSuggestion}
+          onDismissSuggestions={() => setPendingSuggestions([])}
         />
       </div>
 
@@ -1651,6 +1678,9 @@ function RightColumn({
   onToggleTaste,
   trackedJob,
   onDismissJob,
+  pendingSuggestions,
+  onConfirmSuggestion,
+  onDismissSuggestions,
   bp,
 }: {
   messages: ChatMessage[];
@@ -1665,6 +1695,9 @@ function RightColumn({
   onToggleTaste: () => void;
   trackedJob: ShowJob | null;
   onDismissJob: () => void;
+  pendingSuggestions: Track[];
+  onConfirmSuggestion: (track: Track) => void;
+  onDismissSuggestions: () => void;
   bp: Breakpoint;
 }) {
   const now = new Date();
@@ -1732,6 +1765,29 @@ function RightColumn({
         {messages.map((m) => (
           <TranscriptLine key={m.id} from={m.from} text={m.text} streaming={m.streaming} />
         ))}
+        {pendingSuggestions.length > 0 && (
+          <div style={{ marginTop: 8, padding: 10, border: '1px solid var(--faint)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.22em', color: 'var(--faint)' }}>
+              DJ 推荐 · 选一首插到下一首
+            </div>
+            {pendingSuggestions.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => onConfirmSuggestion(t)}
+                style={{ textAlign: 'left', background: 'transparent', border: '1px solid var(--faint)', borderRadius: 4, padding: '6px 8px', cursor: 'pointer', color: 'var(--text)' }}
+              >
+                <span style={{ fontSize: 12 }}>《{t.title}》</span>{' '}
+                <span style={{ fontSize: 11, color: 'var(--mute)' }}>{t.artist}</span>
+              </button>
+            ))}
+            <button
+              onClick={onDismissSuggestions}
+              style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', color: 'var(--faint)', fontSize: 10, cursor: 'pointer', padding: 0 }}
+            >
+              忽略
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Production progress + trace */}

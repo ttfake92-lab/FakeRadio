@@ -8,6 +8,12 @@ import type { PlaybackState } from "./playback-state.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import type { WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
+import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
+import {
+  buildRecommendationContext,
+  selectRecommendedCandidates,
+  type RecommendationCandidateSource
+} from "../recommendation/recommendation-engine.js";
 
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 
@@ -37,8 +43,11 @@ export type ResolveResult = {
   decision: Awaited<ReturnType<typeof computeDjDecision>>;
   isFallback: boolean;
   candidates: Track[];
-  candidateSource: "favorites" | "search" | "queue";
+  candidateSource: RecommendationCandidateSource | "queue";
   rerankSource: "llm-pick" | "fallback";
+  recommendationSignals?: string[];
+  recommendationQueries?: string[];
+  recommendationSeedCount?: number;
 };
 
 function normalizeForMatch(value: string): string {
@@ -78,6 +87,7 @@ function buildGroundedFallbackDecision(
   candidateSource: ResolveResult["candidateSource"]
 ): DjDecision {
   const sourceLabel: Record<ResolveResult["candidateSource"], string> = {
+    curated: "电台策划推荐",
     favorites: "你的收藏库",
     search: "网易云搜索结果",
     queue: "当前队列"
@@ -108,11 +118,30 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   ]);
   const queueIds = new Set(state.getQueue().map(t => t.id));
 
-  // Collect candidates: favorites + search results, deduplicated, up to 20
   const favoritesTracks = await likedSongs.list();
-  const uniqueCandidates = favoritesTracks
-    .filter((track) => !recentOrCurrentTrackIds.has(track.id) && !queueIds.has(track.id))
-    .slice(0, 20);
+  const currentPlan = buildTodayPlan(now, userPreferences.playlists);
+  const currentBlock = getCurrentPlanBlock(currentPlan, now) ?? {
+    at: "runtime",
+    label: "当前时段",
+    moodHint: currentMoodHint
+  };
+  const recommendationContext = buildRecommendationContext({
+    now,
+    block: currentBlock,
+    weather: weatherSnapshot,
+    calendar: calendarItems,
+    userPreferences,
+    likedSongs: favoritesTracks,
+    recentTrackIds: recentOrCurrentTrackIds,
+    queuedTrackIds: queueIds
+  });
+  const recommendedEntries = await selectRecommendedCandidates({
+    music,
+    context: recommendationContext,
+    limit: 20
+  });
+  const candidateSourceByTrackId = new Map(recommendedEntries.map((entry) => [entry.track.id, entry.source] as const));
+  const uniqueCandidates = recommendedEntries.map((entry) => entry.track);
 
   const draftDecision = await computeDjDecision({
     llm,
@@ -146,7 +175,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   if (llmPickedTrack) {
     try {
       track = await music.resolve(llmPickedTrack);
-      candidateSource = favoritesTracks.some((f) => f.id === llmPickedTrack!.id) ? "favorites" : "search";
+      candidateSource = candidateSourceByTrackId.get(llmPickedTrack.id) ?? "curated";
       rerankSource = "llm-pick";
     } catch {
       llmPickedTrack = undefined;
@@ -155,34 +184,34 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
 
   // Fall back to deterministic selection if LLM didn't pick or resolve failed
   if (!track) {
-    const favoriteCandidate = state.selectCandidate(favoritesTracks);
-    if (favoriteCandidate) {
+    for (const candidate of recommendedEntries) {
       try {
-        track = await music.resolve(favoriteCandidate);
-        candidateSource = "favorites";
+        track = await music.resolve(candidate.track);
+        candidateSource = candidate.source;
+        break;
       } catch {
-        candidateSource = "search";
+        // Try the next curated candidate.
       }
-    } else {
-      candidateSource = "search";
     }
 
-    // Step 2: If no favorite track resolved, fall back to search
     if (!track) {
-      const candidates = (await music.search(draftDecision.play.query ?? currentMoodHint))
-        .filter((candidate) => !recentOrCurrentTrackIds.has(candidate.id));
-      const candidate = candidates[0];
       const queueCandidate = queue.find(t => !recentOrCurrentTrackIds.has(t.id));
-
-      if (candidate) {
-        track = await music.resolve(candidate);
-        candidateSource = "search";
-      } else if (queueCandidate) {
+      if (queueCandidate) {
         track = await music.resolve(queueCandidate);
         candidateSource = "queue";
-      } else {
-        throw new Error("No track available from configured music provider");
       }
+    }
+
+    if (!track) {
+      const favoriteCandidate = state.selectCandidate(favoritesTracks);
+      if (favoriteCandidate) {
+        track = await music.resolve(favoriteCandidate);
+        candidateSource = "favorites";
+      }
+    }
+
+    if (!track) {
+      throw new Error("No track available from configured music provider");
     }
   }
 
@@ -203,6 +232,9 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
       `recentlySelected.count: ${recentOrCurrentTrackIds.size}`,
       `candidates.source: ${candidateSource}`,
       `candidates.rerankSource: ${rerankSource}`,
+      `recommendation.signals: ${recommendationContext.signals.join(", ")}`,
+      `recommendation.queries: ${recommendationContext.queries.join(" | ")}`,
+      `recommendation.seedCount: ${recommendationContext.seedTracks.length}`,
       `music.selectedTrack: ${track.title} - ${track.artist}`,
       ...queue.map((item, index) => `music.queue[${index}]: ${item.title} - ${item.artist}`)
     ],
@@ -218,7 +250,17 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     ? rawDecision
     : buildGroundedFallbackDecision(track, candidateSource);
 
-  return { track, decision, isFallback, candidates: uniqueCandidates, candidateSource, rerankSource };
+  return {
+    track,
+    decision,
+    isFallback,
+    candidates: uniqueCandidates,
+    candidateSource,
+    rerankSource,
+    recommendationSignals: recommendationContext.signals,
+    recommendationQueries: recommendationContext.queries,
+    recommendationSeedCount: recommendationContext.seedTracks.length
+  };
 }
 
 export async function synthesizeWithFallback(

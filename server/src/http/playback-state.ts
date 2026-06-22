@@ -13,14 +13,17 @@ export type PlaybackState = {
   rememberSelectedTrack(track: Track): void;
   selectCandidate(tracks: Track[]): Track | undefined;
   removeFromQueue(trackId: string): void;
+  insertNext(track: Track): void;
   queueSize(): number;
   buildNowResponse(): NowResponse;
 };
 
+const RECENTLY_SELECTED_TRACK_LIMIT = 200;
+
 export function createPlaybackState(initialQueue: Track[] = [], initialRecentlySelectedTrackIds: string[] = []): PlaybackState {
   let currentTrack: Track | null = null;
   let currentDj: NowResponse["dj"] = { say: "FakeRadio 准备好了。" };
-  let recentlySelectedTrackIds: string[] = [...new Set(initialRecentlySelectedTrackIds)].slice(0, 50);
+  let recentlySelectedTrackIds: string[] = [...new Set(initialRecentlySelectedTrackIds)].slice(0, RECENTLY_SELECTED_TRACK_LIMIT);
   let queue: Track[] = initialQueue;
   let lastPlanBlockAt: string | null = null;
 
@@ -56,7 +59,7 @@ export function createPlaybackState(initialQueue: Track[] = [], initialRecentlyS
       recentlySelectedTrackIds = [
         track.id,
         ...recentlySelectedTrackIds.filter((id) => id !== track.id)
-      ].slice(0, 50);
+      ].slice(0, RECENTLY_SELECTED_TRACK_LIMIT);
     },
     selectCandidate(tracks) {
       const excludedTrackIds = new Set([
@@ -68,6 +71,10 @@ export function createPlaybackState(initialQueue: Track[] = [], initialRecentlyS
     },
     removeFromQueue(trackId) {
       queue = queue.filter((t) => t.id !== trackId);
+    },
+    insertNext(track) {
+      // 插到队首 = 当前正在播的下一首；去重避免同一首重复。
+      queue = [track, ...queue.filter((t) => t.id !== track.id)];
     },
     queueSize() {
       return queue.length;

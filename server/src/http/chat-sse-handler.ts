@@ -1,6 +1,6 @@
+import type { Track } from "@fakeradio/shared";
 import type { RegisterRoutesDeps } from "./types.js";
 import { handleShowProgrammingIntent } from "./chat-intent-router.js";
-import { enqueueSuggestedTracks } from "./queue-suggestions.js";
 
 export type ChatDonePayload = {
   text: string;
@@ -10,6 +10,7 @@ export type ChatDonePayload = {
     title?: string;
     artist?: string;
     briefId?: string;
+    tracks?: Track[];
   };
 };
 
@@ -216,24 +217,37 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
 
     if (isMusicRequest) {
       try {
-        const queued = await enqueueSuggestedTracks(playQuery, {
-          music: deps.music,
-          state: deps.state,
-          stateRepo: deps.stateRepo,
-          stream: deps.stream
-        });
-        if (queued.length === 0) {
+        // DJ 推荐歌曲：解析候选名单返回对话框，由用户确认后才插到下一首（不点即抛弃）。
+        const searchResults = await deps.music.search(playQuery);
+        const queue = deps.state.getQueue();
+        const excluded = new Set([
+          ...deps.state.getRecentlySelectedTrackIds(),
+          ...(currentTrack ? [currentTrack.id] : []),
+          ...queue.map((t) => t.id)
+        ]);
+        const suggestions: Track[] = [];
+        for (const candidate of searchResults) {
+          if (suggestions.length >= 5) break;
+          if (excluded.has(candidate.id)) continue;
+          try {
+            const resolved = await deps.music.resolve(candidate);
+            if (excluded.has(resolved.id)) continue;
+            excluded.add(resolved.id);
+            suggestions.push(resolved);
+          } catch {
+            // 跳过无法解析的候选，继续尝试下一首。
+          }
+        }
+        if (suggestions.length === 0) {
           throw new Error("No suggested tracks available");
         }
-        const queuedText = `我把 ${queued.slice(0, 3).map((track) => `《${track.title}》`).join("、")} 加进今日播放列表了，先不打断正在播的这首。`;
-        emitter.emit("chunk", queuedText);
-        const responseText = `${decision.say}${queuedText}`;
-        const action: NonNullable<ChatDonePayload["action"]> = { type: "queue-updated" };
-        if (queued[0]) {
-          action.trackId = queued[0].id;
-          action.title = queued[0].title;
-          action.artist = queued[0].artist;
-        }
+        const suggestText = `我挑了几首你可能会喜欢的：${suggestions.map((t) => `《${t.title}》`).join("、")}。点一首我就插到下一首。`;
+        emitter.emit("chunk", suggestText);
+        const responseText = `${decision.say}${suggestText}`;
+        const action: NonNullable<ChatDonePayload["action"]> = {
+          type: "track-suggestion",
+          tracks: suggestions
+        };
         await deps.sessionRepo.appendMessage({
           timestamp: new Date().toISOString(),
           role: "agent",
@@ -247,7 +261,7 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
         });
         return;
       } catch {
-        // Music resolution failed, fall through to text-only response
+        // 候选解析失败，退回纯文本回复。
       }
     }
 
