@@ -61,4 +61,7 @@ export type RegisterRoutesDeps = {
   dailyShowPlanGenerator: DailyShowPlanGenerator;
   jobRegistry: JobRegistry;
   showProjectRepo: ShowProjectRepository;
+  // 是否启用运行时补生成 prepared episodes（消费后低于水位线时后台补）。
+  // 生产默认 true；测试用 createTestRadioServer 时置 false 避免后台写入污染断言。
+  prewarmRefillEnabled?: boolean;
 };

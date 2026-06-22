@@ -52,6 +52,11 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onTimeUpdateRef = useRef<(() => void) | null>(null);
   const episodeStateRef = useRef<EpisodePlaybackState>(episodeState);
+  // skipToNext 是后定义的 useCallback，playEpisodeData 闭包直接引用会陈旧，
+  // 用 ref 持有最新值，供 speechAudio.onerror 自动切歌。
+  const skipToNextRef = useRef<() => void>(() => {});
+  // 连续口播失败计数：超过阈值就停在 error，避免无限切歌死循环。
+  const speechErrorCountRef = useRef(0);
 
   episodeStateRef.current = episodeState;
 
@@ -70,6 +75,12 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
 
     setEpisodeData(episode);
     setEpisodeState("preparing");
+
+    // 先停掉旧音频再设新 src：防止切歌瞬间两段音频并行（旧口播/旧音乐尾音 +
+    // 新口播），是"两个音频打架"的根因之一。clearEpisodeState 已做同样清理，
+    // 但 playNextEpisode 秒切路径直接进 playEpisodeData，绕过了它。
+    musicAudio.pause();
+    speechAudio.pause();
 
     musicAudio.src = buildApiUrl(`/api/audio/${episode.track.id}`);
     musicAudio.volume = 0;
@@ -113,13 +124,19 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     };
 
     speechAudio.onerror = () => {
-      const ma = audio.musicRef.current;
-      if (ma && !ma.paused) {
-        audio.fadeVolume(ma, 1.0, 300);
-      }
-      setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ERROR"));
-      setError("口播加载失败");
       speechAudio.removeEventListener("timeupdate", onTimeUpdate);
+      speechErrorCountRef.current += 1;
+      if (speechErrorCountRef.current >= 3) {
+        // 连续失败：不再自动切，停在 error 让用户感知（网络/TTS 服务可能挂了）。
+        setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ERROR"));
+        const ma = audio.musicRef.current;
+        if (ma && !ma.paused) audio.fadeVolume(ma, 1.0, 300);
+        setError("连续多首口播加载失败，请检查网络或 TTS 服务");
+      } else {
+        // 偶发失败：静默切下一首，skipToNext 的 loading 状态自带反馈，
+        // 不设 error（playEpisode 开头会清 error，设了也白设）。
+        void skipToNextRef.current();
+      }
     };
 
     musicAudio.onended = () => {
@@ -165,6 +182,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     speechAudio.play().then(() => {
       try {
         setEpisodeState((current) => transitEpisodeStateSafely(current, "LOAD_SUCCESS"));
+        speechErrorCountRef.current = 0;
       } catch {
         // state already changed, ignore
       }
@@ -313,6 +331,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     clearEpisodeState();
     await playEpisode();
   }, [clearEpisodeState, playEpisode]);
+  skipToNextRef.current = skipToNext;
 
   const refreshPrefetch = useCallback(async () => {
     // 先等正在进行的预取结束，否则它的旧结果会在我们清空后覆盖回来。

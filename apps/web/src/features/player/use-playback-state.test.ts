@@ -254,7 +254,7 @@ describe("usePlaybackState", () => {
     expect(result.current.musicAudioUrl).toBe("http://localhost:3301/api/audio/track-1");
   });
 
-  it("speech error transitions to error state", async () => {
+  it("speech error auto-skips to next track instead of stalling", async () => {
     getNextEpisode.mockResolvedValue(makeEpisodeResponse());
     const { result } = renderHook(() => usePlaybackState(audio));
 
@@ -263,12 +263,14 @@ describe("usePlaybackState", () => {
     });
 
     const speechEl = audio.speechRef.current! as any;
-    act(() => {
+    await act(async () => {
       speechEl.onerror();
+      // skipToNext 异步切歌（clearEpisodeState + playEpisode），等它跑完。
+      await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(result.current.episodeState).toBe("error");
-    expect(result.current.error).toBe("口播加载失败");
+    // 偶发口播失败：自动换下一首，不卡在 error 等用户手动点。
+    expect(result.current.episodeState).not.toBe("error");
   });
 
   it("speech ended transitions to music state", async () => {

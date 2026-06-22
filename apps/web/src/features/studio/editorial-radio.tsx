@@ -159,7 +159,9 @@ function useAudioReactiveVisualizer(
         lastUpdate = now;
         graph.analyser.getByteFrequencyData(graph.data);
         const next = mapFrequencyDataToBars(graph.data);
-        const audible = !audio.paused && !audio.ended && next.energy > 0.006;
+        // reactive 只由"是否在播"决定，不看能量阈值：暂停恢复后头几帧能量低、
+        // 或前奏/弱段时能量本就低，用阈值当开关会把真实频谱误判成"假"动效。
+        const audible = !audio.paused && !audio.ended;
         setState({
           levels: audible ? next.levels : EMPTY_VISUALIZER_LEVELS,
           energy: audible ? next.energy : 0,

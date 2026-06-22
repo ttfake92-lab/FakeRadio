@@ -31,6 +31,11 @@ const EnvSchema = z.object({
   FAKERADIO_PREWARM_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   FAKERADIO_PREWARM_TIME: z.string().min(1).default("23:30"),
   FAKERADIO_PREWARM_EPISODES_PER_BLOCK: z.coerce.number().int().positive().default(3),
+  // 启动时为当前 block 预生成多少首完整 episode（含口播 TTS）。后台异步生成，
+  // 不阻塞启动和首次播放。每首约 5-15s LLM+TTS，10 首约 1-2 分钟陆续就绪。
+  FAKERADIO_PREWARM_STARTUP_EPISODES: z.coerce.number().int().positive().default(10),
+  // prepared_episodes 的低水位：当前 block 剩余 ready 数低于此值时触发后台补生成。
+  FAKERADIO_PREWARM_LOW_WATER_MARK: z.coerce.number().int().positive().default(2),
   FAKERADIO_OPENWEATHER_API_KEY: z.string().optional(),
   FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai"),
   FAKERADIO_LARK_CALENDAR_CLIENT_ID: z.string().optional(),

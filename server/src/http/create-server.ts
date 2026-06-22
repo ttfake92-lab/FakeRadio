@@ -19,7 +19,7 @@ import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { formatRadioDate } from "../utils/time.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { createSchedulerLoop, createPrewarmScheduler, type PrewarmScheduler } from "../scheduler/scheduler-loop.js";
-import { composeEpisodeFromTrack, buildPersonalHistorySnippet, type ComposeEpisodeDeps } from "../http/episode-runner.js";
+import { runPrewarmForDate, type PrewarmDeps } from "../scheduler/daily-episode-prewarmer.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
@@ -218,7 +218,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     showPlanGenerator,
     dailyShowPlanGenerator,
     jobRegistry,
-    showProjectRepo
+    showProjectRepo,
+    prewarmRefillEnabled: !options.skipStartupPrewarm
   });
 
   const schedulerLoop = createSchedulerLoop({
@@ -301,62 +302,52 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   prewarmScheduler.start();
   app.addHook("onClose", () => prewarmScheduler.stop());
 
-  // 启动预热第一首：后台为队列第一首生成完整 episode，存入 prepared_episodes，
-  // 供首次 /api/episode/next 的 claimPreparedEpisode 秒切，避免首次播放等 LLM+TTS。
+  // 启动批量预热：后台为当前 block 预生成 N 首完整 episode（含口播 TTS），
+  // 存入 prepared_episodes，供 /api/episode/next 和 /api/episode/prefetch 秒切，
+  // 避免每首都等 LLM+TTS。N 由 FAKERADIO_PREWARM_STARTUP_EPISODES 控制（默认 10）。
+  // 后台 void 异步，不阻塞启动；第一首就绪后即可播放，其余陆续准备。
   // 进度通过 agent-message 广播进对话框，让用户知道"正在准备"。
   if (!options.skipStartupPrewarm && initialQueue.length > 0 && currentPlanBlock) {
-    void prewarmFirstEpisode();
+    void prewarmStartupEpisodes();
   }
 
-  async function prewarmFirstEpisode() {
-    const track = initialQueue[0];
-    if (!track || !currentPlanBlock) return;
+  async function prewarmStartupEpisodes() {
+    if (!currentPlanBlock) return;
     const radioDate = formatRadioDate(nowProvider());
     const blockAt = currentPlanBlock.at;
-    const composeEpisodeDeps: ComposeEpisodeDeps = {
-      llm, tts, ttsCacheDir, storySource,
-      publicMetadataAdapter: defaultPublicMetadataAdapter,
-      webResearchAdapter: defaultWebResearchAdapter,
-      weather, calendar, devices, systemPrompt
-    };
+    const targetCount = env.FAKERADIO_PREWARM_STARTUP_EPISODES;
     const broadcastProgress = (text: string) => {
       stream.broadcast({
         type: "agent-message",
-        payload: { role: "agent", text, trackId: track.id }
+        payload: { role: "agent", text }
       });
     };
-    broadcastProgress(`正在为第一首歌《${track.title}》准备口播…`);
+    broadcastProgress(`正在准备 ${targetCount} 首歌的口播，第一首就绪后即可播放…`);
+    const prewarmDeps: PrewarmDeps = {
+      llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
+      publicMetadataAdapter: defaultPublicMetadataAdapter,
+      webResearchAdapter: defaultWebResearchAdapter,
+      likedSongs, stateRepo, nowProvider, audioDir, userPreferences
+    };
     try {
-      // 必须先 resolve 拿到 audioUrl：推荐引擎返回的是元数据，无播放链接。
-      // 不 resolve 的话预存的 episode.track 没 audioUrl，播放时 /api/audio 的
-      // proxyAndRecord 取不到链接 → 404 → "音乐加载失败"（live 路径正常正是因为
-      // resolveNextTrackAndDecision 内部已 resolve）。
-      const resolvedTrack = await music.resolve(track);
-      const recentMemoryEntries = await memory.recent(5);
-      const [playedHistory, likedSongTracks] = await Promise.all([
-        stateRepo.getRecentlyPlayed(50),
-        likedSongs.list().catch(() => [])
-      ]);
-      const personalHistory = buildPersonalHistorySnippet(resolvedTrack, playedHistory, likedSongTracks);
-      const { episode } = await composeEpisodeFromTrack(resolvedTrack, composeEpisodeDeps, {
-        recentMemory: recentMemoryEntries.map((entry) => entry.content),
-        taste: userPreferences.taste,
-        routines: userPreferences.routines,
-        moodRules: userPreferences.moodRules,
-        profile: userPreferences.profile,
-        personalHistory
-      });
-      await stateRepo.savePreparedEpisode({
+      const results = await runPrewarmForDate(
+        prewarmDeps,
         radioDate,
-        blockAt,
-        status: "ready",
-        episodeJson: JSON.stringify(episode),
-        audioDownloaded: false
-      });
-      broadcastProgress(`第一首《${track.title}》准备好了，点播放即可开始。`);
+        [{ at: currentPlanBlock.at, label: currentPlanBlock.label, moodHint: currentPlanBlock.moodHint }],
+        targetCount,
+        systemPrompt
+      );
+      const totalPrepared = results.reduce((sum, r) => sum + r.prepared, 0);
+      const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
+      if (totalPrepared > 0) {
+        broadcastProgress(`${totalPrepared} 首口播已就绪，随时可以播放。`);
+      }
+      if (totalFailed > 0) {
+        console.error(`[prewarm] Startup batch: ${totalFailed} episode(s) failed to prepare.`);
+      }
     } catch (err) {
-      console.error(`[prewarm] First episode preparation failed:`, err);
-      broadcastProgress(`第一首口播准备失败，点播放后会现生成，稍等片刻。`);
+      console.error(`[prewarm] Startup batch preparation failed:`, err);
+      broadcastProgress(`口播准备失败，点播放后会现生成，稍等片刻。`);
     }
   }
 

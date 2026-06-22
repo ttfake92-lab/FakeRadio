@@ -28,6 +28,7 @@ import { startExportTask, getExportTask, getExportFilePath, exportShowProject } 
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import type { PlaybackState } from "./playback-state.js";
 import { resolveNextTrackAndDecision, composeEpisodeFromTrack, synthesizeWithFallback, buildPersonalHistorySnippet, type EpisodeRunnerDeps, type ComposeEpisodeDeps } from "./episode-runner.js";
+import { runPrewarmForDate, type PrewarmDeps } from "../scheduler/daily-episode-prewarmer.js";
 import { handleChat } from "./chat-intent-router.js";
 import { registerShowRoutes } from "./routes/show-routes.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
@@ -60,7 +61,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     systemPrompt, userPreferences, weather, weatherStatus, calendar, calendarStatus, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
     storySourceStatus, webResearchStatus, neteaseAuth, runtimeManager, baseDir, programBriefRepo,
-    showPlanRepo, showPlanGenerator, dailyShowPlanGenerator, jobRegistry, showProjectRepo
+    showPlanRepo, showPlanGenerator, dailyShowPlanGenerator, jobRegistry, showProjectRepo,
+    prewarmRefillEnabled = true
   } = deps;
 
   const getAdapterStatuses = () => runtimeManager?.getStatuses() ?? {
@@ -85,6 +87,42 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     publicMetadataAdapter, webResearchAdapter,
     weather, calendar, devices, systemPrompt
   };
+
+  const prewarmDeps: PrewarmDeps = {
+    llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
+    publicMetadataAdapter, webResearchAdapter, likedSongs, stateRepo, nowProvider, audioDir, userPreferences
+  };
+
+  // 后台补生成 prepared episodes：当前 block 剩余 ready 低于低水位时，
+  // 异步补到 FAKERADIO_PREWARM_STARTUP_EPISODES 首。防重入，不阻塞调用方响应。
+  // 这是"播到最后一首时再加载下一批"的真正落点——prepared 才是秒切关键，
+  // 不是内存 queue 的 track。
+  let prewarmRefilling = false;
+  function ensurePreparedEpisodes() {
+    if (!prewarmRefillEnabled || prewarmRefilling) return;
+    const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
+    const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
+    if (!currentBlock) return;
+    const today = formatRadioDate(nowProvider());
+    void (async () => {
+      try {
+        const status = await stateRepo.getBlockPrewarmStatus(today, currentBlock.at);
+        if (status.ready >= env.FAKERADIO_PREWARM_LOW_WATER_MARK) return;
+        prewarmRefilling = true;
+        await runPrewarmForDate(
+          prewarmDeps,
+          today,
+          [{ at: currentBlock.at, label: currentBlock.label, moodHint: currentBlock.moodHint }],
+          env.FAKERADIO_PREWARM_STARTUP_EPISODES,
+          systemPrompt
+        );
+      } catch (err) {
+        console.error(`[prewarm] ensurePreparedEpisodes failed:`, err);
+      } finally {
+        prewarmRefilling = false;
+      }
+    })();
+  }
 
   let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   app.addHook("onClose", () => {
@@ -200,7 +238,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
-    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
+    if (state.queueSize() <= 1) void appendRecommendedTracks(10).catch(() => {});
     stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
     await stateRepo.recordPlayedTrack({
       id: randomUUID(),
@@ -341,7 +379,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
-    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
+    if (state.queueSize() <= 1) void appendRecommendedTracks(10).catch(() => {});
     state.setDj({
       say: decision.say,
       audioUrl: ttsResult.audioUrl,
@@ -536,7 +574,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           state.setTrack(episode.track);
           state.rememberSelectedTrack(episode.track);
           state.removeFromQueue(episode.track.id);
-          if (state.queueSize() <= 1) await appendRecommendedTracks(10);
+          if (state.queueSize() <= 1) void appendRecommendedTracks(10).catch(() => {});
           state.setDj({ say: episode.story.text, audioUrl: episode.story.audioUrl });
           stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
           stream.broadcast({ type: "dj-speech", payload: { text: episode.story.text, audioUrl: episode.story.audioUrl } });
@@ -559,6 +597,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
             storyType: episode.story.type,
             audioUrl: episode.story.audioUrl
           });
+          ensurePreparedEpisodes();
           return EpisodeNextResponseSchema.parse({ episode, source: "prepared" });
         }
       }
@@ -608,6 +647,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           trackRegistry.register(episode.track);
           // 预取的曲目会被前端接续播放，必须登记进"最近已选"
           state.rememberSelectedTrack(episode.track);
+          ensurePreparedEpisodes();
           return EpisodeNextResponseSchema.parse({ episode, source: "prepared" });
         }
       }
@@ -639,7 +679,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.removeFromQueue(track.id);
     // 优先槽里的曲目此刻开始播了——只在 id 匹配时清，避免误清用户后来又插入的新歌。
     state.consumePriorityNextTrack(track.id);
-    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
+    if (state.queueSize() <= 1) void appendRecommendedTracks(10).catch(() => {});
     stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
     await stateRepo.recordPlayedTrack({
       id: randomUUID(),

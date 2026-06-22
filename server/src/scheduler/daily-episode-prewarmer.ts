@@ -3,7 +3,7 @@ import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 import type { StateRepository } from "../state/state-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
-import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
+import { composeEpisodeFromTrack, buildPersonalHistorySnippet, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { computeDjDecision } from "../brain/dj-brain.js";
 import { formatRadioDate } from "../utils/time.js";
 import { buildRecommendationContext, selectRecommendedCandidates } from "../recommendation/recommendation-engine.js";
@@ -140,11 +140,16 @@ async function generatePrewarmEpisode(
     publicMetadataAdapter, webResearchAdapter,
     weather, calendar, devices, systemPrompt
   };
+  // 与 live 路径对齐：注入 profile + personalHistory，否则预热出的口播质量退化。
+  const playedHistory = await stateRepo.getRecentlyPlayed(50);
+  const personalHistory = buildPersonalHistorySnippet(track, playedHistory, favoritesTracks);
   const { episode } = await composeEpisodeFromTrack(track, composeDeps, {
     recentMemory: [],
     taste: deps.userPreferences.taste,
     routines: deps.userPreferences.routines,
-    moodRules: deps.userPreferences.moodRules
+    moodRules: deps.userPreferences.moodRules,
+    profile: deps.userPreferences.profile,
+    personalHistory
   });
 
   return { episode, audioDownloaded: false };
