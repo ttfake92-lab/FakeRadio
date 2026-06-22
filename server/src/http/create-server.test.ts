@@ -206,7 +206,12 @@ describe("createRadioServer", () => {
       now: () => new Date(2026, 3, 30, 8, 0, 0)
     });
 
-    // 启动预热是 void 异步；轮询直到 episode 就绪或超时。
+    // 启动预热是 void 异步;先等一小段让它跑完(prewarm 内部有 resolve+memory+history+
+    // likedSongs+compose+save,fs 异步会引入几个 microtask)。第一次 next 必须在
+    // prewarm 完成后发起——否则会走 live 路径,而 live 已经把 track id 写入
+    // recentlySelected,后续 claim 同一首 prepared 时会被排除,测试永远拿不到 prepared。
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
     let source = "";
     let preparedEpisode: { episode: { track: { id: string; audioUrl?: string } } } | null = null;
     for (let i = 0; i < 50; i += 1) {

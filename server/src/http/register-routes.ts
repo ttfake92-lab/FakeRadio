@@ -27,7 +27,7 @@ import { proxyAndRecord, isAudioRecorded, getAudioFilePath } from "../audio/audi
 import { startExportTask, getExportTask, getExportFilePath, exportShowProject } from "../export/export-pipeline.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import type { PlaybackState } from "./playback-state.js";
-import { resolveNextTrackAndDecision, composeEpisodeFromTrack, synthesizeWithFallback, type EpisodeRunnerDeps, type ComposeEpisodeDeps } from "./episode-runner.js";
+import { resolveNextTrackAndDecision, composeEpisodeFromTrack, synthesizeWithFallback, buildPersonalHistorySnippet, type EpisodeRunnerDeps, type ComposeEpisodeDeps } from "./episode-runner.js";
 import { handleChat } from "./chat-intent-router.js";
 import { registerShowRoutes } from "./routes/show-routes.js";
 import { registerSettingsRoutes } from "./routes/settings-routes.js";
@@ -510,6 +510,11 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       });
 
       const recentMemoryEntries = await memory.recent(5);
+      const [playedHistory, likedSongTracks] = await Promise.all([
+        stateRepo.getRecentlyPlayed(50),
+        likedSongs.list().catch(() => [])
+      ]);
+      const personalHistory = buildPersonalHistorySnippet(track, playedHistory, likedSongTracks);
       const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
         track,
         composeEpisodeDeps,
@@ -517,7 +522,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           recentMemory: recentMemoryEntries.map((entry) => entry.content),
           taste: userPreferences.taste,
           routines: userPreferences.routines,
-          moodRules: userPreferences.moodRules
+          moodRules: userPreferences.moodRules,
+          profile: userPreferences.profile,
+          personalHistory
         }
       );
 
@@ -571,6 +578,11 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       state.rememberSelectedTrack(track);
 
       const recentMemoryEntries = await memory.recent(5);
+      const [playedHistory, likedSongTracks] = await Promise.all([
+        stateRepo.getRecentlyPlayed(50),
+        likedSongs.list().catch(() => [])
+      ]);
+      const personalHistory = buildPersonalHistorySnippet(track, playedHistory, likedSongTracks);
       const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
         track,
         composeEpisodeDeps,
@@ -578,7 +590,9 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
           recentMemory: recentMemoryEntries.map((entry) => entry.content),
           taste: userPreferences.taste,
           routines: userPreferences.routines,
-          moodRules: userPreferences.moodRules
+          moodRules: userPreferences.moodRules,
+          profile: userPreferences.profile,
+          personalHistory
         }
       );
 

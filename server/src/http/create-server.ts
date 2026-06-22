@@ -19,7 +19,7 @@ import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { formatRadioDate } from "../utils/time.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { createSchedulerLoop, createPrewarmScheduler, type PrewarmScheduler } from "../scheduler/scheduler-loop.js";
-import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
+import { composeEpisodeFromTrack, buildPersonalHistorySnippet, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
@@ -333,11 +333,18 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       // resolveNextTrackAndDecision 内部已 resolve）。
       const resolvedTrack = await music.resolve(track);
       const recentMemoryEntries = await memory.recent(5);
+      const [playedHistory, likedSongTracks] = await Promise.all([
+        stateRepo.getRecentlyPlayed(50),
+        likedSongs.list().catch(() => [])
+      ]);
+      const personalHistory = buildPersonalHistorySnippet(resolvedTrack, playedHistory, likedSongTracks);
       const { episode } = await composeEpisodeFromTrack(resolvedTrack, composeEpisodeDeps, {
         recentMemory: recentMemoryEntries.map((entry) => entry.content),
         taste: userPreferences.taste,
         routines: userPreferences.routines,
-        moodRules: userPreferences.moodRules
+        moodRules: userPreferences.moodRules,
+        profile: userPreferences.profile,
+        personalHistory
       });
       await stateRepo.savePreparedEpisode({
         radioDate,

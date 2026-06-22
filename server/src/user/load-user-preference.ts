@@ -4,6 +4,9 @@ import { resolve } from "node:path";
 const DEFAULT_USER_TASTE = "喜欢低刺激、持续陪伴的音乐。";
 const DEFAULT_ROUTINES = "早晨低刺激启动，工作时段稳定少打扰。";
 const DEFAULT_MOOD_RULES = "晴天早晨温暖轻盈。";
+// profile 是"你是谁"——身份、生活节奏、对话风格喜好等。默认留空,
+// 让用户自己写 user/profile.md;不存在就不注入,避免无关内容污染口播。
+const DEFAULT_PROFILE = "";
 
 // taste-writer 复用同一默认值，避免双定义漂移
 export { DEFAULT_USER_TASTE };
@@ -28,6 +31,7 @@ export type UserPreferences = {
   taste: string;
   routines: string;
   moodRules: string;
+  profile: string;
   playlists: Playlist[];
 };
 
@@ -41,14 +45,15 @@ function defaultBaseDir(): string {
 export async function loadUserPreferences(
   baseDir: string = defaultBaseDir()
 ): Promise<UserPreferences> {
-  const [taste, routines, moodRules, playlists] = await Promise.all([
+  const [taste, routines, moodRules, profile, playlists] = await Promise.all([
     loadFile(resolve(baseDir, "user/taste.md"), DEFAULT_USER_TASTE),
     loadFile(resolve(baseDir, "user/routines.md"), DEFAULT_ROUTINES),
     loadFile(resolve(baseDir, "user/mood-rules.md"), DEFAULT_MOOD_RULES),
+    loadFile(resolve(baseDir, "user/profile.md"), DEFAULT_PROFILE),
     loadPlaylists(resolve(baseDir, "user/playlists.json"))
   ]);
 
-  return { taste, routines, moodRules, playlists };
+  return { taste, routines, moodRules, profile, playlists };
 }
 
 async function loadFile(path: string, fallback: string): Promise<string> {

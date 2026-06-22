@@ -14,6 +14,8 @@ export type BuildContextInput = {
   userTaste: string;
   routines: string;
   moodRules: string;
+  /** 个人画像(profile.md);为空就不注入 */
+  profile?: string;
   recentMemory: string[];
   userMessage?: string;
   toolResults: string[];
@@ -23,6 +25,14 @@ export type BuildContextInput = {
 };
 
 export function buildContextWindow(input: BuildContextInput): ContextFragment[] {
+  const userLines = [
+    `taste: ${input.userTaste}`,
+    `routines: ${input.routines}`,
+    `moodRules: ${input.moodRules}`
+  ];
+  if (input.profile && input.profile.trim().length > 0) {
+    userLines.unshift(`profile: ${input.profile.trim()}`);
+  }
   return [
     {
       id: "system",
@@ -34,7 +44,7 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
     {
       id: "user",
       label: "用户语料",
-      content: [`taste: ${input.userTaste}`, `routines: ${input.routines}`, `moodRules: ${input.moodRules}`].join("\n"),
+      content: userLines.join("\n"),
       priority: 2,
       source: "user"
     },

@@ -347,6 +347,11 @@ export type EpisodeCompositionContext = {
   taste: string;
   routines: string;
   moodRules: string;
+  // 个人画像(profile.md 内容);为空就不注入 prompt。
+  profile?: string;
+  // 这首歌在用户历史里的关系(由调用方用 buildPersonalHistorySnippet 算好);
+  // 为空就不注入。让 DJ 能说"你之前在晚上听过这位 N 次"这种带温度的话。
+  personalHistory?: string;
 };
 
 export type ComposedEpisode = {
@@ -387,7 +392,9 @@ export async function composeEpisodeFromTrack(
     { weather: weatherSnapshot, calendar: calendarItems, devices: playbackDevices },
     context.taste,
     context.routines,
-    context.moodRules
+    context.moodRules,
+    context.profile,
+    context.personalHistory
   );
 
   const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(deps.tts, deps.ttsCacheDir, narration);
@@ -401,6 +408,51 @@ export async function composeEpisodeFromTrack(
   };
 
   return { episode, narration, storyType, storyTtsResult, fallbackReason };
+}
+
+// 算"这首歌在你历史里的关系",给 DJ prompt 用作"老朋友共同记忆"。
+// 故意只输出 3-4 行干净事实,不做花式叙事——LLM 自己挑角度带入口播。
+// 输入的 playedHistory / likedSongs 越完整,产出的事实越精确;没有就返回空串。
+export function buildPersonalHistorySnippet(
+  track: Track,
+  playedHistory: Array<{ trackId: string; artist: string; playedAt: string }>,
+  likedSongs: Track[]
+): string {
+  const lines: string[] = [];
+  const trackArtist = (track.artist ?? "").trim();
+  const normalize = (s: string) => s.trim().toLowerCase();
+  const targetArtist = normalize(trackArtist);
+
+  // 1) 这首歌本身是否在收藏里
+  const isLiked = likedSongs.some((t) => t.id === track.id);
+  if (isLiked) lines.push(`这首《${track.title}》在你的收藏里。`);
+
+  // 2) 这位艺术家的其他收藏(最多列 2 首歌名,避免占用太多 token)
+  if (targetArtist) {
+    const sameArtistLiked = likedSongs.filter(
+      (t) => t.id !== track.id && normalize(t.artist ?? "").includes(targetArtist)
+    );
+    if (sameArtistLiked.length > 0) {
+      const titles = sameArtistLiked.slice(0, 2).map((t) => `《${t.title}》`).join("、");
+      const more = sameArtistLiked.length > 2 ? `等 ${sameArtistLiked.length} 首` : "";
+      lines.push(`你收藏过 ${trackArtist} 的 ${titles}${more}。`);
+    }
+  }
+
+  // 3) 这位艺术家最近几次出现的次数 + 最近一次时段(按小时分早/午/夜)
+  if (targetArtist) {
+    const sameArtistPlays = playedHistory.filter((p) =>
+      normalize(p.artist ?? "").includes(targetArtist)
+    );
+    const last = sameArtistPlays[0]; // playedHistory 调用方按 playedAt DESC
+    if (last) {
+      const hour = new Date(last.playedAt).getHours();
+      const slot = hour < 7 ? "凌晨" : hour < 12 ? "早晨" : hour < 18 ? "下午" : hour < 22 ? "傍晚" : "深夜";
+      lines.push(`你之前听过 ${trackArtist} ${sameArtistPlays.length} 次,最近一次是在${slot}。`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 export function determineStoryType(sources: RadioEpisode["sources"]): RadioEpisode["story"]["type"] {
@@ -447,7 +499,9 @@ export async function narrateStoryWithSources(
   contextEnv: ContextEnvironment,
   userTaste: string,
   routines: string,
-  moodRules: string
+  moodRules: string,
+  profile?: string,
+  personalHistory?: string
 ): Promise<{ narration: string; storyType: RadioEpisode["story"]["type"] }> {
   const rawType = determineStoryType(sources);
   const effectiveType = rawType;
@@ -462,7 +516,18 @@ export async function narrateStoryWithSources(
       "没有可靠的背景资料：不要假装知道幕后故事。谈这首歌的声音本身——节奏、人声的质感、某件乐器——以及它为什么适合现在这个时刻。"
   };
 
-  const fragments = buildContextWindow({
+  // 把"这首歌在你历史里的关系"显式作为 prompt 段落,而非藏在内存或资料里。
+  // 给 DJ 一段可用的"老朋友共同记忆",但不是必须用——LLM 自己判断是否带入。
+  const personalSection = personalHistory && personalHistory.trim().length > 0
+    ? `
+
+这首歌在听众历史里的关系:
+${personalHistory.trim()}
+
+把这段事实当作"老朋友的共同记忆"——如果它有合适的角度可以带进口播,就自然带一句(比如"你之前听过这位三次,都是夜里"或"这位的另一首《X》你收藏过")。但不要硬塞、不要每次都用。`
+    : "";
+
+  const baseInput = {
     now: new Date(),
     systemPrompt: systemPrompt + `
 
@@ -472,11 +537,11 @@ export async function narrateStoryWithSources(
 故事类型: ${effectiveType}
 
 写法要求:
-- 2 到 4 句，口语，像电台里随口聊起，说完自然停住。
+- 2 到 7 句,密度自己判断:有真实细节就多说一点,没有可讲的就极简带过。
 - ${typeGuidance[effectiveType]}
-- 只讲一个点，讲透，不要面面俱到。
-- 行文中自然带到歌名或歌手名，但禁止用「接下来是 XXX 的 XXX」这种报幕腔开场。
-- 结尾把话头轻轻交给音乐即可，不要说「让我们一起聆听」之类的主持词。
+- 只讲一个点,讲透,不要面面俱到。
+- 行文中自然带到歌名或歌手名,但禁止用「接下来是 XXX 的 XXX」这种报幕腔开场。
+- 结尾把话头轻轻交给音乐即可,不要说「让我们一起聆听」之类的主持词。${personalSection}
 
 来源资料:
 ${sourceContext}`,
@@ -487,7 +552,11 @@ ${sourceContext}`,
     toolResults: [],
     executionState: "narrate-story",
     environment: contextEnv,
-  });
+  };
+  // profile 严格可选(exactOptionalPropertyTypes):有内容才挂上,避免 undefined 写入。
+  const fragments = profile && profile.trim().length > 0
+    ? buildContextWindow({ ...baseInput, profile })
+    : buildContextWindow(baseInput);
 
   const decision = await llm.compute(fragments);
   const narration = narrationMentionsTrack(decision.say, track)
