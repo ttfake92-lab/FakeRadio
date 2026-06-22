@@ -97,6 +97,14 @@ h1, h2, h3, h4, p {
   51%, 100% { opacity: 0; }
 }
 
+/* 长歌名滚动：先停在起点 → 缓慢左移到结尾 → 停在结尾 → 缓慢回到起点。
+   一个周期 ~16s，停留占 60%，移动占 40%，频率慢、不刺眼。*/
+@keyframes fr-marquee {
+  0%, 20%   { transform: translateX(0); }
+  50%, 80%  { transform: translateX(var(--marquee-distance, 0)); }
+  100%      { transform: translateX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

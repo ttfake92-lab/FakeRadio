@@ -792,7 +792,7 @@ export function EditorialRadio() {
         style={{
           padding: bp === 'tablet' ? '24px 24px 56px' : '24px 56px 56px',
           display: 'grid',
-          gridTemplateColumns: bp === 'tablet' ? '1fr' : '260px 1fr 320px',
+          gridTemplateColumns: bp === 'tablet' ? '1fr' : '340px 1fr 320px',
           gap: bp === 'tablet' ? 32 : 48,
         }}
       >
@@ -1090,6 +1090,143 @@ function ThemeToggle({
 }
 
 // ─────────────────────────────────────────────────────────────
+// 歌名最多展示 3 行：≤3 行静态全部显示；>3 行则前 2 行静态、第 3 行把剩余文字做缓慢滚动。
+// ─────────────────────────────────────────────────────────────
+function MarqueeTitle({ text, bp }: { text: string; bp: Breakpoint }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  // mode: 'static' = ≤3 行直接展示；'split' = 前2行静态 + 第3行滚动剩余
+  const [mode, setMode] = useState<'static' | 'split'>('static');
+  const [first2, setFirst2] = useState('');
+  const [rest, setRest] = useState('');
+
+  const fontSize = bp === 'tablet' ? 44 : 64;
+  const lineH = fontSize * 0.95;
+  const sharedStyle: React.CSSProperties = {
+    fontFamily: 'var(--font-display)',
+    fontSize,
+    lineHeight: 0.95,
+    fontWeight: 400,
+    letterSpacing: '-0.02em',
+  };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+    const compute = () => {
+      const width = container.clientWidth;
+      if (width === 0) return;
+      measure.style.width = `${width}px`;
+      measure.textContent = text;
+      const totalLines = Math.round(measure.scrollHeight / lineH);
+      if (totalLines <= 3) {
+        setMode('static');
+        return;
+      }
+      // 二分查找：最长的、渲染高度 ≤ 2 行的前缀。剩余部分进第 3 行滚动。
+      let lo = 0, hi = text.length, best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        measure.textContent = text.slice(0, mid);
+        if (measure.scrollHeight <= lineH * 2 + 0.5) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      setFirst2(text.slice(0, best));
+      setRest(text.slice(best));
+      setMode('split');
+    };
+    compute();
+    // 字体异步加载会改变行数，加载完成后复测一次。
+    let cancelled = false;
+    const doc = typeof document !== 'undefined' ? (document as Document & { fonts?: { ready?: Promise<unknown> } }) : undefined;
+    if (doc?.fonts?.ready) {
+      doc.fonts.ready.then(() => {
+        if (!cancelled) compute();
+      });
+    }
+    if (typeof ResizeObserver === 'undefined') return () => { cancelled = true; };
+    const ro = new ResizeObserver(compute);
+    ro.observe(container);
+    return () => { cancelled = true; ro.disconnect(); };
+  }, [text, lineH]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', minWidth: 0 }}>
+      {mode === 'static' ? (
+        <div style={sharedStyle}>{text}</div>
+      ) : (
+        <>
+          <div style={{ ...sharedStyle, height: lineH * 2, overflow: 'hidden' }}>{first2}</div>
+          <SingleLineMarquee text={rest} style={sharedStyle} />
+        </>
+      )}
+      {/* 隐藏测量层：与标题同字体同宽度，用来数行数和二分切分 */}
+      <div
+        ref={measureRef}
+        aria-hidden
+        style={{
+          ...sharedStyle,
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          whiteSpace: 'normal',
+        }}
+      />
+    </div>
+  );
+}
+
+// 单行滚动：溢出才滚，不溢出静态。第 3 行剩余文字用这个。
+function SingleLineMarquee({ text, style }: { text: string; style: React.CSSProperties }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(0);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const measure = () => {
+      const dist = inner.scrollWidth - outer.clientWidth;
+      setOverflow(dist > 2 ? dist : 0);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(outer);
+    return () => ro.disconnect();
+  }, [text]);
+
+  const animated = overflow > 0;
+  return (
+    <div ref={outerRef} style={{ overflow: 'hidden', minWidth: 0 }}>
+      <span
+        ref={innerRef}
+        style={{
+          ...style,
+          display: 'inline-block',
+          whiteSpace: 'nowrap',
+          ...(animated
+            ? ({
+                animation: 'fr-marquee 16s ease-in-out infinite',
+                '--marquee-distance': `-${overflow}px`,
+              } as React.CSSProperties)
+            : {}),
+        }}
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
 // LeftColumn — track info + progress + queue
 // ─────────────────────────────────────────────────────────────
 function LeftColumn({
@@ -1143,18 +1280,9 @@ function LeftColumn({
         >
           N°<span style={{ marginLeft: 4 }}>003</span> &nbsp;/&nbsp; NOW
         </div>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-          <div
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: bp === 'tablet' ? 44 : 64,
-              lineHeight: 0.95,
-              fontWeight: 400,
-              letterSpacing: '-0.02em',
-              marginBottom: 16,
-            }}
-          >
-            {title}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <MarqueeTitle text={title} bp={bp} />
           </div>
           {track && (
             <button
@@ -1162,6 +1290,7 @@ function LeftColumn({
               aria-label={isFavorited ? '取消收藏' : '收藏'}
               style={{
                 marginTop: 8,
+                flexShrink: 0,
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
