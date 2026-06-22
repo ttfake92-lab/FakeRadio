@@ -671,10 +671,13 @@ export function EditorialRadio() {
         ...prev,
         { id: `dj-${Date.now()}`, from: 'DJ', text: `好，把《${track.title}》插到下一首了。`, origin: 'chat' },
       ]);
+      // 丢掉之前预取的下一首（可能是旧推荐），重新预取——服务端会优先返回刚插入的曲目，
+      // 让 UP NEXT 立刻显示这首歌，当前歌唱完后秒切到它。
+      await playback.refreshPrefetch();
     } catch {
       // 插入失败保留候选名单，用户可重试。
     }
-  }, []);
+  }, [playback]);
 
   const handleGenerateNow = useCallback(async (briefId: string) => {
     startJobTracking(briefId);

@@ -230,8 +230,19 @@ FakeRadio 支持预热，提前生成 episode：
 - 预热和定时触发共用 `prewarmForDate()` 函数，统一 shouldRun → run → mark 流程
 - 每个 daypart block 生成 `FAKERADIO_PREWARM_EPISODES_PER_BLOCK` 个 episode
 - 预热结果存入 `prepared_episodes` 表
-- `/api/episode/next` 优先领取 prepared episode（`source: "prepared"`），无可用时走实时生成（`source: "live"`）
+- `/api/episode/next` 选歌优先级：**优先槽（用户"插到下一首"）→ prepared episode（`source: "prepared"`）→ live 推荐（`source: "live"`）**。无可用 prepared episode 时走实时生成
 - 预热后自动尝试下载歌曲音频到 `user/audio/` 目录
+
+### 优先槽（priority next track）
+
+`PlaybackState` 持有一个与推荐缓冲池 `queue` **分离**的优先槽 `priorityNextTrack`，用于承载用户在 DJ 聊天里点确认"插到下一首"的曲目。它拥有最高播放优先级：
+
+- `POST /api/queue/insert-next` 写入优先槽（不再 unshift 进 `queue`），并从 `queue` 去重移除同一首
+- `/api/episode/next` 和 `/api/episode/prefetch` 顶部先消费优先槽：next 路由 `music.resolve` 后清槽并组装 episode；prefetch 路由返回但不清槽（等前端接续播放时 `/api/episode/playing` 按 id 匹配清槽，避免预取结果被丢弃时丢歌）
+- `resolveNextTrackAndDecision` 把优先槽曲目 id 加入推荐排除集，防止推荐引擎把它当候选再选一次导致连播两遍
+- 前端 `editorial-radio.handleConfirmSuggestion` 在 `insertNextTrack` 成功后调 `playback.refreshPrefetch()`：等在途预取结束 → 清掉旧 `nextEpisodeRef` → 重新预取，让 UP NEXT 立即显示选中曲目
+
+> 这个槽位是为修复「DJ 说插到下一首了但实际没插入」而引入的。根因：旧实现把歌 unshift 进 `queue`，但 player 切下一首走 prewarm/推荐，`queue` 仅作最后兜底几乎永远轮不到；推荐引擎还把 `queue` 里的歌排除掉。独立优先槽 + 端点优先消费 + 前端刷新预取三层一起才真正打通。
 
 ## 导出管道
 

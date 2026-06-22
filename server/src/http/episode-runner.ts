@@ -117,6 +117,12 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     ...(currentTrack ? [currentTrack.id] : [])
   ]);
   const queueIds = new Set(state.getQueue().map(t => t.id));
+  // 优先槽里的曲目马上就要播，不能让推荐引擎把它当候选再选一次（否则会连播两遍）。
+  const priorityNextTrack = state.getPriorityNextTrack();
+  if (priorityNextTrack) {
+    queueIds.add(priorityNextTrack.id);
+    recentOrCurrentTrackIds.add(priorityNextTrack.id);
+  }
 
   const favoritesTracks = await likedSongs.list();
   const currentPlan = buildTodayPlan(now, userPreferences.playlists);

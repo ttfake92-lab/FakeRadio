@@ -170,6 +170,68 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     ];
   }
 
+  // 给定已选定的 track，组装 live episode（口播 + TTS）。
+  // /api/episode/next、/api/episode/prefetch 的 live 分支与优先槽分支共用，避免三处重复。
+  async function composeLiveEpisode(track: RadioEpisode["track"]) {
+    const recentMemoryEntries = await memory.recent(5);
+    const [playedHistory, likedSongTracks] = await Promise.all([
+      stateRepo.getRecentlyPlayed(50),
+      likedSongs.list().catch(() => [])
+    ]);
+    const personalHistory = buildPersonalHistorySnippet(track, playedHistory, likedSongTracks);
+    const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
+      track,
+      composeEpisodeDeps,
+      {
+        recentMemory: recentMemoryEntries.map((entry) => entry.content),
+        taste: userPreferences.taste,
+        routines: userPreferences.routines,
+        moodRules: userPreferences.moodRules,
+        profile: userPreferences.profile,
+        personalHistory
+      }
+    );
+    return { episode, narration, storyTtsResult, storyType };
+  }
+
+  // /api/episode/next 选定 track 后的副作用：登记、更新播放状态、广播、落库、组装 episode。
+  async function finalizeNextEpisode(track: RadioEpisode["track"]) {
+    trackRegistry.register(track);
+    state.setTrack(track);
+    state.rememberSelectedTrack(track);
+    state.removeFromQueue(track.id);
+    if (state.queueSize() <= 1) await appendRecommendedTracks(10);
+    stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
+    await stateRepo.recordPlayedTrack({
+      id: randomUUID(),
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album ?? null,
+      source: track.source,
+      playedAt: new Date().toISOString()
+    });
+    const { episode, narration, storyTtsResult, storyType } = await composeLiveEpisode(track);
+    state.setDj({ say: narration, audioUrl: storyTtsResult.audioUrl });
+    stream.broadcast({ type: "dj-speech", payload: { text: narration, audioUrl: storyTtsResult.audioUrl } });
+    const hookText = narration.split(/[。！？.!?]/)[0]?.trim();
+    if (hookText && hookText.length > 0) {
+      stream.broadcast({ type: "agent-message", payload: { role: "agent", text: hookText, trackId: track.id } });
+    }
+    await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType, audioUrl: storyTtsResult.audioUrl });
+    return EpisodeNextResponseSchema.parse({ episode, source: "live" });
+  }
+
+  // /api/episode/prefetch 选定 track 后的副作用：登记、记已选（防预取重复选同一首）、组装 episode、落口播。
+  // 预取不更新"当前曲目"——前端接续播放时会调 /api/episode/playing 上报。
+  async function finalizePrefetchEpisode(track: RadioEpisode["track"]) {
+    trackRegistry.register(track);
+    state.rememberSelectedTrack(track);
+    const { episode, narration, storyTtsResult, storyType } = await composeLiveEpisode(track);
+    await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType, audioUrl: storyTtsResult.audioUrl });
+    return EpisodeNextResponseSchema.parse({ episode, source: "live" });
+  }
+
   app.get("/api/health", async () => {
     const statuses = getAdapterStatuses();
     return HealthResponseSchema.parse({
@@ -445,7 +507,21 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   app.get("/api/episode/next", async (request, reply) => {
     try {
-      // Try to claim a prepared episode for the current block first
+      // 1) 优先槽：用户在 DJ 聊天点"插到下一首"的曲目，最高优先级，跳过 prewarm/推荐。
+      //    这是修复"DJ 说插了但没插"的关键——以前插进 queue 后被 prewarm/推荐抢先消费。
+      const priorityTrack = state.getPriorityNextTrack();
+      if (priorityTrack) {
+        try {
+          const resolved = await music.resolve(priorityTrack);
+          state.consumePriorityNextTrack();
+          return await finalizeNextEpisode(resolved);
+        } catch {
+          // resolve 失败（如网易云 URL 拿不到）：清槽，落回正常流程。
+          state.consumePriorityNextTrack();
+        }
+      }
+
+      // 2) Try to claim a prepared episode for the current block first
       const today = formatRadioDate(nowProvider());
       const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
       const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
@@ -487,56 +563,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         }
       }
 
-      // Fall back to live generation
+      // 3) Fall back to live generation
       await refreshRecentPlaybackMemory();
-      const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+      const { track } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
         throw new Error("No track available");
       }
-      trackRegistry.register(track);
-      state.setTrack(track);
-      state.rememberSelectedTrack(track);
-      state.removeFromQueue(track.id);
-      if (state.queueSize() <= 1) await appendRecommendedTracks(10);
-      stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
-      await stateRepo.recordPlayedTrack({
-        id: randomUUID(),
-        trackId: track.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? null,
-        source: track.source,
-        playedAt: new Date().toISOString()
-      });
-
-      const recentMemoryEntries = await memory.recent(5);
-      const [playedHistory, likedSongTracks] = await Promise.all([
-        stateRepo.getRecentlyPlayed(50),
-        likedSongs.list().catch(() => [])
-      ]);
-      const personalHistory = buildPersonalHistorySnippet(track, playedHistory, likedSongTracks);
-      const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
-        track,
-        composeEpisodeDeps,
-        {
-          recentMemory: recentMemoryEntries.map((entry) => entry.content),
-          taste: userPreferences.taste,
-          routines: userPreferences.routines,
-          moodRules: userPreferences.moodRules,
-          profile: userPreferences.profile,
-          personalHistory
-        }
-      );
-
-      state.setDj({ say: narration, audioUrl: storyTtsResult.audioUrl });
-      stream.broadcast({ type: "dj-speech", payload: { text: narration, audioUrl: storyTtsResult.audioUrl } });
-      const hookText2 = narration.split(/[。！？.!?]/)[0]?.trim();
-      if (hookText2 && hookText2.length > 0) {
-        stream.broadcast({ type: "agent-message", payload: { role: "agent", text: hookText2, trackId: track.id } });
-      }
-      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType: storyType, audioUrl: storyTtsResult.audioUrl });
-
-      return EpisodeNextResponseSchema.parse({ episode, source: "live" });
+      return await finalizeNextEpisode(track);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return reply.status(503).send({ error: message });
@@ -547,7 +580,21 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   // 没有才 fallback 到 live generation (LLM+TTS, 慢)。
   app.get("/api/episode/prefetch", async (request, reply) => {
     try {
-      // 优先 claim prepared episode（秒切核心：prewarm 已生成完整 episode，无需等待）
+      // 1) 优先槽：用户"插到下一首"的曲目。预取不消费槽（不清掉），
+      //    等前端接续播放时 /api/episode/playing 上报后再清——
+      //    这样即便预取结果被前端丢弃，优先曲目也不会丢。
+      const priorityTrack = state.getPriorityNextTrack();
+      if (priorityTrack) {
+        try {
+          const resolved = await music.resolve(priorityTrack);
+          return await finalizePrefetchEpisode(resolved);
+        } catch {
+          // resolve 失败：清槽，避免后续预取反复重试同一首不可播的歌。
+          state.consumePriorityNextTrack();
+        }
+      }
+
+      // 2) 优先 claim prepared episode（秒切核心：prewarm 已生成完整 episode，无需等待）
       const today = formatRadioDate(nowProvider());
       const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
       const currentBlock = getCurrentPlanBlock(currentPlan, nowProvider());
@@ -565,42 +612,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         }
       }
 
-      // 没有 prepared episode：fallback 到 live generation（慢，但保证有内容）
+      // 3) 没有 prepared episode：fallback 到 live generation（慢，但保证有内容）
       await refreshRecentPlaybackMemory();
-      const { track, decision } = await resolveNextTrackAndDecision(episodeRunnerDeps);
+      const { track } = await resolveNextTrackAndDecision(episodeRunnerDeps);
       if (!track) {
         throw new Error("No track available");
       }
-      // Register track for audio proxying but don't update playback state
-      trackRegistry.register(track);
-      // 预取的曲目会被前端接续播放，必须登记进"最近已选"，
-      // 否则下一次预取会再次选中同一首，导致每首歌播两遍
-      state.rememberSelectedTrack(track);
-
-      const recentMemoryEntries = await memory.recent(5);
-      const [playedHistory, likedSongTracks] = await Promise.all([
-        stateRepo.getRecentlyPlayed(50),
-        likedSongs.list().catch(() => [])
-      ]);
-      const personalHistory = buildPersonalHistorySnippet(track, playedHistory, likedSongTracks);
-      const { episode, narration, storyTtsResult, storyType } = await composeEpisodeFromTrack(
-        track,
-        composeEpisodeDeps,
-        {
-          recentMemory: recentMemoryEntries.map((entry) => entry.content),
-          taste: userPreferences.taste,
-          routines: userPreferences.routines,
-          moodRules: userPreferences.moodRules,
-          profile: userPreferences.profile,
-          personalHistory
-        }
-      );
-
-      // 预取的 episode 大概率会被前端接续播放，口播记录（含音频路径）
-      // 要进 dj_messages，否则当日导出无法为这些歌混入口播
-      await stateRepo.appendDjMessage({ text: narration, trackId: track.id, storyType, audioUrl: storyTtsResult.audioUrl });
-
-      return EpisodeNextResponseSchema.parse({ episode, source: "live" });
+      return await finalizePrefetchEpisode(track);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return reply.status(503).send({ error: message });
@@ -619,6 +637,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     state.setTrack(track);
     state.rememberSelectedTrack(track);
     state.removeFromQueue(track.id);
+    // 优先槽里的曲目此刻开始播了——只在 id 匹配时清，避免误清用户后来又插入的新歌。
+    state.consumePriorityNextTrack(track.id);
     if (state.queueSize() <= 1) await appendRecommendedTracks(10);
     stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
     await stateRepo.recordPlayedTrack({
@@ -634,14 +654,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     return reply.send({ ok: true });
   });
 
-  // DJ 推荐确认插入：把用户选中的曲目插到队首（下一首播放）。
+  // DJ 推荐确认插入：把用户选中的曲目写入优先槽（最高播放优先级，下一首即播）。
+  // 不再 push 进 queue——queue 是推荐缓冲池，会被 prewarm/推荐抢先消费，插进去的歌轮不到播。
   app.post("/api/queue/insert-next", async (request, reply) => {
     const { track } = InsertNextRequestSchema.parse(request.body);
     state.insertNext(track);
-    const queue = state.getQueue();
-    stream.broadcast({ type: "queue-updated", payload: { queue } });
-    scheduleQueueSnapshot(queue);
-    return reply.send({ ok: true, queue });
+    stream.broadcast({ type: "now-playing", payload: state.buildNowResponse() });
+    return reply.send({ ok: true });
   });
 
   app.get("/api/plan/today", async () => TodayPlanResponseSchema.parse(buildTodayPlan(nowProvider(), userPreferences.playlists)));

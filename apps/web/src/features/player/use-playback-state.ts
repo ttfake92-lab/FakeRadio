@@ -32,6 +32,9 @@ export type PlaybackState = {
   skipToNext(): Promise<void>;
   setError(error: string | null): void;
   clearEpisodeState(): void;
+  // 用户在 DJ 聊天点"插到下一首"后调用：丢掉已预取的（可能是旧推荐）下一首，
+  // 重新预取——服务端会优先返回刚插入的曲目，这样 UP NEXT 立刻显示并播对。
+  refreshPrefetch(): Promise<void>;
 };
 
 export function usePlaybackState(audio: AudioEngine): PlaybackState {
@@ -311,6 +314,24 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     await playEpisode();
   }, [clearEpisodeState, playEpisode]);
 
+  const refreshPrefetch = useCallback(async () => {
+    // 先等正在进行的预取结束，否则它的旧结果会在我们清空后覆盖回来。
+    if (isPrefetchingRef.current) {
+      await new Promise<void>((resolve) => {
+        const poll = setInterval(() => {
+          if (!isPrefetchingRef.current) {
+            clearInterval(poll);
+            resolve();
+          }
+        }, 50);
+      });
+    }
+    nextEpisodeRef.current = null;
+    setNextEpisode(null);
+    setNextEpisodeError(null);
+    await prefetchNextEpisode();
+  }, [prefetchNextEpisode]);
+
   return {
     episodeState,
     episodeData,
@@ -326,6 +347,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     playEpisode,
     skipToNext,
     setError,
-    clearEpisodeState
+    clearEpisodeState,
+    refreshPrefetch
   };
 }

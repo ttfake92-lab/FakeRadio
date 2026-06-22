@@ -14,6 +14,11 @@ export type PlaybackState = {
   selectCandidate(tracks: Track[]): Track | undefined;
   removeFromQueue(trackId: string): void;
   insertNext(track: Track): void;
+  // 用户在 DJ 聊天里点确认"插到下一首"的曲目。它和 queue（推荐缓冲池）分开存放，
+  // 拥有最高播放优先级——episode 端点会先消费它，再走 prewarm / 推荐引擎。
+  getPriorityNextTrack(): Track | null;
+  // 清掉优先槽。传 matchId 时只在槽内曲目 id 匹配时才清，避免误清（如 /playing 上报的是别的歌）。
+  consumePriorityNextTrack(matchId?: string): void;
   queueSize(): number;
   buildNowResponse(): NowResponse;
 };
@@ -26,6 +31,8 @@ export function createPlaybackState(initialQueue: Track[] = [], initialRecentlyS
   let recentlySelectedTrackIds: string[] = [...new Set(initialRecentlySelectedTrackIds)].slice(0, RECENTLY_SELECTED_TRACK_LIMIT);
   let queue: Track[] = initialQueue;
   let lastPlanBlockAt: string | null = null;
+  // 用户点"插到下一首"的曲目；与 queue 分离，避免被推荐缓冲池稀释或被推荐引擎排除后永远播不到。
+  let priorityNextTrack: Track | null = null;
 
   return {
     getCurrentTrack() {
@@ -73,8 +80,17 @@ export function createPlaybackState(initialQueue: Track[] = [], initialRecentlyS
       queue = queue.filter((t) => t.id !== trackId);
     },
     insertNext(track) {
-      // 插到队首 = 当前正在播的下一首；去重避免同一首重复。
-      queue = [track, ...queue.filter((t) => t.id !== track.id)];
+      // 用户点"插到下一首"：写入优先槽（最高播放优先级），并从推荐缓冲池里去掉同一首避免重复。
+      // 不再 unshift 进 queue——queue 是推荐缓冲池，几乎总被 prewarm/推荐抢先消费，插进去的歌根本轮不到播。
+      priorityNextTrack = track;
+      queue = queue.filter((t) => t.id !== track.id);
+    },
+    getPriorityNextTrack() {
+      return priorityNextTrack;
+    },
+    consumePriorityNextTrack(matchId) {
+      if (matchId !== undefined && (priorityNextTrack?.id !== matchId)) return;
+      priorityNextTrack = null;
     },
     queueSize() {
       return queue.length;
