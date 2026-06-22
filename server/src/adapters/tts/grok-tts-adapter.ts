@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ProxyAgent } from "undici";
 import type { TtsAdapter } from "../types.js";
 import { createTtsCacheManager } from "./tts-cache-manager.js";
 
@@ -11,6 +12,8 @@ export type CreateGrokTtsAdapterOptions = {
   speed?: number;
   style?: string;
   timeoutMs?: number;
+  /** 显式覆盖 HTTPS 代理;不传则按 FAKERADIO_GROK_HTTPS_PROXY → HTTPS_PROXY → HTTP_PROXY → ALL_PROXY 顺序探测 */
+  httpsProxy?: string;
 };
 
 const GROK_STYLE_TAGS: Record<string, string> = {
@@ -44,6 +47,21 @@ function hashGrokPayload(text: string, voice: string, language: string, speed: n
     .slice(0, 16);
 }
 
+function resolveProxyUrl(override: string | undefined): string | undefined {
+  // 显式 override 优先,否则用系统级代理变量。api.x.ai 在某些网络环境(如境内)
+  // 直连会超时——其 IP 解析到 Meta CDN,可能被墙。Node 的 fetch (undici)
+  // 不会像 curl 那样自动读 HTTPS_PROXY,必须显式传 dispatcher。
+  const env = process.env;
+  const candidate =
+    override ??
+    env.FAKERADIO_GROK_HTTPS_PROXY ??
+    env.HTTPS_PROXY ?? env.https_proxy ??
+    env.HTTP_PROXY ?? env.http_proxy ??
+    env.ALL_PROXY ?? env.all_proxy;
+  const trimmed = candidate?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
 export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsAdapter {
   const cacheManager = createTtsCacheManager(options.cacheDir);
   const baseUrl = (options.baseUrl ?? "https://api.x.ai/v1").replace(/\/$/, "");
@@ -52,6 +70,11 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
   const speed = clampSpeed(options.speed ?? 1);
   const style = getSpeechStyleTag(options.style ?? "");
   const timeoutMs = options.timeoutMs ?? 60_000;
+  const proxyUrl = resolveProxyUrl(options.httpsProxy);
+  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+  if (proxyUrl) {
+    console.log(`[grok-tts] routing through proxy: ${proxyUrl}`);
+  }
 
   return {
     async synthesize(text) {
@@ -78,8 +101,10 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
               codec: "mp3"
             }
           }),
-          signal: AbortSignal.timeout(timeoutMs)
-        });
+          signal: AbortSignal.timeout(timeoutMs),
+          // 仅在配置了代理时传 dispatcher,不影响海外/无代理环境
+          ...(dispatcher ? { dispatcher } : {})
+        } as RequestInit & { dispatcher?: ProxyAgent });
       } catch (err) {
         if (err instanceof Error && err.name === "TimeoutError") {
           throw new Error(`Grok TTS 生成超时（${Math.round(timeoutMs / 1000)}s），请重试`);
