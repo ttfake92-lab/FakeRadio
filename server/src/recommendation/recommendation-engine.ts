@@ -158,6 +158,17 @@ export async function selectRecommendedCandidates(input: {
     }
   }
 
+  // 搜索/simi 全空时，兜底用收藏曲库（过滤掉已排除的），保证尽量有候选可挑。
+  // 与 selectRecommendedTrack 的 fallbackLiked 一致——聊天推荐不能"搜不到就什么都不给"。
+  if (collected.length === 0) {
+    for (const track of collectFreshTracks(context.seedTracks, excluded, limit)) {
+      if (seen.has(track.id)) continue;
+      seen.add(track.id);
+      collected.push({ track, source: "favorites" as const });
+      if (collected.length >= limit) break;
+    }
+  }
+
   return collected;
 }
 
@@ -243,7 +254,7 @@ function inferEnergy(block: RecommendationBlock, weather: WeatherSnapshot, moodR
   return "medium";
 }
 
-function extractTasteKeywords(text: string): string[] {
+export function extractTasteKeywords(text: string): string[] {
   // 显式匹配的常见子风格/经典艺术家簇,作为高质量种子。
   // 艺术家名单独抽出来另走 likedArtists,这里只保留风格/子流派词。
   const candidates: Array<[RegExp, string]> = [

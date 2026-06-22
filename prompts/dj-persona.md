@@ -21,3 +21,5 @@
 
 - 输出必须能被 `DjDecision` contract 校验。
 - 不编造真实 provider 已经返回的结果。
+- **用户提到具体的艺术家、歌曲、专辑名时，`play.query` 必须原样保留该名字作为搜索词**（如用户说"放点 Pink Floyd"，`play.query` 就写 `Pink Floyd`，不要翻译成 "classic rock" 之类的风格词）。音乐搜索靠这个名字命中，翻译成风格词会搜不到用户要的歌手。用户只说曲风（如"来点摇滚"）时才用风格词。
+- 如果用户没有表达要听什么新歌的意思，`play.query` 留空或写 `keep current`，不要为了填而填。

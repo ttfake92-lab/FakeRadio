@@ -37,6 +37,53 @@ export function splitIntoSentences(text: string): string[] {
   return sentences;
 }
 
+function uniqueQueries(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const trimmed = (v ?? "").trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+// 从用户消息里抽出明确的实体名(艺术家/歌曲/专辑),作为最强搜索种子。
+// 规则:
+// 1) 引号/书名号里的内容 — 用户明确点名("放 Pink Floyd 的《Wish You Were Here》")
+// 2) 多词英文专有名词(连续 2+ 个首字母大写词,或单大写词带空格)— "Pink Floyd"/"Led Zeppelin"
+// 3) extractTasteKeywords 命中的风格簇里夹带的艺术家名(如 "Pink Floyd"/"Sigur Rós")
+// 单个常见英文单词(jazz/rock/focus)不算实体,留给 playQuery 处理。
+export function extractMentionedEntities(
+  message: string,
+  extractTasteKeywords: (text: string) => string[]
+): string[] {
+  const entities: string[] = [];
+
+  // 1) 引号 / 书名号 / 方括号里的内容
+  const quoted = message.match(/[《【「『"'\[].+?[》】」』"'\]]/g) ?? [];
+  for (const q of quoted) {
+    const inner = q.slice(1, -1).trim();
+    if (inner) entities.push(inner);
+  }
+
+  // 2) 连续 2+ 个首字母大写词(如 "Pink Floyd", "Led Zeppelin", "Sigur Rós")。
+  // 用 \p{L} 覆盖非 ASCII 字母(ó/é/ü 等),避免漏掉 Sigur Rós 这类带变音符的艺术家名。
+  const multiWord = message.match(/\b[A-Z\p{Lu}][\p{L}]+(?:\s+[A-Z\p{Lu}][\p{L}]+)+\b/gu) ?? [];
+  entities.push(...multiWord);
+
+  // 3) extractTasteKeywords 命中的字符串本身也可能含艺术家名(它返回的 keyword 不一定是风格词,
+  //    例如用户写 "Sigur Rós" 时它返回 "Sigur Rós")。把命中关键词里带空格或非 ASCII 的当实体。
+  for (const kw of extractTasteKeywords(message)) {
+    if (/\s/.test(kw) || /[^\x00-\x7F]/.test(kw)) {
+      entities.push(kw);
+    }
+  }
+
+  return uniqueQueries(entities);
+}
+
 export type ChatSSEHandlerDeps = Pick<
   RegisterRoutesDeps,
   | "llm"
@@ -222,7 +269,7 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
         // 但 seeds/excludeTrackIds 仍来自用户的真实 liked songs + 最近播放,避免再次跑偏。
         // 不再裸调 music.search(playQuery)——那条路径完全无视用户喜好,
         // 导致"换 jazz"返回的是网易云搜索热度榜,跟用户实际品味无关。
-        const { buildRecommendationContext, selectRecommendedCandidates } = await import("../recommendation/recommendation-engine.js");
+        const { buildRecommendationContext, selectRecommendedCandidates, extractTasteKeywords } = await import("../recommendation/recommendation-engine.js");
         const { buildTodayPlan, getCurrentPlanBlock } = await import("../scheduler/radio-scheduler.js");
         const queue = deps.state.getQueue();
         const excluded = new Set([
@@ -247,9 +294,14 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
           recentTrackIds: excluded,
           queuedTrackIds: new Set(queue.map((t) => t.id))
         });
-        // playQuery 是 LLM 从用户语义里提炼的当下意图(如"jazz"、"安静的钢琴"),
-        // 必须排在 taste 之前——用户明确要的曲风优先于通用偏好。
-        const tasteAwareQueries = [playQuery, ...context.queries];
+
+        // 用户消息里明确提到的实体名(艺术家/歌曲/专辑)，是比 LLM playQuery 更强的信号。
+        // playQuery 是 LLM 的"二手翻译"(用户说 Pink Floyd, LLM 可能写成 classic rock),
+        // 而网易云搜索靠原名命中。这里从用户原话里抽实体名,和 playQuery 并列进 queries 最前,
+        // 双保险:既给 LLM 翻译的意图,也给用户原话。
+        const mentionedEntities = extractMentionedEntities(msg, extractTasteKeywords);
+        const tasteAwareQueries = uniqueQueries([...mentionedEntities, playQuery, ...context.queries]);
+
         const candidates = await selectRecommendedCandidates({
           music: deps.music,
           context: { ...context, queries: tasteAwareQueries },
@@ -257,7 +309,18 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
         });
 
         if (candidates.length === 0) {
-          throw new Error("No suggested tracks available");
+          console.warn(`[chat] No candidates for message="${msg}" playQuery="${playQuery}" queries=${JSON.stringify(tasteAwareQueries)}`);
+          // 不要静默吞掉——告诉用户没找到,引导换个说法,而不是装没事让用户以为 DJ 不想理。
+          const fallbackText = `${decision.say}没找到特别合适的,要不换个说法?比如直接报歌名或歌手名,我帮你插到下一首。`;
+          emitter.emit("chunk", "没找到特别合适的,要不换个说法?比如直接报歌名或歌手名,我帮你插到下一首。");
+          await deps.sessionRepo.appendMessage({
+            timestamp: new Date().toISOString(),
+            role: "agent",
+            text: fallbackText,
+            ...(currentTrack ? { trackId: currentTrack.id } : {})
+          });
+          emitter.emit("done", { text: fallbackText });
+          return;
         }
         const suggestions = candidates.map((c) => c.track);
         const suggestText = `我挑了几首你可能会喜欢的：${suggestions.map((t) => `《${t.title}》`).join("、")}。点一首我就插到下一首。`;
@@ -279,8 +342,9 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
           action
         });
         return;
-      } catch {
-        // 候选解析失败，退回纯文本回复。
+      } catch (err) {
+        console.warn(`[chat] track-suggestion failed for message="${msg}":`, err instanceof Error ? err.message : String(err));
+        // 候选解析异常,退回纯文本回复(下方统一保存+done)。
       }
     }
 
