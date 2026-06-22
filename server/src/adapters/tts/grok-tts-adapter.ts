@@ -72,9 +72,7 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
   const timeoutMs = options.timeoutMs ?? 60_000;
   const proxyUrl = resolveProxyUrl(options.httpsProxy);
   const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
-  if (proxyUrl) {
-    console.log(`[grok-tts] routing through proxy: ${proxyUrl}`);
-  }
+  console.log(`[grok-tts] init: voice=${voice} language=${language} proxy=${proxyUrl ?? "(direct)"} style=${style || "(none)"}`);
 
   return {
     async synthesize(text) {
