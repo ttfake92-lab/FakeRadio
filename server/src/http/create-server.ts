@@ -19,7 +19,7 @@ import { createStreamBroadcaster } from "../realtime/stream-bus.js";
 import { formatRadioDate } from "../utils/time.js";
 import { buildTodayPlan, getCurrentPlanBlock } from "../scheduler/radio-scheduler.js";
 import { createSchedulerLoop, createPrewarmScheduler, type PrewarmScheduler } from "../scheduler/scheduler-loop.js";
-import { runPrewarmForDate, shouldRunPrewarm, markPrewarmRunComplete, type PrewarmDeps } from "../scheduler/daily-episode-prewarmer.js";
+import { composeEpisodeFromTrack, type ComposeEpisodeDeps } from "../http/episode-runner.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
@@ -38,6 +38,7 @@ import { createDailyShowPlanGenerator } from "../show/daily-show-plan-generator.
 import { createDailySelectionEngine } from "../show/daily-selection-engine.js";
 import { createStateRecentPlayedRepository } from "../show/state-recent-played-repository.js";
 import { scheduleTonightBriefIfNeeded, type SchedulerExecutionDeps } from "../show/scheduler-integration.js";
+import { buildRecommendationContext, selectRecommendedCandidates } from "../recommendation/recommendation-engine.js";
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
 import { createRuntimeAdapterManager } from "./runtime-adapter-manager.js";
@@ -73,7 +74,8 @@ type CreateRadioServerOptions = {
 export async function createRadioServer(options: CreateRadioServerOptions = {}) {
   const app = Fastify({ logger: false });
   await app.register(cors, {
-    origin: true
+    origin: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
   });
   await app.register(websocket);
 
@@ -101,9 +103,15 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
     ttsRate: 0
   });
   const savedSettings = await stateRepo.getPref<unknown>("show:settings");
-  const savedSettingsObject = savedSettings && typeof savedSettings === "object"
+  const savedSettingsObject: Record<string, unknown> = savedSettings && typeof savedSettings === "object"
     ? { ...(savedSettings as Record<string, unknown>), providerMode: "netease" }
     : {};
+  if (savedSettingsObject.ttsProvider === "edge") {
+    savedSettingsObject.ttsProvider = "grok";
+    if (savedSettingsObject.ttsVoice === "zh-CN-XiaoxiaoNeural") {
+      savedSettingsObject.ttsVoice = "eve";
+    }
+  }
   const initialSettings = SettingsSchema.parse({
     ...defaultSettings,
     ...savedSettingsObject
@@ -151,15 +159,35 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const userPreferences = options.userPreferences ?? (await loadUserPreferences());
 
   // State
-  const { lastPlayedTracks, todayDjMessages, lastQueueSnapshot, latestPrefs } = await stateRepo.getStartupState();
+  const { lastPlayedTracks, todayDjMessages, latestPrefs } = await stateRepo.getStartupState();
   const currentPlan = buildTodayPlan(nowProvider(), userPreferences.playlists);
   const currentPlanBlock = getCurrentPlanBlock(currentPlan, nowProvider());
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
-  const initialQueue = await music.recommend({ mood: currentMoodHint, limit: 10 }).catch(() => []);
-  const restoredQueue = (lastQueueSnapshot?.trackIds && lastQueueSnapshot.trackIds.length > 0)
-    ? lastQueueSnapshot.trackIds
-    : initialQueue;
-  const queueToRestore = restoredQueue.filter((track) => (track as { source?: string }).source !== "mock");
+  const initialQueue = await (async () => {
+    const [weatherSnapshot, calendarItems, likedSongTracks] = await Promise.all([
+      weather.current().catch(() => ({ summary: "unknown", moodHint: currentMoodHint })),
+      calendar.upcoming().catch(() => []),
+      likedSongs.list().catch(() => [])
+    ]);
+    const context = buildRecommendationContext({
+      now: nowProvider(),
+      block: currentPlanBlock ?? {
+        at: "runtime",
+        label: "当前时段",
+        moodHint: currentMoodHint
+      },
+      weather: weatherSnapshot,
+      calendar: calendarItems,
+      userPreferences,
+      likedSongs: likedSongTracks,
+      recentTrackIds: new Set(lastPlayedTracks.map((track) => track.trackId)),
+      queuedTrackIds: new Set()
+    });
+    const candidates = await selectRecommendedCandidates({ music, context, limit: 10 }).catch(() => []);
+    return candidates.map((candidate) => candidate.track);
+  })();
+  // 启动队列：每次启动都用新推荐引擎重新推荐 10 首，不再续播上次快照。
+  const queueToRestore = initialQueue.filter((track) => (track as { source?: string }).source !== "mock");
   const state = createPlaybackState(queueToRestore, lastPlayedTracks.map((track) => track.trackId));
 
   // Routes
@@ -201,25 +229,6 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   schedulerLoop.start();
   app.addHook("onClose", () => schedulerLoop.stop());
 
-  // Prewarm scheduler
-  const prewarmDeps: PrewarmDeps = {
-    llm,
-    music,
-    tts,
-    ttsCacheDir,
-    weather,
-    calendar,
-    devices,
-    storySource,
-    publicMetadataAdapter: options.publicMetadataAdapter,
-    webResearchAdapter: runtimeManager.getWebResearchAdapter(),
-    likedSongs,
-    stateRepo,
-    nowProvider,
-    audioDir,
-    userPreferences
-  };
-
   // 统一的默认适配器策略
   const defaultPublicMetadataAdapter = options.publicMetadataAdapter;
   const defaultWebResearchAdapter = runtimeManager.getWebResearchAdapter();
@@ -251,9 +260,6 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       }
 
       const todayDate = formatRadioDate(nowProvider());
-      const tomorrow = new Date(nowProvider());
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowDate = formatRadioDate(tomorrow);
 
       const recentPlayedRepo = createStateRecentPlayedRepository(stateRepo);
       const dailySelectionEngine = createDailySelectionEngine(recentPlayedRepo, { exclusionWindowDays: 7 });
@@ -290,44 +296,61 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       } catch (err) {
         console.error(`[prewarm] Theme show scheduler failed for ${todayDate}:`, err);
       }
-
-      const tomorrowPlan = buildTodayPlan(tomorrow, userPreferences.playlists);
-      void prewarmForDate(tomorrowDate, tomorrow, "Daily");
     }
   });
   prewarmScheduler.start();
   app.addHook("onClose", () => prewarmScheduler.stop());
 
-  // 预热某个日期：shouldRun → run → mark。startup prewarm 和定时 tick 共用。
-  const prewarmForDate = async (targetDate: string, target: Date, label: string) => {
-    const canRun = await shouldRunPrewarm(prewarmDeps, targetDate);
-    if (!canRun) {
-      console.log(`[prewarm] ${label} (${targetDate}) already prewarmed, skipping.`);
-      return;
-    }
-    console.log(`[prewarm] ${label}: prewarming ${targetDate}...`);
-    try {
-      const plan = buildTodayPlan(target, userPreferences.playlists);
-      const results = await runPrewarmForDate(
-        prewarmDeps,
-        targetDate,
-        plan.blocks,
-        env.FAKERADIO_PREWARM_EPISODES_PER_BLOCK,
-        systemPrompt
-      );
-      const totalPrepared = results.reduce((s, r) => s + r.prepared, 0);
-      const totalFailed = results.reduce((s, r) => s + r.failed, 0);
-      console.log(`[prewarm] ${label} completed for ${targetDate}: ${totalPrepared} prepared, ${totalFailed} failed.`);
-      await markPrewarmRunComplete(prewarmDeps, targetDate);
-    } catch (err) {
-      console.error(`[prewarm] ${label} failed for ${targetDate}:`, err);
-    }
-  };
+  // 启动预热第一首：后台为队列第一首生成完整 episode，存入 prepared_episodes，
+  // 供首次 /api/episode/next 的 claimPreparedEpisode 秒切，避免首次播放等 LLM+TTS。
+  // 进度通过 agent-message 广播进对话框，让用户知道"正在准备"。
+  if (!options.skipStartupPrewarm && initialQueue.length > 0 && currentPlanBlock) {
+    void prewarmFirstEpisode();
+  }
 
-  // 启动时预热今天：若今天还没预热过，异步跑一次（不阻塞启动）
-  // 解决"白天启动服务器今天永远 0 ready"的问题
-  if (env.FAKERADIO_PREWARM_ENABLED && !options.skipStartupPrewarm) {
-    void prewarmForDate(formatRadioDate(nowProvider()), nowProvider(), "Startup");
+  async function prewarmFirstEpisode() {
+    const track = initialQueue[0];
+    if (!track || !currentPlanBlock) return;
+    const radioDate = formatRadioDate(nowProvider());
+    const blockAt = currentPlanBlock.at;
+    const composeEpisodeDeps: ComposeEpisodeDeps = {
+      llm, tts, ttsCacheDir, storySource,
+      publicMetadataAdapter: defaultPublicMetadataAdapter,
+      webResearchAdapter: defaultWebResearchAdapter,
+      weather, calendar, devices, systemPrompt
+    };
+    const broadcastProgress = (text: string) => {
+      stream.broadcast({
+        type: "agent-message",
+        payload: { role: "agent", text, trackId: track.id }
+      });
+    };
+    broadcastProgress(`正在为第一首歌《${track.title}》准备口播…`);
+    try {
+      // 必须先 resolve 拿到 audioUrl：推荐引擎返回的是元数据，无播放链接。
+      // 不 resolve 的话预存的 episode.track 没 audioUrl，播放时 /api/audio 的
+      // proxyAndRecord 取不到链接 → 404 → "音乐加载失败"（live 路径正常正是因为
+      // resolveNextTrackAndDecision 内部已 resolve）。
+      const resolvedTrack = await music.resolve(track);
+      const recentMemoryEntries = await memory.recent(5);
+      const { episode } = await composeEpisodeFromTrack(resolvedTrack, composeEpisodeDeps, {
+        recentMemory: recentMemoryEntries.map((entry) => entry.content),
+        taste: userPreferences.taste,
+        routines: userPreferences.routines,
+        moodRules: userPreferences.moodRules
+      });
+      await stateRepo.savePreparedEpisode({
+        radioDate,
+        blockAt,
+        status: "ready",
+        episodeJson: JSON.stringify(episode),
+        audioDownloaded: false
+      });
+      broadcastProgress(`第一首《${track.title}》准备好了，点播放即可开始。`);
+    } catch (err) {
+      console.error(`[prewarm] First episode preparation failed:`, err);
+      broadcastProgress(`第一首口播准备失败，点播放后会现生成，稍等片刻。`);
+    }
   }
 
   return app;

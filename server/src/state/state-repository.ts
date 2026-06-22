@@ -221,7 +221,7 @@ export function createStateRepository(dbPath: string): StateRepository {
     },
 
     getStartupState() {
-      const lastPlayedTracks = db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT 50`).all() as unknown[];
+      const lastPlayedTracks = db.prepare(`SELECT * FROM played_tracks ORDER BY played_at DESC LIMIT 200`).all() as unknown[];
       const today = formatRadioDate(new Date());
       const todayDjMessages = db.prepare(`SELECT * FROM dj_messages WHERE radio_date = ? ORDER BY created_at ASC`).all(today) as unknown[];
       const lastQueueSnapshotRow = db.prepare(`SELECT * FROM queue_snapshots ORDER BY created_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;

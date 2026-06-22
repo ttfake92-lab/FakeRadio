@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Track } from "@fakeradio/shared";
 import { createFakeLlmAdapter, createFakeMusicAdapter, createFakeStorySourceAdapter, createFakeTtsAdapter } from "../test/fake-adapters.js";
 import { createRadioServer } from "./create-server.js";
 import { createStateRepository } from "../state/state-repository.js";
@@ -21,6 +22,21 @@ function createEmptyLikedSongsBaseDir() {
   const dir = mkdtempSync(join(tmpdir(), "fakeradio-server-test-"));
   mkdirSync(join(dir, "user"), { recursive: true });
   writeFileSync(join(dir, "user/netease-liked-songs.raw.json"), "[]", "utf-8");
+  isolatedBaseDirs.push(dir);
+  return dir;
+}
+
+function createLikedSongsBaseDir() {
+  const dir = mkdtempSync(join(tmpdir(), "fakeradio-server-test-"));
+  mkdirSync(join(dir, "user"), { recursive: true });
+  writeFileSync(join(dir, "user/netease-liked-songs.raw.json"), JSON.stringify([
+    {
+      id: 101,
+      name: "Somebody To Love",
+      ar: [{ name: "Queen" }],
+      al: { name: "A Day At The Races" }
+    }
+  ]), "utf-8");
   isolatedBaseDirs.push(dir);
   return dir;
 }
@@ -114,6 +130,41 @@ describe("createRadioServer", () => {
     expect(body.blocks.find((block: { at: string }) => block.at === "09:00")).toMatchObject({ ready: 0, consumed: 0, failed: 1 });
   });
 
+  it("uses liked songs as taste seeds when building the startup queue", async () => {
+    const baseDir = createLikedSongsBaseDir();
+    const curatedTrack: Track = {
+      id: "sim-bowie",
+      title: "Life On Mars?",
+      artist: "David Bowie",
+      durationMs: 190000,
+      source: "netease"
+    };
+    const recommend = vi.fn().mockImplementation(async (input) => input.seeds?.length ? [curatedTrack] : []);
+
+    app = await createTestRadioServer({
+      musicAdapterResult: {
+        music: {
+          ...createFakeMusicAdapter(),
+          search: vi.fn().mockResolvedValue([]),
+          recommend
+        },
+        status: "ready"
+      },
+      ttsAdapter: createFakeTtsAdapter(),
+      baseDir,
+      now: () => new Date(2026, 5, 21, 21, 30, 0)
+    });
+
+    const now = await app.inject({ method: "GET", url: "/api/now" });
+
+    expect(now.statusCode).toBe(200);
+    expect(now.json().queue.map((track: Track) => track.id)).toContain("sim-bowie");
+    expect(recommend).toHaveBeenCalledWith(expect.objectContaining({
+      seeds: [expect.objectContaining({ id: "101", title: "Somebody To Love" })],
+      excludeTrackIds: expect.arrayContaining(["101"])
+    }));
+  });
+
   it("avoids recently persisted played tracks after a server restart", async () => {
     const baseDir = createEmptyLikedSongsBaseDir();
     const repo = createStateRepository(join(baseDir, "fakeradio.db"));
@@ -134,6 +185,82 @@ describe("createRadioServer", () => {
       publicMetadataAdapter: createFakeStorySourceAdapter(),
       webResearchAdapter: createFakeStorySourceAdapter(),
       baseDir
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/episode/next" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().episode.track.id).toBe("fake-track-002");
+  });
+
+  it("prewarms the first episode on startup so the first play is served prepared", async () => {
+    app = await createRadioServer({
+      skipStartupPrewarm: false,
+      baseDir: createEmptyLikedSongsBaseDir(),
+      llmAdapter: createFakeLlmAdapter(),
+      musicAdapterResult: createFakeMusicAdapterResult(),
+      ttsAdapter: createFakeTtsAdapter(),
+      storySourceAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
+      webResearchAdapter: createFakeStorySourceAdapter(),
+      now: () => new Date(2026, 3, 30, 8, 0, 0)
+    });
+
+    // 启动预热是 void 异步；轮询直到 episode 就绪或超时。
+    let source = "";
+    let preparedEpisode: { episode: { track: { id: string; audioUrl?: string } } } | null = null;
+    for (let i = 0; i < 50; i += 1) {
+      const r = await app.inject({ method: "GET", url: "/api/episode/next" });
+      if (r.statusCode === 200) {
+        const body = r.json();
+        source = body.source;
+        if (source === "prepared") { preparedEpisode = body; break; }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(source).toBe("prepared");
+    // 预热的 track 必须已 resolve 出 audioUrl，否则播放时 /api/audio 取不到链接 → 404。
+    expect(preparedEpisode?.episode.track.audioUrl).toBeTruthy();
+  });
+
+  it("avoids tracks played earlier in the recent exclusion window even after many newer plays", async () => {
+    const baseDir = createEmptyLikedSongsBaseDir();
+    const repo = createStateRepository(join(baseDir, "fakeradio.db"));
+    await repo.recordPlayedTrack({
+      id: "played-track-old-within-window",
+      trackId: "fake-track-001",
+      title: "Fake Track 1",
+      artist: "Fake Artist",
+      album: "Local First Radio",
+      source: "local",
+      playedAt: new Date("2026-06-10T00:00:00.000Z").toISOString()
+    });
+    for (let i = 0; i < 50; i += 1) {
+      await repo.recordPlayedTrack({
+        id: `played-track-newer-${i}`,
+        trackId: `newer-track-${i}`,
+        title: `Newer Track ${i}`,
+        artist: "Fake Artist",
+        album: "Local First Radio",
+        source: "local",
+        playedAt: new Date(`2026-06-20T00:${String(i).padStart(2, "0")}:00.000Z`).toISOString()
+      });
+    }
+
+    app = await createTestRadioServer({
+      musicAdapterResult: {
+        music: {
+          ...createFakeMusicAdapterResult().music,
+          recommend: vi.fn().mockResolvedValue([])
+        },
+        status: "ready"
+      },
+      ttsAdapter: createFakeTtsAdapter(),
+      storySourceAdapter: createFakeStorySourceAdapter(),
+      publicMetadataAdapter: createFakeStorySourceAdapter(),
+      webResearchAdapter: createFakeStorySourceAdapter(),
+      baseDir,
+      nowProvider: () => new Date("2026-06-21T08:00:00.000Z")
     });
 
     const response = await app.inject({ method: "GET", url: "/api/episode/next" });
@@ -284,8 +411,15 @@ describe("createRadioServer", () => {
 
     const nowBeforeNext = await app.inject({ method: "GET", url: "/api/now" });
     expect(nowBeforeNext.statusCode).toBe(200);
-    expect(nowBeforeNext.json().queue).toEqual([queueTrack]);
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "warm morning indie", limit: 10 });
+    expect(nowBeforeNext.json().queue.map((track: Track) => track.id)).toEqual([
+      "netease-queue-001",
+      "netease-search-001"
+    ]);
+    expect(music.recommend).toHaveBeenCalledWith(expect.objectContaining({
+      mood: "warm morning indie",
+      seeds: [],
+      excludeTrackIds: []
+    }));
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
@@ -294,7 +428,7 @@ describe("createRadioServer", () => {
     expect(next.json().decision.reason).toContain("Search Result");
     expect(next.json().decision.reason).not.toContain("当前没有真实 provider 输入");
     expect(music.search).toHaveBeenCalledWith("warm morning indie");
-    expect(music.resolve).toHaveBeenCalledWith(candidateTrack);
+    expect(music.resolve).toHaveBeenCalledWith(queueTrack);
   });
 
   it("uses custom playlist seeds for music search when playlists are injected", async () => {
@@ -348,7 +482,11 @@ describe("createRadioServer", () => {
 
     const next = await app.inject({ method: "GET", url: "/api/next" });
     expect(next.statusCode).toBe(200);
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "custom morning seed", limit: 10 });
+    expect(music.recommend).toHaveBeenCalledWith(expect.objectContaining({
+      mood: "custom morning seed",
+      seeds: [],
+      excludeTrackIds: expect.any(Array)
+    }));
   });
 
   it("selects a different search candidate after the current track has played", async () => {
@@ -456,7 +594,7 @@ describe("createRadioServer", () => {
     };
     const music = {
       recommend: vi.fn().mockResolvedValue([firstTrack]),
-      search: vi.fn().mockResolvedValueOnce([firstTrack]).mockResolvedValueOnce([secondTrack]),
+      search: vi.fn().mockResolvedValue([firstTrack, secondTrack]),
       resolve: vi.fn().mockImplementation(async (track) => ({
         ...track,
         audioUrl: `https://example.com/audio/${track.id}.mp3`
@@ -475,7 +613,11 @@ describe("createRadioServer", () => {
     await app.inject({ method: "GET", url: "/api/next" });
     const secondNext = await app.inject({ method: "GET", url: "/api/next" });
 
-    expect(music.recommend).toHaveBeenCalledWith({ mood: "ambient pop night", limit: 10 });
+    expect(music.recommend).toHaveBeenCalledWith(expect.objectContaining({
+      mood: "ambient pop night",
+      seeds: [],
+      excludeTrackIds: expect.any(Array)
+    }));
     expect(secondNext.statusCode).toBe(200);
     expect(secondNext.json().decision.reason).toContain("Night Window");
     expect(secondNext.json().decision.say).toContain("Afterglow Desk");

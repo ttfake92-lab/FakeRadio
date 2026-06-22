@@ -282,9 +282,31 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
     setEpisodeSource(null);
   }, []);
 
-  // 手动 NEXT：优先用预取秒切，没有才清状态重新生成。
+  // 手动 NEXT：优先用预取秒切；预取进行中则等待它完成（而非打断重新生成）；
+  // 既无预取也未在预取，才清状态现生成。
   const skipToNext = useCallback(async () => {
     if (playNextEpisode()) return;
+    if (isPrefetchingRef.current) {
+      // 预取进行中：给可见反馈，轮询等待结果秒切，避免放弃预取重新生成。
+      setIsLoadingEpisode(true);
+      const ready = await new Promise<boolean>((resolve) => {
+        const deadline = Date.now() + 8000;
+        const poll = setInterval(() => {
+          if (nextEpisodeRef.current) {
+            clearInterval(poll);
+            resolve(true);
+          } else if (!isPrefetchingRef.current || Date.now() > deadline) {
+            clearInterval(poll);
+            resolve(false);
+          }
+        }, 100);
+      });
+      if (ready && playNextEpisode()) {
+        setIsLoadingEpisode(false);
+        return;
+      }
+      setIsLoadingEpisode(false);
+    }
     clearEpisodeState();
     await playEpisode();
   }, [clearEpisodeState, playEpisode]);
