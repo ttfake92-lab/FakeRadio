@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ProxyAgent } from "undici";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import type { TtsAdapter } from "../types.js";
 import { createTtsCacheManager } from "./tts-cache-manager.js";
 
@@ -82,9 +82,13 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
         return { text, audioUrl: `/cache/tts/${cacheKey}.mp3`, cacheKey };
       }
 
-      let response: Response;
+      let response: Awaited<ReturnType<typeof undiciFetch>> | Response;
       try {
-        response = await fetch(`${baseUrl}/tts`, {
+        // 有代理时必须用 undici 的 fetch + ProxyAgent dispatcher。Node 内置 globalThis.fetch
+        // 来自旧版 undici,跟外部 undici@7 ProxyAgent 接口不兼容(会抛 'invalid onRequestStart')。
+        // 没代理时仍用 globalThis.fetch,这样单测对 globalThis.fetch 的 stub 依然能拦到。
+        const fetchFn = dispatcher ? undiciFetch : fetch;
+        const init: Parameters<typeof undiciFetch>[1] = {
           method: "POST",
           headers: {
             Authorization: `Bearer ${options.apiKey}`,
@@ -100,9 +104,9 @@ export function createGrokTtsAdapter(options: CreateGrokTtsAdapterOptions): TtsA
             }
           }),
           signal: AbortSignal.timeout(timeoutMs),
-          // 仅在配置了代理时传 dispatcher,不影响海外/无代理环境
           ...(dispatcher ? { dispatcher } : {})
-        } as RequestInit & { dispatcher?: ProxyAgent });
+        };
+        response = await fetchFn(`${baseUrl}/tts`, init);
       } catch (err) {
         if (err instanceof Error && err.name === "TimeoutError") {
           throw new Error(`Grok TTS 生成超时（${Math.round(timeoutMs / 1000)}s），请重试`);

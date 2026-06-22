@@ -13,6 +13,11 @@ describe("createGrokTtsAdapter", () => {
 
   beforeEach(() => {
     cacheDir = makeTmpDir();
+    // 测试环境可能继承 shell 的 HTTPS_PROXY,导致 grok adapter 走 undiciFetch
+    // 绕过 globalThis.fetch stub。显式清掉,让测试走 stub 路径。
+    delete process.env.HTTPS_PROXY;
+    delete process.env.HTTP_PROXY;
+    delete process.env.ALL_PROXY;
   });
 
   afterEach(() => {
