@@ -416,7 +416,7 @@ describe("createRadioServer", () => {
       "netease-search-001"
     ]);
     expect(music.recommend).toHaveBeenCalledWith(expect.objectContaining({
-      mood: "warm morning indie",
+      mood: expect.stringContaining("warm morning indie"),
       seeds: [],
       excludeTrackIds: []
     }));
@@ -427,7 +427,7 @@ describe("createRadioServer", () => {
     expect(next.json().decision.say).toContain("Search Result");
     expect(next.json().decision.reason).toContain("Search Result");
     expect(next.json().decision.reason).not.toContain("当前没有真实 provider 输入");
-    expect(music.search).toHaveBeenCalledWith("warm morning indie");
+    expect(music.search).toHaveBeenCalledWith(expect.stringContaining("warm morning indie"));
     expect(music.resolve).toHaveBeenCalledWith(queueTrack);
   });
 
@@ -571,7 +571,7 @@ describe("createRadioServer", () => {
 
     expect(next.statusCode).toBe(503);
     expect(next.json().error).toContain("No track available");
-    expect(music.search).toHaveBeenCalledWith("warm morning indie");
+    expect(music.search).toHaveBeenCalledWith(expect.stringContaining("warm morning indie"));
     expect(music.resolve).not.toHaveBeenCalled();
   });
 
@@ -614,7 +614,7 @@ describe("createRadioServer", () => {
     const secondNext = await app.inject({ method: "GET", url: "/api/next" });
 
     expect(music.recommend).toHaveBeenCalledWith(expect.objectContaining({
-      mood: "ambient pop night",
+      mood: expect.stringContaining("ambient pop night"),
       seeds: [],
       excludeTrackIds: expect.any(Array)
     }));

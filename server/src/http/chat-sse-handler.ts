@@ -116,12 +116,13 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
     if (currentTrack) userEntry.trackId = currentTrack.id;
     await deps.sessionRepo.appendMessage(userEntry);
 
-    // Load recent memory for context
+    // Load recent memory for context: 双方都收，否则 LLM 看不到用户上一轮说了什么，
+    // 多轮对话就会断片（用户说"换 jazz"→ DJ 答"好"→ 用户说"可以"→ DJ 不知道"可以"是同意什么）。
     const todaySession = await deps.sessionRepo.getToday();
     const recentMemory = todaySession
-      .filter((e) => e.role === "agent")
-      .slice(-5)
-      .map((e) => e.text);
+      .filter((e) => e.role === "user" || e.role === "agent")
+      .slice(-10)
+      .map((e) => `[${e.role === "user" ? "USER" : "DJ"}] ${e.text}`);
 
     // Intent: next-track
     if (/^(下一首|next|切歌|换一首)/i.test(msg)) {
@@ -217,30 +218,48 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
 
     if (isMusicRequest) {
       try {
-        // DJ 推荐歌曲：解析候选名单返回对话框，由用户确认后才插到下一首（不点即抛弃）。
-        const searchResults = await deps.music.search(playQuery);
+        // DJ 推荐歌曲: 走推荐引擎,把用户当下要的曲风(playQuery)塞到 query 列表最前,
+        // 但 seeds/excludeTrackIds 仍来自用户的真实 liked songs + 最近播放,避免再次跑偏。
+        // 不再裸调 music.search(playQuery)——那条路径完全无视用户喜好,
+        // 导致"换 jazz"返回的是网易云搜索热度榜,跟用户实际品味无关。
+        const { buildRecommendationContext, selectRecommendedCandidates } = await import("../recommendation/recommendation-engine.js");
+        const { buildTodayPlan, getCurrentPlanBlock } = await import("../scheduler/radio-scheduler.js");
         const queue = deps.state.getQueue();
         const excluded = new Set([
           ...deps.state.getRecentlySelectedTrackIds(),
           ...(currentTrack ? [currentTrack.id] : []),
           ...queue.map((t) => t.id)
         ]);
-        const suggestions: Track[] = [];
-        for (const candidate of searchResults) {
-          if (suggestions.length >= 5) break;
-          if (excluded.has(candidate.id)) continue;
-          try {
-            const resolved = await deps.music.resolve(candidate);
-            if (excluded.has(resolved.id)) continue;
-            excluded.add(resolved.id);
-            suggestions.push(resolved);
-          } catch {
-            // 跳过无法解析的候选，继续尝试下一首。
-          }
-        }
-        if (suggestions.length === 0) {
+        const currentPlan = buildTodayPlan(now, deps.userPreferences.playlists);
+        const currentBlock = getCurrentPlanBlock(currentPlan, now) ?? {
+          at: "runtime",
+          label: "对话推荐",
+          moodHint: deps.currentMoodHint
+        };
+        const likedSongTracks = await deps.likedSongs.list().catch(() => []);
+        const context = buildRecommendationContext({
+          now,
+          block: currentBlock,
+          weather: weatherSnapshot,
+          calendar: calendarItems,
+          userPreferences: deps.userPreferences,
+          likedSongs: likedSongTracks,
+          recentTrackIds: excluded,
+          queuedTrackIds: new Set(queue.map((t) => t.id))
+        });
+        // playQuery 是 LLM 从用户语义里提炼的当下意图(如"jazz"、"安静的钢琴"),
+        // 必须排在 taste 之前——用户明确要的曲风优先于通用偏好。
+        const tasteAwareQueries = [playQuery, ...context.queries];
+        const candidates = await selectRecommendedCandidates({
+          music: deps.music,
+          context: { ...context, queries: tasteAwareQueries },
+          limit: 5
+        });
+
+        if (candidates.length === 0) {
           throw new Error("No suggested tracks available");
         }
+        const suggestions = candidates.map((c) => c.track);
         const suggestText = `我挑了几首你可能会喜欢的：${suggestions.map((t) => `《${t.title}》`).join("、")}。点一首我就插到下一首。`;
         emitter.emit("chunk", suggestText);
         const responseText = `${decision.say}${suggestText}`;
