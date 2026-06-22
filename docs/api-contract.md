@@ -4,7 +4,7 @@
 
 - `GET /api/health`：返回 server 和 adapter 状态。当前至少包含 `adapters.llm`、`adapters.music`、`adapters.tts`、`adapters.weather`、`adapters.calendar`、`adapters.upnp`。其中 `adapters.music` 当前会返回 `ready` 或 `mock`。
 - `GET /api/now`：返回当前播放、DJ 口播和队列。`track.source` 与 `queue[].source` 会直接告诉前端当前曲目来自 `netease` 还是 `mock`。
-- `GET /api/next`：计算下一首歌，返回 DJ 决策、歌曲、TTS 结果和诊断信息。`diagnostics` 字段包含：`candidateSource`（favorites/search/queue/mock）、`rerankSource`（llm-pick/fallback）、`favoritesAvailable`（收藏曲目数）、`candidatesCount`（候选总数）、`isFallback`（是否使用 mock 兜底）、`musicProvider`（当前音乐来源）。LLM 可从候选曲目列表中选择曲目，选中时 `rerankSource` 为 `llm-pick`，否则走确定性兜底。TTS provider 失败时会回退到 mock TTS，避免主流程返回未处理的 500。
+- `GET /api/next`：计算下一首歌，返回 DJ 决策、歌曲、TTS 结果和诊断信息。选歌先经过 server 侧 Recommendation Engine，综合 daypart、天气、日程、`taste.md`、`mood-rules.md`、`playlists.json`、网易喜欢歌曲 seed、最近播放和当前队列。`diagnostics` 字段包含：`candidateSource`（curated/favorites/search/queue）、`rerankSource`（llm-pick/fallback）、`favoritesAvailable`（收藏曲目数）、`candidatesCount`（候选总数）、`signals`（本次使用的推荐信号）、`queries`（实际扩展出的 provider 查询）、`seedCount`（liked song seed 数）、`isFallback`、`musicProvider`。LLM 可从策划候选曲目列表中选择曲目，选中时 `rerankSource` 为 `llm-pick`，否则走确定性兜底。TTS provider 失败时会回退到本地可听 TTS，避免主流程返回未处理的 500。
 - `POST /api/chat`：向 DJ 发送自然语言消息。支持的意图：切歌（"下一首"）、收藏（"喜欢这首歌"）、节目编排（自然语言触发，如"帮我做一期后摇主题节目"、"最近在听很多 City Pop"）、品味更新、故事讲述等。节目编排支持多轮对话：创建 → 修改 → 确认。
 - `POST /api/chat/stream`：SSE 流式聊天端点。请求体同 `/api/chat`（`{ message: string }`），返回 `text/event-stream`。事件类型：`event: chunk`（句子片段，data 为 string）、`event: done`（最终结果，data 为 `{ text: string, action?: { type: "next-track" | "add-favorite" | "show-brief-created" | "show-plan-refined" | "show-confirmed" | "show-cancelled", trackId?: string, title?: string, artist?: string, briefId?: string } }`）。前端通过 `useChatSSE` hook 消费该流。
 - `GET /api/taste`：返回规范化用户品味。
@@ -38,8 +38,8 @@
 
 ## TTS
 
-- `GET /api/tts/voices`：返回各 provider 可用音色列表，供设置页下拉。`{ mimo: [{value,label}...], edge: [{value,label}...] }`。
-- `POST /api/tts/preview`：用指定参数试听合成。请求体 `{ provider: "mimo"|"edge", voice, style?, rate?, text? }`，临时构造 adapter 合成示例文本（默认「欢迎收听 FakeRadio，这是当前音色的试听。」），返回 `{ audioUrl }`（音频落 TTS 缓存，复用 `/cache/tts/*` 路由 serve）。MiMo 未配 API key 或合成失败返回 503 + `{ error }`。
+- `GET /api/tts/voices`：返回各 provider 可用音色和 Grok speech tag 风格列表，供设置页下拉。`{ mimo: [{value,label}...], grok: [{value,label}...], grokStyles: [{value,label}...] }`。
+- `POST /api/tts/preview`：用指定参数试听合成。请求体 `{ provider: "mimo"|"grok", voice, style?, rate?, text? }`，临时构造 adapter 合成示例文本（默认「欢迎收听 FakeRadio，这是当前音色的试听。」），返回 `{ audioUrl }`（音频落 TTS 缓存，复用 `/cache/tts/*` 路由 serve）。MiMo 或 Grok 未配 API key、合成失败时返回 503 + `{ error }`。
 
 ## Show Production（节目制作）
 

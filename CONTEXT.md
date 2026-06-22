@@ -120,11 +120,11 @@ FakeRadio 目前按四层理解：
 
 ### 真实 TTS
 
-- `TtsAdapter` 已支持 `edge`（Edge TTS）和 `mimo`（MiMo V2.5 TTS）。
-- 通过 `FAKERADIO_TTS_PROVIDER` 切换，`FAKERADIO_MIMO_API_KEY` 为必需 key。
-- MiMo TTS 使用 provider-aware 缓存键（`hash(text, provider, model, voice)`），防止跨 provider 缓存碰撞。
+- `TtsAdapter` 已支持 `grok`（xAI Grok TTS）和 `mimo`（MiMo V2.5 TTS）。
+- 通过 `FAKERADIO_TTS_PROVIDER` 切换：Grok 需要 `FAKERADIO_XAI_API_KEY`（或 `XAI_API_KEY`），MiMo 需要 `FAKERADIO_MIMO_API_KEY`。
+- TTS 使用 provider-aware 缓存键（`hash(text, provider, voice/style/rate)`），防止跨 provider 缓存碰撞。
 - 音频格式：MiMo 返回 WAV（16-bit PCM 24kHz），缓存文件扩展名与格式一致。
-- TTS 失败时回退到 mock TTS（生成真实静音 WAV），不阻断主流程。
+- TTS 失败时回退到本地可听 TTS，不阻断主流程。
 
 ### 真实天气
 
@@ -172,7 +172,7 @@ FakeRadio 目前按四层理解：
 
 ### 播放与口播稳定性
 
-- TTS provider 出错时，server 会回退到 mock TTS 结果，避免 Edge TTS 等真实 provider 的运行时失败阻断 `/api/next`。
+- TTS provider 出错时，server 会回退到本地可听 TTS 结果，避免 Grok / MiMo 等真实 provider 的运行时失败阻断 `/api/next`。
 - 播放器收到 DJ 口播时会临时降低音乐音量；TTS 播放失败或淡入淡出计算越界时，前端必须把最终音量限制在浏览器允许的 `[0, 1]` 范围内。
 - story audio（`speechAudio`）播放失败时，前端不再自动回退到纯音乐，而是进入 `error` 状态并提示用户「口播加载失败」。
 

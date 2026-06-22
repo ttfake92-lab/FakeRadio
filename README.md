@@ -45,8 +45,8 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 |------|----------|----------|
 | LLM | DeepSeek（默认，需 API key） | `FAKERADIO_DEEPSEEK_API_KEY` |
 | LLM | Mock（无 key 时自动回退） | — |
+| TTS | Grok TTS（默认） | `FAKERADIO_TTS_PROVIDER=grok` + `FAKERADIO_XAI_API_KEY`（也兼容 `XAI_API_KEY`） |
 | TTS | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` + `FAKERADIO_MIMO_API_KEY` |
-| TTS | Edge TTS（默认） | `FAKERADIO_TTS_PROVIDER=edge` |
 
 所有配置统一在项目根目录 `.env` 文件中。详见 `docs/adapters.md`。
 

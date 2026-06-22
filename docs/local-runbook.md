@@ -149,7 +149,10 @@ screen -S fakeradio-netease -X quit
 | `FAKERADIO_DEEPSEEK_API_KEY` | DeepSeek API key（LLM） | — | 否（无 key 时回退到 mock LLM） |
 | `FAKERADIO_DEEPSEEK_MODEL` | DeepSeek 模型名 | `deepseek-v4-flash` | 否 |
 | `FAKERADIO_DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/v1` | 否 |
-| `FAKERADIO_TTS_PROVIDER` | TTS provider：`edge` / `mimo` | `edge` | 否 |
+| `FAKERADIO_TTS_PROVIDER` | TTS provider：`grok` / `mimo` | `grok` | 否 |
+| `FAKERADIO_XAI_API_KEY` | xAI / Grok TTS API key（也兼容 `XAI_API_KEY`） | — | 否（provider=grok 时必需） |
+| `FAKERADIO_XAI_TTS_BASE_URL` | xAI TTS API 地址 | `https://api.x.ai/v1` | 否 |
+| `FAKERADIO_XAI_TTS_LANGUAGE` | Grok TTS 语言代码，如 `zh` / `en` / `auto` | `zh` | 否 |
 | `FAKERADIO_MIMO_API_KEY` | MiMo TTS API key | — | 否（provider=mimo 时必需） |
 | `FAKERADIO_MIMO_BASE_URL` | MiMo API 地址 | `https://api.xiaomimimo.com/v1` | 否 |
 | `FAKERADIO_MIMO_TTS_VOICE` | MiMo 音色 | `茉莉` | 否 |
@@ -161,8 +164,8 @@ screen -S fakeradio-netease -X quit
 FAKERADIO_BRAVE_API_KEY=your_brave_key
 FAKERADIO_NETEASE_API_BASE_URL=http://127.0.0.1:3300
 FAKERADIO_DEEPSEEK_API_KEY=your_deepseek_key
-FAKERADIO_TTS_PROVIDER=mimo
-FAKERADIO_MIMO_API_KEY=your_mimo_key
+FAKERADIO_TTS_PROVIDER=grok
+FAKERADIO_XAI_API_KEY=your_xai_key
 ```
 
 无 Brave API key 时，web-research-adapter 不报错，直接返回空数组。episode route 不受影响，走到现有降级链路（metadata → lyric → mood-reading）。
@@ -218,7 +221,7 @@ curl http://localhost:3301/api/plan/today
 - `/api/now` 的 `track.source` 和 `queue[].source`
 - `/api/next` 的 `decision.reason` 是否围绕真实曲目生成
 - `/api/plan/today` 的 `blocks[].moodHint` 是否来自对应 playlist 的首个 seed
-- `/api/next` 的 `diagnostics` 字段：`candidateSource` 反映候选来源（favorites 优先于 search）、`rerankSource` 反映 LLM 是否从候选中选曲、`favoritesAvailable` 为收藏曲目数量
+- `/api/next` 的 `diagnostics` 字段：`candidateSource` 反映候选来源（curated/favorites/search/queue）、`signals` 和 `queries` 说明本次综合了哪些推荐信号，`rerankSource` 反映 LLM 是否从候选中选曲，`favoritesAvailable` 为收藏曲目数量
 - 前端页面是否显示 `Music Provider` 和来源标签
 
 验证网页研究（web research）功能：
@@ -343,4 +346,3 @@ curl http://localhost:3301/api/prewarm/status | jq '{enabled, targetDate, lastRu
 1. 检查网易云服务是否启动：`curl http://localhost:3300`
 2. 检查 cookie 是否有效：重新注入
 3. 检查 `FAKERADIO_PROVIDER_MODE=auto`（非 `mock`）
-

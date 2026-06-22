@@ -147,103 +147,105 @@ export function ShowLibrary({
         ...(embedded ? {} : { zIndex: 100 }),
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 16px",
-          borderBottom: isExpanded ? "1px solid var(--line)" : "none",
-          cursor: "pointer",
-          background: "var(--ink-soft)",
-        }}
-        onClick={onToggleExpand}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              color: "var(--text)",
-              fontSize: 20,
-              fontStyle: "italic",
-            }}
-          >
-            Library
-          </span>
-          {projects.length > 0 && (
+      {!embedded && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            borderBottom: isExpanded ? "1px solid var(--line)" : "none",
+            cursor: "pointer",
+            background: "var(--ink-soft)",
+          }}
+          onClick={onToggleExpand}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                color: "var(--text)",
+                fontSize: 20,
+                fontStyle: "italic",
+              }}
+            >
+              Library
+            </span>
+            {projects.length > 0 && (
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  padding: "2px 8px",
+                  background: "var(--ink-soft)",
+                  color: "var(--accent)",
+                  borderRadius: 0,
+                  fontSize: 9,
+                  letterSpacing: "0.15em",
+                }}
+              >
+                {projects.length}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefresh();
+              }}
+              aria-label="刷新"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--mute)",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.15em",
+                padding: 4,
+              }}
+            >
+              SYNC
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              aria-label="关闭"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--mute)",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.15em",
+                padding: 4,
+              }}
+            >
+              CLOSE
+            </button>
             <span
               style={{
                 fontFamily: "var(--font-mono)",
-                padding: "2px 8px",
-                background: "var(--ink-soft)",
-                color: "var(--accent)",
-                borderRadius: 0,
+                color: "var(--faint)",
                 fontSize: 9,
                 letterSpacing: "0.15em",
               }}
             >
-              {projects.length}
+              {isExpanded ? "V" : ">"}
             </span>
-          )}
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRefresh();
-            }}
-            aria-label="刷新"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--mute)",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.15em",
-              padding: 4,
-            }}
-          >
-            SYNC
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            aria-label="关闭"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--mute)",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.15em",
-              padding: 4,
-            }}
-          >
-            CLOSE
-          </button>
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              color: "var(--faint)",
-              fontSize: 9,
-              letterSpacing: "0.15em",
-            }}
-          >
-            {isExpanded ? "V" : ">"}
-          </span>
-        </div>
-      </div>
+      )}
 
-      {isExpanded && (
+      {(embedded || isExpanded) && (
         <div
           style={{
-            padding: 16,
-            maxHeight: "calc(100vh - 260px)",
-            overflowY: "auto",
+            padding: embedded ? 0 : 16,
+            maxHeight: embedded ? "none" : "calc(100vh - 260px)",
+            overflowY: embedded ? "visible" : "auto",
           }}
         >
           {sortedProjects.length === 0 ? (

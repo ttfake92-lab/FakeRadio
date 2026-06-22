@@ -120,60 +120,62 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
         ...(embedded ? {} : { zIndex: 100 }),
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 16px",
-          borderBottom: isExpanded ? "1px solid var(--line)" : "none",
-          cursor: "pointer",
-        }}
-        onClick={onToggleExpand}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              color: "var(--text)",
-              fontSize: 20,
-              fontStyle: "italic",
-            }}
-          >
-            Production
-          </span>
+      {!embedded && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            borderBottom: isExpanded ? "1px solid var(--line)" : "none",
+            cursor: "pointer",
+          }}
+          onClick={onToggleExpand}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                color: "var(--text)",
+                fontSize: 20,
+                fontStyle: "italic",
+              }}
+            >
+              Production
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--mute)",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.15em",
+                padding: 4,
+              }}
+            >
+              CLOSE
+            </button>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "var(--faint)",
+                fontSize: 9,
+                letterSpacing: "0.15em",
+              }}
+            >
+              {isExpanded ? "V" : ">"}
+            </span>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); onClose(); }}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--mute)",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.15em",
-              padding: 4,
-            }}
-          >
-            CLOSE
-          </button>
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              color: "var(--faint)",
-              fontSize: 9,
-              letterSpacing: "0.15em",
-            }}
-          >
-            {isExpanded ? "V" : ">"}
-          </span>
-        </div>
-      </div>
+      )}
 
-      {isExpanded && (
-        <div style={{ padding: 16, maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+      {(embedded || isExpanded) && (
+        <div style={{ padding: embedded ? 0 : 16, maxHeight: embedded ? "none" : "calc(100vh - 240px)", overflowY: embedded ? "visible" : "auto" }}>
           <BriefSelector
             briefs={briefs ?? []}
             activeBriefId={brief?.id}

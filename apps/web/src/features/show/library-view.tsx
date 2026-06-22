@@ -242,8 +242,10 @@ function ScheduleSection() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// LibraryView — 节目库统一视图（今日打包 / 制作 / 节目库 / 节目单）
+// LibraryView — 节目库统一视图(Tab 切换: 制作 / 节目库 / 今日 & 节目单)
 // ─────────────────────────────────────────────────────────────
+type LibraryTab = "production" | "library" | "today";
+
 export function LibraryView({
   brief,
   briefs,
@@ -255,41 +257,135 @@ export function LibraryView({
   onGenerateNow,
   onClose,
 }: LibraryViewProps) {
+  const [activeTab, setActiveTab] = useState<LibraryTab>("production");
+
+  const tabs: Array<{ key: LibraryTab; label: string; sub: string; count?: number }> = [
+    { key: "production", label: "Production", sub: "制作工作台" },
+    { key: "library", label: "Library", sub: "节目库", count: projects?.length ?? 0 },
+    { key: "today", label: "Today", sub: "今日整期 + 节目单" },
+  ];
+
   return (
-    <div style={{ maxWidth: 460, margin: "0 auto", padding: "40px 0", display: "flex", flexDirection: "column", gap: 40 }}>
-      <TodayExportSection />
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "min(820px, 100%)",
+        margin: "0 auto",
+        padding: "32px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+      }}
+    >
+      {/* Tab Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "stretch",
+          gap: 0,
+          borderBottom: "1px solid var(--line)",
+        }}
+      >
+        {tabs.map((t) => {
+          const active = t.key === activeTab;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                flex: 1,
+                padding: "16px 12px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                borderBottom: active ? "1px solid var(--accent)" : "1px solid transparent",
+                marginBottom: -1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+                color: active ? "var(--text)" : "var(--mute)",
+                transition: "color 0.18s ease",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: 20,
+                    fontStyle: "italic",
+                    lineHeight: 1,
+                  }}
+                >
+                  {t.label}
+                </span>
+                {typeof t.count === "number" && t.count > 0 && (
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10,
+                      letterSpacing: "0.15em",
+                      color: "var(--accent)",
+                    }}
+                  >
+                    {t.count}
+                  </span>
+                )}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 9,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: "var(--faint)",
+                }}
+              >
+                {t.sub}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-      <div style={{ borderTop: "1px solid var(--line)" }} />
-      <SectionTitle>PRODUCTION · 制作工作台</SectionTitle>
-      <ProductionBoard
-        isExpanded
-        embedded
-        onToggleExpand={() => {}}
-        onClose={onClose}
-        {...(brief !== undefined ? { brief } : {})}
-        {...(briefs !== undefined ? { briefs } : {})}
-        {...(showPlan !== undefined ? { showPlan } : {})}
-        {...(jobs !== undefined ? { jobs } : {})}
-        {...(projects !== undefined ? { projects } : {})}
-        {...(onSwitchBrief !== undefined ? { onSwitchBrief } : {})}
-        {...(onProjectsChanged !== undefined ? { onProjectsChanged } : {})}
-        {...(onGenerateNow !== undefined ? { onGenerateNow } : {})}
-      />
+      {/* Active panel */}
+      {activeTab === "production" && (
+        <ProductionBoard
+          isExpanded
+          embedded
+          onToggleExpand={() => {}}
+          onClose={onClose}
+          {...(brief !== undefined ? { brief } : {})}
+          {...(briefs !== undefined ? { briefs } : {})}
+          {...(showPlan !== undefined ? { showPlan } : {})}
+          {...(jobs !== undefined ? { jobs } : {})}
+          {...(projects !== undefined ? { projects } : {})}
+          {...(onSwitchBrief !== undefined ? { onSwitchBrief } : {})}
+          {...(onProjectsChanged !== undefined ? { onProjectsChanged } : {})}
+          {...(onGenerateNow !== undefined ? { onGenerateNow } : {})}
+        />
+      )}
 
-      <div style={{ borderTop: "1px solid var(--line)" }} />
-      <SectionTitle>LIBRARY · 节目库</SectionTitle>
-      <ShowLibrary
-        isExpanded
-        isOpen
-        embedded
-        projects={projects ?? []}
-        onToggleExpand={() => {}}
-        onClose={onClose}
-        onRefresh={onProjectsChanged ?? (() => {})}
-      />
+      {activeTab === "library" && (
+        <ShowLibrary
+          isExpanded
+          isOpen
+          embedded
+          projects={projects ?? []}
+          onToggleExpand={() => {}}
+          onClose={onClose}
+          onRefresh={onProjectsChanged ?? (() => {})}
+        />
+      )}
 
-      <div style={{ borderTop: "1px solid var(--line)" }} />
-      <ScheduleSection />
+      {activeTab === "today" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+          <TodayExportSection />
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 32 }}>
+            <ScheduleSection />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

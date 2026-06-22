@@ -55,7 +55,7 @@ FakeRadio 当前已经有最小连续性闭环：
 
 - `buildTodayPlan(playlists?)` 生成当天的时段计划；当传入 `user/playlists.json` 内容时，block 的 `label` 和 `moodHint` 取自对应 playlist 的 `name` 与首个 `seed`，未传入时回退到硬编码默认值
 - `getCurrentPlanBlock()` 选出当前时段 block
-- 初始队列按当前 block 的 `moodHint`（即对应 playlist 的首个 seed）生成
+- 初始队列、daypart 切换队列、实时 `/api/next` 和每日预热都通过 Recommendation Engine 生成候选；它会综合当前 block、天气、日程、用户品味、mood rules、playlist seeds、网易喜欢歌曲 seed、最近播放和当前队列
 - 每次成功生成下一首后，server 追加 `playedTrack` 记忆
 - 后续 DJ 文案可引用上一首歌，形成连续过渡
 
@@ -219,10 +219,11 @@ FakeRadio 支持预热，提前生成 episode：
 
 ## 收藏与推荐
 
-收藏歌曲参与选歌候选：
+收藏歌曲参与推荐，但不再作为默认播放池：
 
 - `user/netease-liked-songs.raw.json` 存储网易云「我喜欢的音乐」导出数据
 - `liked-songs-repository.ts` 提供加载、诊断和随机采样
-- `/api/next` 的候选选择优先从收藏列表采样，收藏为空时走 search
+- Recommendation Engine 把收藏歌曲作为 taste seed，优先扩展相似歌曲和符合当前时段/天气/日程的策划候选
+- 收藏原曲会被排除在常规候选之外，只有策划推荐、search 和队列都不可用时才作为最终兜底
 - LLM 可从候选列表中指定曲目（`rerankSource: "llm-pick"`），否则走确定性兜底
-- `/api/next` 的 `diagnostics` 字段暴露 `candidateSource`、`rerankSource`、`favoritesAvailable` 等诊断信息
+- `/api/next` 的 `diagnostics` 字段暴露 `candidateSource`、`rerankSource`、`favoritesAvailable`、`signals`、`queries`、`seedCount` 等诊断信息

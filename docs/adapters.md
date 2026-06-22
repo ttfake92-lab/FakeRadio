@@ -25,12 +25,14 @@ FakeRadio 当前仍以 mock 为基础闭环，但 `music adapter` 已支持两�
 `MusicAdapter` 当前只负责三件事：
 
 - `search(query)`
-- `recommend({ mood, limit })`
+- `recommend({ mood, limit, seeds?, excludeTrackIds? })`
 - `resolve(track)`
 
-第一版真实网易云接入只覆盖这三个能力，不包含歌词、登录态、歌单管理或账号相关逻辑。
+真实 provider 仍只覆盖这几个能力，不包含歌词、登录态、歌单管理或账号相关逻辑；综合推荐判断不写进 provider，而是由 server 的 Recommendation Engine 完成。
 
-`recommend({ mood, limit })` 的当前策略不是走账号级推荐，而是把 `mood` 当作检索提示词生成候选。这个 `mood` 目前来自 daypart block 的 `moodHint`。
+`recommend({ mood, limit, seeds?, excludeTrackIds? })` 接收 Recommendation Engine 生成的策划意图。`mood` 是综合 daypart、天气、日程、品味和 mood rules 后的查询提示；`seeds` 通常来自网易喜欢歌曲，只作为相似推荐种子，不代表要直接播放收藏原曲；`excludeTrackIds` 用于过滤最近播放、当前队列和 seed 原曲。
+
+网易云 adapter 的策略是：有 `seeds` 时优先调用 `/simi/song` 扩展相似歌曲；相似歌曲不足时再用 `mood` 走 `/cloudsearch` 补足候选。
 
 ## Provider 选择
 
@@ -86,8 +88,20 @@ TTS 通过 `TtsAdapter` 边界接入。当前支持两种 provider：
 
 | Provider | 环境变量 | 说明 |
 |----------|----------|------|
-| Edge TTS | `FAKERADIO_TTS_PROVIDER=edge`（默认） | 使用 `edge-tts` npm 包，Microsoft Edge TTS 服务 |
+| Grok TTS | `FAKERADIO_TTS_PROVIDER=grok`（默认） | 调用 xAI `POST /v1/tts`，返回原始 MP3 bytes |
 | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` | 小米 MiMo 开放平台语音合成 |
+
+### Grok TTS 配置
+
+```bash
+FAKERADIO_TTS_PROVIDER=grok
+FAKERADIO_XAI_API_KEY=your_xai_key
+FAKERADIO_XAI_TTS_BASE_URL=https://api.x.ai/v1
+FAKERADIO_XAI_TTS_LANGUAGE=zh
+FAKERADIO_TTS_VOICE=eve
+```
+
+可用官方音色：`eve`、`ara`、`rex`、`sal`、`leo`。Grok 不提供独立 `style` 请求参数，但官方支持 speech tags；设置页会把 Grok 的播报风格下拉映射为 `<soft>`、`<whisper>`、`<emphasis>` 等官方标签并包裹口播文本。
 
 ### MiMo TTS 配置
 
@@ -105,8 +119,8 @@ FAKERADIO_MIMO_TTS_VOICE=茉莉
 除环境变量默认值外，音色、播报风格、语速可在运行时通过设置页（`GET/PUT /api/settings`）调整，`applySettings` 重建 adapter，无需重启：
 
 - `ttsVoice` / `mimoVoice`：音色，按当前 provider 生效。
-- `ttsStyle`：播报风格描述（中文自由文本，如「温柔治愈」「沉稳深夜」），**仅 MiMo 生效**，注入 MiMo chat/completions 的 user message 提示。空串回退默认 `warm, natural` 提示。
-- `ttsRate`：语速偏移百分比（-50~200，0 为正常），**仅 Edge 生效**，透传给 edge-tts 的 `rate`（如 `+50%`、`-20%`）。MiMo 未确认支持结构化语速参数，改用 `ttsStyle` 文本暗示（如「语速稍慢」）。
+- `ttsStyle`：播报风格。MiMo 使用中文自由文本注入 user message；Grok 使用官方 speech tag 风格下拉（空串表示自然）。
+- `ttsRate`：语速偏移百分比（设置页对 Grok 使用 -30~50，0 为正常），Grok adapter 会转换为 xAI `speed`（0.7~1.5）。MiMo 未确认支持结构化语速参数，改用 `ttsStyle` 文本暗示（如「语速稍慢」）。
 
 缓存键纳入 provider/model/voice/style(或 rate)/text，同文案不同参数不会复用缓存。设置页提供试听按钮（`POST /api/tts/preview`），用当前表单值临时合成一句示例音频。
 
