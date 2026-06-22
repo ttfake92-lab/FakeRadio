@@ -274,7 +274,8 @@ export async function synthesizeWithFallback(
   try {
     return { result: await tts.synthesize(text) };
   } catch (error) {
-    console.error("TTS synthesis failed, falling back to local audible TTS:", error);
+    console.error("[tts] primary synthesis failed, falling back to macOS say:", error instanceof Error ? error.message : error);
+    console.error("[tts] text was:", text.slice(0, 120));
     try {
       const audibleFallback = options.audibleFallback ?? createMacOsSayTtsAdapter({ cacheDir: ttsCacheDir });
       return {

@@ -68,8 +68,9 @@ type RuntimeAdapterManagerOptions = {
 function proxyAdapter<T extends object>(getTarget: () => T): T {
   return new Proxy({} as T, {
     get(_target, prop) {
-      const value = getTarget()[prop as keyof T];
-      return typeof value === "function" ? value.bind(getTarget()) : value;
+      const target = getTarget();
+      const value = target[prop as keyof T];
+      return typeof value === "function" ? value.bind(target) : value;
     }
   });
 }
@@ -211,6 +212,7 @@ export async function createRuntimeAdapterManager(options: RuntimeAdapterManager
     },
 
     async applySettings(nextSettings: Settings) {
+      console.log(`[runtime-adapter] applySettings called: provider=${nextSettings.ttsProvider} voice=${nextSettings.ttsProvider === 'mimo' ? nextSettings.mimoVoice : nextSettings.ttsVoice} style=${nextSettings.ttsStyle}`);
       const nextSnapshot = await buildSnapshot({
         cookieStore: options.cookieStore,
         ttsCacheDir: options.ttsCacheDir,
@@ -218,6 +220,7 @@ export async function createRuntimeAdapterManager(options: RuntimeAdapterManager
       }, options.overrides);
       settings = nextSettings;
       snapshot = nextSnapshot;
+      console.log(`[runtime-adapter] snapshot.tts replaced, ttsStatus=${snapshot.statuses.tts}`);
       return { settings, statuses: snapshot.statuses };
     }
   };
