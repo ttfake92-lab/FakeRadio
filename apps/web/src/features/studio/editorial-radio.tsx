@@ -260,8 +260,6 @@ export function EditorialRadio() {
   const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputDraft, setInputDraft] = useState('');
-  const [latestChatDjText, setLatestChatDjText] = useState<string | null>(null);
-  const [streamingChatDjText, setStreamingChatDjText] = useState<string | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [pendingSuggestions, setPendingSuggestions] = useState<Track[]>([]);
   const [favorites, setFavorites] = useState<FavoriteTrack[]>([]);
@@ -338,7 +336,10 @@ export function EditorialRadio() {
     ? (playback.nextEpisode ? [playback.nextEpisode.track] : [])
     : [];
   const baseDjSay = playback.episodeData?.story.text ?? now?.dj?.say ?? '';
-  const djSay = streamingChatDjText ?? latestChatDjText ?? baseDjSay;
+  // DJ-speaking 区 = 当前曲目的口播介绍。聊天回复只进对话框，不抢这个槽——
+  // 之前 chat reply 覆盖 baseDjSay 会让"音乐口播"和"用户对话回复"挤在同一格，
+  // 用户分不清现在 DJ 说的到底是这首歌的介绍，还是在回复"我想听安静的"。
+  const djSay = baseDjSay;
   const isLive = isEpisodeActive
     ? isPlaying
     : (now?.playback === 'playing' || isPlaying);
@@ -379,20 +380,30 @@ export function EditorialRadio() {
     setJobs(jobsData.jobs ?? []);
   }, [activeBriefId]);
 
-  useEffect(() => {
-    setLatestChatDjText(null);
-    setStreamingChatDjText(null);
-  }, [track?.id, baseDjSay]);
-
-  // DJ typewriter
+  // DJ typewriter：只渲染当前曲目的介绍（baseDjSay），聊天回复走对话框。
   const djLines = useMemo(() => {
-    const text = latestChatDjText ?? baseDjSay;
-    if (text) return [text];
+    if (baseDjSay) return [baseDjSay];
     return ['等待播放…'];
-  }, [baseDjSay, latestChatDjText]);
+  }, [baseDjSay]);
   const [djLineIndex, setDjLineIndex] = useState(0);
   const [typedText, setTypedText] = useState('');
-  const displayTypedText = streamingChatDjText ?? (latestChatDjText ? latestChatDjText : typedText);
+  const displayTypedText = typedText;
+
+  // 每次 episode 切换都把当前曲目的口播文案 push 进对话框，作为单一数据源。
+  // 之前依赖后端 WebSocket 广播 dj-speech 来填对话框，但 prefetch 接续路径
+  // (finalizePrefetchEpisode) 没广播，导致预取曲目切到时对话框收不到。
+  // 直接以 episodeData.story.text 为权威，不再绕一圈走 WS。
+  useEffect(() => {
+    const story = playback.episodeData?.story.text?.trim();
+    const trackId = playback.episodeData?.track.id;
+    if (!story || !trackId) return;
+    if (story === lastBroadcastDjTextRef.current) return;
+    lastBroadcastDjTextRef.current = story;
+    setMessages((prev) => [
+      ...prev,
+      { id: `dj-ep-${trackId}-${Date.now()}`, from: 'DJ', text: story, origin: 'broadcast' },
+    ]);
+  }, [playback.episodeData?.track.id, playback.episodeData?.story.text]);
 
   useEffect(() => {
     const full = djLines[djLineIndex] ?? '';
@@ -622,17 +633,12 @@ export function EditorialRadio() {
       chatSSE.sendMessage(trimmed, {
         onChunk(chunk) {
           streamedText += chunk;
-          setStreamingChatDjText(streamedText);
           setMessages((prev) =>
             prev.map((m) => (m.id === djId ? { ...m, text: m.text + chunk } : m)),
           );
         },
         onDone(data) {
           const finalText = data.text || streamedText;
-          setStreamingChatDjText(null);
-          if (finalText.trim()) {
-            setLatestChatDjText(finalText);
-          }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === djId ? { ...m, text: finalText || m.text, streaming: false } : m,
@@ -2817,11 +2823,11 @@ function MobileRadio({
   const artist = track?.artist ?? '—';
   const cnLabel = isDark ? 'EDITORIAL · DARK' : 'EDITORIAL · LIGHT';
   const canSend = inputDraft.trim().length > 0;
-  const normalizedDjText = currentDjText.trim();
-  const chatMessages = messages.filter((message) => {
-    const text = message.text.trim();
-    return text.length > 0 && (message.origin !== 'broadcast' || text !== normalizedDjText);
-  });
+  // 对话框收所有非空消息，包括音乐口播 broadcast。
+  // 之前会把跟 DJ-speaking 区文字相同的 broadcast 过滤掉（避免重复），
+  // 但 DJ-speaking 区现在只放当前曲目介绍，不再 mirror 聊天回复，
+  // 把口播也一起留在对话框反而能让用户看历史。
+  const chatMessages = messages.filter((m) => m.text.trim().length > 0);
   const visualizer = useAudioReactiveVisualizer(musicRef, isPlaying);
   const handleVisualizerPlayPause = useCallback(() => {
     visualizer.resume();

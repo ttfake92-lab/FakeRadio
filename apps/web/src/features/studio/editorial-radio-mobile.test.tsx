@@ -246,7 +246,7 @@ describe("EditorialRadio mobile runtime wiring", () => {
     expect(desktopAudio[1]).toBe(mobileAudio[1]);
   });
 
-  it("mirrors the latest DJ chat reply into the now-speaking subtitle", async () => {
+  it("keeps DJ chat replies out of the now-speaking subtitle (chat-only)", async () => {
     render(<EditorialRadio />);
 
     const subtitleCard = (await screen.findByText("DJ · 正在说话")).parentElement;
@@ -264,8 +264,11 @@ describe("EditorialRadio mobile runtime wiring", () => {
       options.onDone({ text: "现在播的是 Bloom，来自 LANY。" });
     });
 
-    expect(within(subtitleCard!).getByText(/现在播的是 Bloom，来自 LANY。/)).toBeInTheDocument();
-    expect(screen.getAllByText(/现在播的是 Bloom，来自 LANY。/).length).toBeGreaterThanOrEqual(2);
+    // DJ-speaking 区只放音乐口播,聊天回复不能渗透进去——
+    // 这是为了让"音乐介绍"和"用户对话"两件事互不抢占。
+    expect(within(subtitleCard!).queryByText(/现在播的是 Bloom，来自 LANY。/)).toBeNull();
+    // 对话框本身一定要有这条回复(只出现在 chat 区域)。
+    expect(screen.getAllByText(/现在播的是 Bloom，来自 LANY。/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("wakes the real audio visualizer when the music element resumes playback", async () => {

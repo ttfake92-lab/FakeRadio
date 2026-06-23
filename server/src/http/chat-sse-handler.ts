@@ -224,6 +224,141 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
       // fall through to default chat path
     }
 
+    // Intent: 找歌/换风格(LLM 主导)。
+    //
+    // 不再用关键词字典 + 硬编码代表艺术家——那种方式有两个死穴:
+    //   1) 字典覆盖不到"再硬核一点"/"昨天那种感觉"/"伤感但不致郁"这种相对意图
+    //   2) 固定艺术家列表导致"每次说摇滚都是同一批人"
+    //
+    // 改为让 LLM 看完整上下文(画像+taste+收藏+最近播放+当前曲目+聊天历史)
+    // 直接输出 5-8 个具体艺术家/歌名,后端无脑 search。
+    // LLM 自己负责"看你听 Pink Floyd 不听 Nirvana,推 Pink Floyd 方向"以及
+    // "最近推过 Queen,这次给 The Beatles" 这种动态决策。
+    try {
+      const { planLlmRecommendation } = await import("../recommendation/llm-recommend-planner.js");
+      const [recentPlayed, likedSongTracks] = await Promise.all([
+        deps.stateRepo.getRecentlyPlayed(20).catch(() => []),
+        deps.likedSongs.list().catch(() => [])
+      ]);
+      // 给 LLM "最近接触过的艺术家"列表,让它自己决定要不要避开重复。
+      const recentArtistsSet = new Set<string>();
+      for (const t of recentPlayed) {
+        if (t.artist) recentArtistsSet.add(t.artist);
+      }
+      const recentArtists = [...recentArtistsSet].slice(0, 15);
+
+      const plan = await planLlmRecommendation({
+        llm: deps.llm,
+        userMessage: msg,
+        currentTrack,
+        profile: deps.userPreferences.profile,
+        taste: deps.userPreferences.taste,
+        routines: deps.userPreferences.routines,
+        likedSongs: likedSongTracks,
+        recentChat: recentMemory,
+        recentArtists
+      });
+
+      if (plan) {
+        const { selectRecommendedCandidates } = await import("../recommendation/recommendation-engine.js");
+        const { buildTodayPlan, getCurrentPlanBlock } = await import("../scheduler/radio-scheduler.js");
+        const queue = deps.state.getQueue();
+        // 排除已播 + 当前 + 已入队 + LLM 主动说要避开的。
+        // avoid 是 LLM 看上下文后给的"这次别推"列表(用户说"别再来 X"或最近重复推过)。
+        // avoid 是名字片段(artist 或 title),作为字符串包含匹配。
+        const avoidLower = plan.avoid.map((a) => a.toLowerCase());
+        const excluded = new Set([
+          ...deps.state.getRecentlySelectedTrackIds(),
+          ...(currentTrack ? [currentTrack.id] : []),
+          ...queue.map((t) => t.id)
+        ]);
+        const currentPlan = buildTodayPlan(now, deps.userPreferences.playlists);
+        const currentBlock = getCurrentPlanBlock(currentPlan, now) ?? {
+          at: "runtime",
+          label: "对话推荐",
+          moodHint: deps.currentMoodHint
+        };
+        // context 用最简骨架——风格切换场景下 weather/calendar 都是噪音,
+        // LLM 已经把"该听什么"压缩到 queries 里了。
+        const context = {
+          now,
+          block: currentBlock,
+          weather: { summary: "unknown", moodHint: "neutral" },
+          calendar: [],
+          userPreferences: deps.userPreferences,
+          likedSongs: likedSongTracks,
+          recentTrackIds: excluded,
+          queuedTrackIds: new Set(queue.map((t) => t.id)),
+          excludedTrackIds: excluded,
+          seedTracks: [],
+          queries: plan.queries,
+          signals: [],
+          intent: {
+            priority: "curated-radio" as const,
+            energy: "medium" as const,
+            daypart: currentBlock.label,
+            weatherMood: "neutral"
+          }
+        };
+
+        const rawCandidates = await selectRecommendedCandidates({
+          music: deps.music,
+          context,
+          limit: 8,        // 多拉一点,避开 avoid 后还能剩 5 首
+          searchOnly: true // 跳过 /simi/song,它是基于"当前喜好"的反向信号
+        });
+        // 应用 avoid 过滤(LLM 告诉我们要避开的)
+        const filtered = avoidLower.length === 0
+          ? rawCandidates
+          : rawCandidates.filter((c) => {
+              const sig = `${c.track.title} ${c.track.artist}`.toLowerCase();
+              return !avoidLower.some((a) => sig.includes(a));
+            });
+        const candidates = filtered.slice(0, 5);
+
+        if (candidates.length === 0) {
+          // LLM 给的 queries 全没搜到结果——告诉用户,引导报具体名字。
+          const fallbackText = plan.say
+            ? `${plan.say}不过没找到合适的,要不直接报个歌名或歌手名?`
+            : `没找到合适的,要不直接报个歌名或歌手名?`;
+          emitter.emit("chunk", fallbackText);
+          await deps.sessionRepo.appendMessage({
+            timestamp: new Date().toISOString(),
+            role: "agent",
+            text: fallbackText,
+            ...(currentTrack ? { trackId: currentTrack.id } : {})
+          });
+          emitter.emit("done", { text: fallbackText });
+          return;
+        }
+
+        const suggestions = candidates.map((c) => c.track);
+        // 用 LLM 给的 say,不再硬编码"好,给你换一批X方向的"——
+        // LLM 知道用户上下文,能说得更自然。
+        const intro = plan.say || "我给你挑了几首。";
+        const suggestText = `${intro} ${suggestions.map((t) => `《${t.title}》`).join("、")}。点一首我插到下一首。`;
+        emitter.emit("chunk", suggestText);
+
+        const action: NonNullable<ChatDonePayload["action"]> = {
+          type: "track-suggestion",
+          tracks: suggestions
+        };
+        await deps.sessionRepo.appendMessage({
+          timestamp: new Date().toISOString(),
+          role: "agent",
+          text: suggestText,
+          ...(currentTrack ? { trackId: currentTrack.id } : {})
+        });
+        emitter.emit("done", { text: suggestText, action });
+        return;
+      }
+      // plan = null: LLM 判定不是找歌意图,或调用失败。
+      // 落到下面的默认 LLM 对话流程,保证用户至少能收到一句聊天回复。
+    } catch (err) {
+      console.warn(`[chat] llm-plan failed for message="${msg}":`, err instanceof Error ? err.message : String(err));
+      // 异常落回默认 LLM 流程。
+    }
+
     // Build real environment
     const [weatherSnapshot, calendarItems, playbackDevices] = await Promise.all([
       deps.weather.current().catch(() => ({ summary: "unknown", moodHint: "calm" })),

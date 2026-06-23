@@ -271,7 +271,13 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
   }, []);
 
   useEffect(() => {
-    if (episodeState === "music") {
+    // 预取从 story 阶段就启动，而不是等到 music 阶段——
+    // 口播平均 20-40 秒，足够后端 prewarm/LLM+TTS 跑完；
+    // 用户在口播阶段按 NEXT 时（最常见的"听了开头不想听"场景），
+    // 才能命中已预取的 nextEpisode 走秒切路径，而不是现生成 5-10 秒。
+    // story / crossfade / music 都触发：前两者抢时间，music 是兜底
+    // （防止用户首次进入 story 之前的状态错过预取）。
+    if (episodeState === "story" || episodeState === "crossfade" || episodeState === "music") {
       prefetchNextEpisode();
     }
   }, [episodeState, prefetchNextEpisode]);

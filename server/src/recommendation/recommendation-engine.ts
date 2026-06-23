@@ -126,34 +126,46 @@ export async function selectRecommendedCandidates(input: {
   music: MusicAdapter;
   context: RecommendationContext;
   limit: number;
+  /** true = 完全跳过 music.recommend(simi/song),只走 search。
+   *  用于风格切换:用户明确要换风格,curated/simi(基于当前喜好)反而是负向信号。 */
+  searchOnly?: boolean;
 }): Promise<Array<{ track: Track; source: RecommendationCandidateSource }>> {
-  const { music, context, limit } = input;
+  const { music, context, limit, searchOnly } = input;
   const excluded = context.excludedTrackIds;
   // simi/song(curated)只能拿到协同过滤的相似歌,容易跑偏品味。
   // 限制它最多贡献一半 limit,把另一半留给 taste/artist 搜索结果。
-  const curatedQuota = Math.max(1, Math.floor(limit / 2));
-  const recommended = asTrackArray(await Promise.resolve(music.recommend({
-    mood: context.queries[0] ?? context.block.moodHint,
-    limit: Math.max(curatedQuota * 2, 10),
-    seeds: context.seedTracks,
-    excludeTrackIds: [...excluded]
-  })).catch(() => []));
-  const curated = collectFreshTracks(recommended, excluded, curatedQuota).map((track) => ({
-    track,
-    source: "curated" as const
-  }));
+  // searchOnly 时完全不调 recommend——风格切换场景下 simi 反而是负向。
+  const curatedQuota = searchOnly ? 0 : Math.max(1, Math.floor(limit / 2));
+  const curated: Array<{ track: Track; source: RecommendationCandidateSource }> = [];
+  if (!searchOnly) {
+    const recommended = asTrackArray(await Promise.resolve(music.recommend({
+      mood: context.queries[0] ?? context.block.moodHint,
+      limit: Math.max(curatedQuota * 2, 10),
+      seeds: context.seedTracks,
+      excludeTrackIds: [...excluded]
+    })).catch(() => []));
+    for (const track of collectFreshTracks(recommended, excluded, curatedQuota)) {
+      curated.push({ track, source: "curated" as const });
+    }
+  }
 
   const collected: Array<{ track: Track; source: RecommendationCandidateSource }> = [...curated];
   const seen = new Set(collected.map((entry) => entry.track.id));
-  // search 用 taste/artist 优先的 query 列表(buildQueries 已按品味→场景顺序排好)。
-  // 拉到 8 个 query 上限给足空间命中真正喜欢的艺术家。
+  // 每个 query 最多贡献 perQueryQuota 首,避免第一个 query 命中就把 slot 占满,
+  // 让代表艺术家根本拿不到位置。limit=5 时 quota=2 → 至少 3 个不同 query 上榜,
+  // 多样性可控;limit=10 时 quota=3,允许强 query 多占一点。
+  // 注意:query 数量 >=2 时启用,query=1(单一搜索)时让它独占,避免少候选。
+  const perQueryQuota = context.queries.length > 1 ? Math.max(1, Math.ceil(limit / 3)) : limit;
   for (const query of context.queries.slice(0, 8)) {
     if (collected.length >= limit) break;
     const searchResults = asTrackArray(await Promise.resolve(music.search(query)).catch(() => []));
+    let addedFromThisQuery = 0;
     for (const track of collectFreshTracks(searchResults, excluded, limit)) {
       if (seen.has(track.id)) continue;
+      if (addedFromThisQuery >= perQueryQuota) break;
       seen.add(track.id);
       collected.push({ track, source: "search" as const });
+      addedFromThisQuery += 1;
       if (collected.length >= limit) return collected;
     }
   }

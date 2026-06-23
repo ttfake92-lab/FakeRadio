@@ -496,12 +496,14 @@ describe("handleChat", () => {
       expect(deps.programBriefRepo.update).toHaveBeenCalledWith("brief-1", { status: "cancelled" });
     });
 
-    it("still returns show-cancelled even when no brief exists", async () => {
+    it("falls through to normal chat when '取消' is sent but no brief exists", async () => {
+      // 没有进行中的节目时,"取消"应当作普通聊天而不是劫持成 show-cancelled——
+      // 不然用户随口说"算了/取消"都会冒出"节目已取消"提示,很莫名其妙。
       const deps = makeDeps();
 
       const result = await handleChat({ message: "取消" }, deps);
 
-      expect(result.action?.type).toBe("show-cancelled");
+      expect(result.action?.type).not.toBe("show-cancelled");
     });
   });
 
@@ -557,6 +559,20 @@ describe("handleChat", () => {
 
       expect(result.action?.type).toBe("show-plan-refined");
       expect(deps.showPlanRepo.save).toHaveBeenCalled();
+    });
+
+    it("falls through to normal chat when LLM mis-detects '降速' as refine but no brief exists", async () => {
+      // "降速" 等纯氛围词不应触发节目编排,即使 LLM 误判。
+      // 没有 active brief 时 gate 会兜底返回 null,让普通聊天/推荐分支接管。
+      const deps = makeDeps();
+      // 模拟 LLM 把 "降速" 误判成 refine
+      (deps.llm.computeJson as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ intent: "refine", refinement: "降速" });
+
+      const result = await handleChat({ message: "降速" }, deps);
+
+      expect(result.action?.type).not.toBe("show-plan-refined");
+      expect(deps.showPlanRepo.save).not.toHaveBeenCalled();
     });
   });
 

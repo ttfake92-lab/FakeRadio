@@ -3,7 +3,8 @@ import type { Track } from "@fakeradio/shared";
 import type { MusicAdapter } from "../adapters/types.js";
 import {
   buildRecommendationContext,
-  selectRecommendedTrack
+  selectRecommendedTrack,
+  selectRecommendedCandidates
 } from "./recommendation-engine.js";
 
 function track(id: string, title: string, artist = "Test Artist"): Track {
@@ -120,5 +121,57 @@ describe("Recommendation Engine", () => {
       seeds: [liked],
       excludeTrackIds: expect.arrayContaining(["fav-queen"])
     }));
+  });
+
+  it("spreads candidates across multiple queries instead of letting the first query take all slots", async () => {
+    // 之前 selectRecommendedCandidates 单个 query 命中就能霸占所有 slot,
+    // 导致风格切换时 "rock" 第一次命中就把代表艺术家挤掉。
+    // 修复后每个 query 最多贡献 perQueryQuota 首,代表艺术家能拿到位置。
+    const rockJunk = [
+      track("r1", "Rock 1", "Junk Band"),
+      track("r2", "Rock 2", "Junk Band"),
+      track("r3", "Rock 3", "Junk Band"),
+      track("r4", "Rock 4", "Junk Band"),
+      track("r5", "Rock 5", "Junk Band")
+    ];
+    const queenSongs = [track("q1", "Bohemian Rhapsody", "Queen")];
+    const pinkFloydSongs = [track("p1", "Wish You Were Here", "Pink Floyd")];
+
+    const music = fakeMusic({
+      search: vi.fn().mockImplementation(async (q: string) => {
+        if (q === "rock") return rockJunk;
+        if (q === "Queen") return queenSongs;
+        if (q === "Pink Floyd") return pinkFloydSongs;
+        return [];
+      }),
+      recommend: vi.fn().mockResolvedValue([])
+    });
+
+    const candidates = await selectRecommendedCandidates({
+      music,
+      context: {
+        now: new Date(),
+        block: { at: "runtime", label: "对话推荐", moodHint: "rock" },
+        weather: { summary: "clear", moodHint: "clear" },
+        calendar: [],
+        userPreferences: { taste: "", routines: "", moodRules: "", playlists: [] },
+        likedSongs: [],
+        recentTrackIds: new Set(),
+        queuedTrackIds: new Set(),
+        excludedTrackIds: new Set(),
+        seedTracks: [],
+        queries: ["rock", "Queen", "Pink Floyd"],
+        signals: [],
+        intent: { priority: "curated-radio", energy: "medium", daypart: "对话推荐", weatherMood: "clear" }
+      },
+      limit: 5
+    });
+
+    const ids = candidates.map((c) => c.track.id);
+    expect(ids).toContain("q1");
+    expect(ids).toContain("p1");
+    // "rock" query 不允许把 5 个 slot 全占满
+    const rockCount = ids.filter((id) => id.startsWith("r")).length;
+    expect(rockCount).toBeLessThanOrEqual(2);
   });
 });
