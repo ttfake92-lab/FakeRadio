@@ -103,6 +103,8 @@ function createMockAudioEngine(): AudioEngine {
     isDucking: () => false,
     setDucking: vi.fn(),
     unlock: vi.fn(),
+    getUserVolume: () => 1,
+    setUserVolume: vi.fn(),
   };
 }
 

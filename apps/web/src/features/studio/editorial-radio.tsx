@@ -11,7 +11,7 @@ import {
   getTaste,
   insertNextTrack,
 } from '../../lib/api-client';
-import { useAudioEngine } from '../player/use-audio-engine';
+import { useAudioEngine, type AudioEngine } from '../player/use-audio-engine';
 import { usePlaybackState } from '../player/use-playback-state';
 import { useStreamConnection } from '../player/use-stream-connection';
 import type { AgentMessage } from '../player/use-stream-connection';
@@ -330,9 +330,13 @@ export function EditorialRadio() {
   episodeActiveRef.current = isEpisodeActive;
 
   const track = playback.episodeData?.track ?? now?.track ?? null;
+  // UP NEXT 只在真正进入 episode 播放后显示已预取的下一首。
+  // 之前 idle 状态下展示 now.queue（后端推荐缓冲池），但 PLAY 走的是
+  // /api/episode/next 优先消费 priority slot / prepared episode / 现场生成，
+  // 从不读 queue 头部——UI 显示的 3 首和实际播的不是一条线，点 PLAY 后就消失。
   const queue = isEpisodeActive
     ? (playback.nextEpisode ? [playback.nextEpisode.track] : [])
-    : (now?.queue ?? []);
+    : [];
   const baseDjSay = playback.episodeData?.story.text ?? now?.dj?.say ?? '';
   const djSay = streamingChatDjText ?? latestChatDjText ?? baseDjSay;
   const isLive = isEpisodeActive
@@ -813,6 +817,7 @@ export function EditorialRadio() {
           onNext={handleNext}
           onToggleFavorite={handleToggleFavorite}
           musicRef={audio.musicRef}
+          audio={audio}
           bp={bp}
         />
 
@@ -1245,6 +1250,7 @@ function LeftColumn({
   onNext,
   onToggleFavorite,
   musicRef,
+  audio,
   bp,
 }: {
   track: Track | null;
@@ -1260,6 +1266,7 @@ function LeftColumn({
   onNext: () => void;
   onToggleFavorite: () => void;
   musicRef: React.RefObject<HTMLAudioElement | null>;
+  audio: AudioEngine;
   bp: Breakpoint;
 }) {
   const title = track?.title ?? '—';
@@ -1440,7 +1447,7 @@ function LeftColumn({
       </div>
 
       {/* Volume */}
-      <VolumeControl musicRef={musicRef} />
+      <VolumeControl audio={audio} />
 
       {/* Error display */}
       {error && (
@@ -2294,7 +2301,7 @@ function ProductionProgressPanel({ job, onDismiss }: { job: ShowJob; onDismiss: 
 // ─────────────────────────────────────────────────────────────
 // VolumeControl
 // ─────────────────────────────────────────────────────────────
-function VolumeControl({ musicRef }: { musicRef: React.RefObject<HTMLAudioElement | null> }) {
+function VolumeControl({ audio }: { audio: AudioEngine }) {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
 
@@ -2302,19 +2309,18 @@ function VolumeControl({ musicRef }: { musicRef: React.RefObject<HTMLAudioElemen
     const v = parseFloat(e.target.value);
     setVolume(v);
     setMuted(v === 0);
-    if (musicRef.current) {
-      musicRef.current.volume = v;
-      musicRef.current.muted = v === 0;
-    }
-  }, [musicRef]);
+    // 走 AudioEngine 统一设置：跨曲目/跨音乐与口播都生效，不会被 crossfade fade 覆盖。
+    audio.setUserVolume(v);
+    if (audio.musicRef.current) audio.musicRef.current.muted = v === 0;
+    if (audio.speechRef.current) audio.speechRef.current.muted = v === 0;
+  }, [audio]);
 
   const toggleMute = useCallback(() => {
-    if (musicRef.current) {
-      const next = !muted;
-      setMuted(next);
-      musicRef.current.muted = next;
-    }
-  }, [musicRef, muted]);
+    const next = !muted;
+    setMuted(next);
+    if (audio.musicRef.current) audio.musicRef.current.muted = next;
+    if (audio.speechRef.current) audio.speechRef.current.muted = next;
+  }, [audio, muted]);
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

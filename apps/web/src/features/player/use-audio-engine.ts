@@ -12,18 +12,31 @@ export type AudioEngine = {
   setDucking(value: boolean): void;
   /** 在用户手势同步栈内调用，解锁 iOS 自动播放限制 */
   unlock(): void;
+  /** 用户在 UI 上设置的音量（0..1），跨曲目/跨音乐与口播统一生效 */
+  getUserVolume(): number;
+  setUserVolume(v: number): void;
 };
 
 export function useAudioEngine(): AudioEngine {
   const musicRef = useRef<HTMLAudioElement>(null);
   const speechRef = useRef<HTMLAudioElement>(null);
   const isDuckingRef = useRef(false);
+  // 用户设的音量是唯一权威源。crossfade / 切歌 / 口播都按它走。
+  // 默认 1.0 = 全量，与之前行为一致。
+  const userVolumeRef = useRef(1);
+  // 每次 fade 启动时自增的 token；setUserVolume 自增它来取消进行中的 fade，
+  // 否则 fade 的下一帧会用旧 target 把用户刚调的新音量覆盖回去。
+  const fadeTokenRef = useRef(0);
 
   const fadeVolume = useCallback((audio: HTMLAudioElement, targetVolume: number, durationMs: number) => {
     const startVolume = audio.volume;
     const startTime = performance.now();
+    fadeTokenRef.current += 1;
+    const myToken = fadeTokenRef.current;
 
     function step(now: number) {
+      // 被新 fade 或 setUserVolume 取消：直接退出，不再覆盖音量
+      if (fadeTokenRef.current !== myToken) return;
       const elapsed = now - startTime;
       audio.volume = computeFadedVolume(startVolume, targetVolume, durationMs, elapsed);
       if (elapsed < durationMs) {
@@ -38,9 +51,26 @@ export function useAudioEngine(): AudioEngine {
     const musicAudio = musicRef.current;
     if (musicAudio && isDuckingRef.current) {
       isDuckingRef.current = false;
-      fadeVolume(musicAudio, 1.0, 300);
+      fadeVolume(musicAudio, userVolumeRef.current, 300);
     }
   }, [fadeVolume]);
+
+  const getUserVolume = useCallback(() => userVolumeRef.current, []);
+
+  const setUserVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    userVolumeRef.current = clamped;
+    // 取消进行中的 fade，避免它把用户新设的音量覆盖掉。
+    fadeTokenRef.current += 1;
+    // 口播：始终跟随用户音量（之前一直没人写它，所以拉滑块对口播无效）。
+    const speech = speechRef.current;
+    if (speech) speech.volume = clamped;
+    // 音乐：只在正在出声时跟随，避免把"口播阶段静音的音乐"提前拉起来。
+    const music = musicRef.current;
+    if (music && !music.paused && music.volume > 0.01) {
+      music.volume = clamped;
+    }
+  }, []);
 
   // iOS/iPadOS 自动播放策略：play() 必须在用户手势同步栈内。
   // 本电台播放链路在点击后会 await 网络请求再 play()，手势上下文已失效。
@@ -103,6 +133,8 @@ export function useAudioEngine(): AudioEngine {
     restoreMusicVolume,
     isDucking: () => isDuckingRef.current,
     setDucking: (value: boolean) => { isDuckingRef.current = value; },
-    unlock
+    unlock,
+    getUserVolume,
+    setUserVolume
   };
 }

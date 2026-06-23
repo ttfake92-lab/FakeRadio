@@ -84,6 +84,8 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
 
     musicAudio.src = buildApiUrl(`/api/audio/${episode.track.id}`);
     musicAudio.volume = 0;
+    // 口播音量跟随用户设置（之前没人写它 → 音量条对口播无效）。
+    speechAudio.volume = audio.getUserVolume();
 
     // 音频源加载失败（如网易云 URL 过期、未登录）时显式提示，
     // 不再无声卡住；口播不中断，用户可点 NEXT 换一首
@@ -101,9 +103,11 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
         crossfadeStarted = true;
         setEpisodeState((current) => transitEpisodeStateSafely(current, "CROSSFADE_START"));
 
-        musicAudio.volume = episode.playback.musicStartVolume;
+        // crossfade 起步/目标都按用户音量缩放，否则用户调的音量会被覆盖。
+        const userVol = audio.getUserVolume();
+        musicAudio.volume = episode.playback.musicStartVolume * userVol;
         musicAudio.play().catch(() => {});
-        audio.fadeVolume(musicAudio, 1.0, episode.playback.crossfadeStartOffsetMs);
+        audio.fadeVolume(musicAudio, userVol, episode.playback.crossfadeStartOffsetMs);
       }
     };
 
@@ -118,7 +122,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
       speechAudio.removeEventListener("timeupdate", onTimeUpdate);
       const ma = audio.musicRef.current;
       if (ma) {
-        ma.volume = 1.0;
+        ma.volume = audio.getUserVolume();
         ma.play().catch(() => {});
       }
     };
@@ -130,7 +134,7 @@ export function usePlaybackState(audio: AudioEngine): PlaybackState {
         // 连续失败：不再自动切，停在 error 让用户感知（网络/TTS 服务可能挂了）。
         setEpisodeState((current) => transitEpisodeStateSafely(current, "SPEECH_ERROR"));
         const ma = audio.musicRef.current;
-        if (ma && !ma.paused) audio.fadeVolume(ma, 1.0, 300);
+        if (ma && !ma.paused) audio.fadeVolume(ma, audio.getUserVolume(), 300);
         setError("连续多首口播加载失败，请检查网络或 TTS 服务");
       } else {
         // 偶发失败：静默切下一首，skipToNext 的 loading 状态自带反馈，

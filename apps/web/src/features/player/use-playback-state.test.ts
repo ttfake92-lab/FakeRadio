@@ -34,6 +34,7 @@ function createMockAudioElement(): HTMLAudioElement {
 function createMockAudioEngine(): AudioEngine {
   const musicRef = { current: createMockAudioElement() };
   const speechRef = { current: createMockAudioElement() };
+  let userVolume = 1;
   return {
     musicRef,
     speechRef,
@@ -42,6 +43,8 @@ function createMockAudioEngine(): AudioEngine {
     isDucking: () => false,
     setDucking: vi.fn(),
     unlock: vi.fn(),
+    getUserVolume: () => userVolume,
+    setUserVolume: (v: number) => { userVolume = v; },
   };
 }
 
