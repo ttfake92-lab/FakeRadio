@@ -424,3 +424,28 @@ HTTPS_PROXY=http://127.0.0.1:7897
 1. 检查网易云服务是否启动：`curl http://localhost:3300`
 2. 检查 cookie 是否有效：重新注入
 3. 检查 `FAKERADIO_PROVIDER_MODE=auto`（非 `mock`）
+
+### 主题节目"做 X 的节目"生成失败 / 歌曲全部不是主题艺术家
+
+按以下顺序排查：
+
+1. **看后端 console**：`[generate-now] preparation failed:` 或 `[generate-now] execution failed:` 带完整堆栈
+2. **看前端右侧聊天栏 ProductionProgressPanel**：失败时显示带 `[preparation]` / `[execution]` 前缀的具体错误。如果显示 "UNIQUE constraint failed: show_projects.slug"，是同一天同主题重复 brief 撞 sqlite，已通过 slug 加毫秒时间戳修复（2026-06-24），重启 server 即可
+3. **看 job 日志**：grep `[show-gen] block X using favorites fallback` —— 出现这条说明网易云 `/cloudsearch` 失效（cookie 过期），节目用 favorites 全集兜底凑齐，所以歌"不全是主题艺术家"。重新注入 cookie 后再编一期就正常
+4. **netease cookie 报 `parse error: error:1C80006B`**：上游 NeteaseCloudMusicApi（3300 端口）AES 解密失败，cookie 过期或 NeteaseCloudMusicApi 进程缓存了旧 cookie。重新注入 cookie + 重启 NeteaseCloudMusicApi 进程
+
+### 导出的节目音频口播和音乐叠在一起 / 音乐没有渐入
+
+老版本（2026-06-23 之前）的项目导出用 `ffmpeg -f concat` 裸串接，没做混音。2026-06-24 已改为逐 episode 调 `mixEpisodeAudio`，**口播全程全音量 + 音乐在口播末尾 1 秒前 adelay + 3 秒 afade 渐入到全音量**。如果重启 server 后导出仍是叠在一起：
+
+1. 确认 server 真的在跑新版代码（`git log -1 --format=%H` 应该是 2026-06-24 或之后的 commit）
+2. ShowProject 的 `showAudioPath` 字段如果有值，会**直接拷贝旧文件**跳过混音 —— 删掉项目重新生成即可
+3. 检查 ffmpeg 版本：`ffmpeg -version`，需要支持 `adelay` 和 `afade` filter（4.x 以上都支持）
+
+### 主题节目导出"无法生成音频：所有 episode 的音乐文件都未能定位到本地"
+
+后台 worker 生成的 episode 用户没在播放器里播过，第一次导出需要按需下载所有歌。失败原因通常是：
+
+1. **网易云 cookie 失效** → 重新注入
+2. **`audioDir` 写入权限问题** → 检查 `FAKERADIO_AUDIO_DIR` 路径权限
+3. **歌曲版权地区限制** → 个别歌曲下载失败会跳过那个 segment，整期至少有 1 首成功就能导出

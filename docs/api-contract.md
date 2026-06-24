@@ -5,7 +5,7 @@
 - `GET /api/health`：返回 server 和 adapter 状态。当前至少包含 `adapters.llm`、`adapters.music`、`adapters.tts`、`adapters.weather`、`adapters.calendar`、`adapters.upnp`。其中 `adapters.music` 当前会返回 `ready` 或 `mock`。
 - `GET /api/now`：返回当前播放、DJ 口播和队列。`track.source` 与 `queue[].source` 会直接告诉前端当前曲目来自 `netease` 还是 `mock`。
 - `GET /api/next`：计算下一首歌，返回 DJ 决策、歌曲、TTS 结果和诊断信息。选歌先经过 server 侧 Recommendation Engine，综合 daypart、天气、日程、`taste.md`、`mood-rules.md`、`playlists.json`、网易喜欢歌曲 seed、最近播放和当前队列。`diagnostics` 字段包含：`candidateSource`（curated/favorites/search/queue）、`rerankSource`（llm-pick/fallback）、`favoritesAvailable`（收藏曲目数）、`candidatesCount`（候选总数）、`signals`（本次使用的推荐信号）、`queries`（实际扩展出的 provider 查询）、`seedCount`（liked song seed 数）、`isFallback`、`musicProvider`。LLM 可从策划候选曲目列表中选择曲目，选中时 `rerankSource` 为 `llm-pick`，否则走确定性兜底。TTS provider 失败时会回退到本地可听 TTS，避免主流程返回未处理的 500。
-- `POST /api/chat`：向 DJ 发送自然语言消息。支持的意图：切歌（"下一首"）、收藏（"喜欢这首歌"）、节目编排（自然语言触发，如"帮我做一期后摇主题节目"、"最近在听很多 City Pop"）、品味更新、故事讲述等。节目编排支持多轮对话：创建 → 修改 → 确认。
+- `POST /api/chat`：向 DJ 发送自然语言消息。支持的意图：切歌（"下一首"）、收藏（"喜欢这首歌"）、节目编排（自然语言触发，如"帮我做一期后摇主题节目"、"做陈奕迅的节目"、"做一期 Pink Floyd"、"策划一期粤语金曲节目"、"最近在听很多 City Pop"）、品味更新、故事讲述等。节目编排支持多轮对话：创建 → 修改 → 确认。意图 regex 详见 `server/src/show/brief-intent-parser.ts:THEME_SHOW_PATTERNS`。
 - `POST /api/chat/stream`：SSE 流式聊天端点。请求体同 `/api/chat`（`{ message: string }`），返回 `text/event-stream`。事件类型：`event: chunk`（句子片段，data 为 string）、`event: done`（最终结果，data 为 `{ text: string, action?: { type: "next-track" | "add-favorite" | "track-suggestion" | "show-brief-created" | "show-plan-refined" | "show-confirmed" | "show-cancelled", trackId?: string, title?: string, artist?: string, tracks?: Track[], briefId?: string } }`）。**`type: "track-suggestion"` 表示 DJ 给出候选歌曲名单**：用户在前端对话框里点击某张候选卡片 → `POST /api/queue/insert-next` 写入优先槽 → 下次 `/api/episode/next` / `/api/episode/prefetch` 优先消费该曲目成为真正的下一首。**不点即抛弃**。候选生成逻辑：用户消息里明确提到的艺术家/歌曲名（引号内容、多词专有名词）被提取为搜索种子，与 LLM 的 `playQuery` 并列进推荐 queries 最前；搜索/相似歌全空时兜底用收藏曲库。**候选仍空时**：不返回 `track-suggestion` action，而是回复纯文字"没找到合适的，换个说法"引导用户，并在服务端打 `console.warn` 暴露 playQuery/queries 便于排查。前端通过 `useChatSSE` hook 消费该流。
 - `POST /api/queue/insert-next`：DJ 候选确认插入。请求体 `{ track: Track }`，把 track 写入 `state` 的**优先槽**（`priorityNextTrack`，与推荐缓冲池 `queue` 分离的最高播放优先级槽位），并从 `queue` 去重移除同一首。广播 `now-playing` 事件（让前端立即刷新）。返回 `{ ok: true }`。**优先槽在 `/api/episode/next`、`/api/episode/prefetch` 里拥有最高消费优先级**——这是修复「DJ 说插到下一首了但实际没插入」的关键：以前 push 进 `queue` 后会被 prewarm 预生成 episode 和推荐引擎抢先消费，`queue` 仅作最后兜底几乎永远轮不到。前端 `editorial-radio` 在用户点击候选卡片时调用，并在成功后调 `playback.refreshPrefetch()` 丢掉旧预取、重新预取，让 UP NEXT 立即显示选中曲目。
 - `GET /api/taste`：返回规范化用户品味。
@@ -73,9 +73,9 @@
 - `GET /api/shows/:id`：返回指定节目详情。
 - `DELETE /api/shows/:id`：删除指定节目。
 - `DELETE /api/shows/:id/trace`：清除指定节目的生成追踪数据。
-- `POST /api/shows/generate-now`：立即生成节目。请求体 `{ briefId: string }`，同步完成从 brief 到 show 的全流程。
-- `POST /api/projects/:id/export`：异步导出指定节目为 ZIP。立即返回 `202 { taskId, status: "pending" }`。
-- `GET /api/export/project/:id/download`：下载指定节目导出的 ZIP 文件。
+- `POST /api/shows/generate-now`：立即生成节目。请求体 `{ briefId: string }`，同步完成从 brief 到 show 的全流程（30-120s，取决于 block 数量）。成功返回 `201 { project, job }`；已有 active job 时返回 `202 { project, job }` 复用；失败返回 `500 { error: string, phase: "preparation"|"execution", project?, job? }`，前端可读 `error` 字段拿到具体原因（plan 生成失败 / sqlite UNIQUE 撞 / netease cookie 失效等）。
+- `POST /api/projects/:id/export`：**同步**导出指定节目为 ZIP。直接返回 `200 { downloadUrl, projectId, date, blocksCount, showMp3Size? }`。导出过程逐 episode 混音（口播全程全音量、音乐在口播末尾 1 秒前 adelay + 3 秒 afade=t=in 渐入到全音量）→ concat 整期 → 写 show-notes.md → 可选 production-trace.jsonl。失败时返回 `500 { error, phase: "preparation"|"execution" }`。
+- `GET /api/export/project/:id/download`：列出或下载指定节目的导出文件。query `?file=show.mp3` 下载单文件（允许 `show.mp3` / `show-notes.md` / `show-plan.json` / `production-trace.jsonl`）；不带 file 返回 `{ projectId, files: string[] }` 文件清单。
 
 ## WebSocket
 

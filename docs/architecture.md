@@ -184,14 +184,14 @@ FakeRadio 支持从「构思」到「成品」的完整节目制作流水线：
 
 ### 一键生成
 
-`POST /api/shows/generate-now` 提供同步端到端生成：从 brief 创建 → plan 生成 → job 执行 → show 成品，单次请求完成全流程。
+`POST /api/shows/generate-now` 提供同步端到端生成：从 brief 创建 → plan 生成 → job 执行 → show 成品，单次请求完成全流程。失败处理、主题分类、选歌优先级和 narration 注入见下文「主题分类与选歌」「剧本式 narration」「一键生成与失败处理」三节。
 
 ### 对话式节目编排
 
 FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊天一样创建、修改和确认节目计划。
 
 **意图检测**采用两层策略：
-1. **regex 快速路径**（零延迟）：匹配"帮我做一期xxx主题节目"等明确指令
+1. **regex 快速路径**（零延迟）：匹配 `做一期 X 主题节目` / `做 X 的节目` / `做一期 X` / `策划|安排|编排|制作 一期 X 节目`，前缀允许"我想/我要/想做"被吸收，命中即创建 brief。覆盖见 `server/src/show/brief-intent-parser.ts:THEME_SHOW_PATTERNS`。
 2. **LLM 兜底检测**（1-3s）：regex 未命中时，用 `computeJson()` 判断自然语言意图（如"最近在听很多后摇"→ 识别为节目创建意图）
 
 **多轮对话流程**：
@@ -201,6 +201,51 @@ FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊
 - **cancel**：用户取消 → 更新 brief status 为 cancelled
 
 对话上下文通过 `SessionRepository`（当日会话记录）推断，不引入独立的 conversation state 存储，保持无状态架构。
+
+### 主题分类与选歌
+
+`POST /api/shows/generate-now` 执行节目时（`scheduler-integration.ts:executeScheduledJob`），先对 `brief.topic` 做一次 LLM 主题分类（`classify-show-topic.ts`），输出 `{ kind, anchors }`：
+
+| kind | 含义 | anchors 示例 | 选歌行为 |
+|------|------|-------------|---------|
+| `artist` | 具体艺术家/乐队 | `["陈奕迅", "Eason Chan"]` | 候选必须 artist 字段命中 anchors（substring 双向匹配），否则丢弃 |
+| `album` | 具体专辑名 | `["OK Computer"]` | 同 artist 类型硬过滤 |
+| `style` | 流派/风格 | `["Britpop", "1990s UK rock"]` | anchors 作为查询前缀辅助召回，不做硬过滤 |
+| `mood` | 氛围/场景 | `["深夜伤感", "late night sad"]` | 同 style |
+| `none` | 太宽泛或解析失败 | `[]` | 不做主题约束（fallback 保护） |
+
+每条 block 的选歌按以下优先级（`scheduler-integration.ts:generateEpisodeForBlock`）：
+
+1. **block.selectionGoal 精准 search**（最高优先级）：从 `selectionGoal`/`storyGoal` 提取《歌名》→ 拼成"主题艺术家 + 歌名"查询，命中即用。这是"节目按编排走"的核心机制。
+2. **favorites + DJ brain**：search 没召回时，用 `computeDjDecision` 从主题艺术家的 favorites 子集（artist/album 时硬过滤后再走 DJ brain，没有再退到全量 favorites）挑歌；executionState 带上 block title + selectionGoal 让 LLM 知道叙事意图。
+3. **music.recommend**：以艺术家名作种子词请求相似歌曲，对返回结果再做硬过滤。
+4. **丢约束 search**：上面三层都没命中且 isStrictTopic，给一次完全忽略主题的兜底 search。
+5. **favorites 全集**：search/recommend 全部失败（常见原因：网易云 cookie 失效导致 `/cloudsearch` 解密报错返回空），从用户 favorites 全集挑任一未排除的歌，保证节目能成型——记 warn 日志 `[show-gen] block X using favorites fallback`。
+
+> **历史坑**：旧实现把 `computeDjDecision` 当第一层，但 LLM 只看到 `"theme-show-block-opening"` 这种 role 字符串，**根本不知道 block 要选哪首具体歌**，每条 block 都从同一池随机挑热门。selectionGoal 在第二层 search 才生效，但第一层已经把名额占了。2026-06-24 修复：把 selectionGoal search 提到第一层。
+
+### 剧本式 narration（show plan 注入口播）
+
+主题节目编排时，`composeEpisodeFromTrack` 接收 `ShowPlanNarrationContext`（`server/src/http/episode-runner.ts`），把整期剧本信息注入 narration prompt：
+
+- 节目主题、当前 block 在整期里的位置（`第 N/8 段`）
+- 当前 block 的 `role` / `title` / `storyGoal`（叙事意图）
+- 上一段 / 下一段的 role + title（让 LLM 自然承接 + 埋伏笔）
+- 整期 8 段一览（让 LLM 看到全局叙事弧）
+
+prompt 里追加"按剧本中的这一幕来写"约束：紧扣段落情绪基调（低谷篇要写失落感、巅峰篇要写 momentum、影响篇要写传承）；opening 定基调；closing 回扣开场、留余韵；中段推进叙事。每集仍保持 2-7 句不超长，剧本是隐线、情绪是表层。
+
+只有节目编排路径（scheduler-integration）传 `showPlanContext`，普通播放/今日节目/prefetch 路径不传，日常体验不动。
+
+### 一键生成与失败处理
+
+`POST /api/shows/generate-now` 提供同步端到端生成。当前实现细节：
+
+- **slug 生成**：`${YYYY-MM-DD}-${topicSlug}-${ms.toString(36)}` 带毫秒时间戳，避免同一天同一主题重复 brief 撞 sqlite UNIQUE。
+- **同一 brief 复用 project**：先 `getByBriefId(briefId)`，已存在 project 不重复 create。
+- **跑路工厂式 try**：plan/job 准备阶段、execution 阶段都包在 try 里，失败返回 `500 { error: <详情>, phase: "preparation"|"execution", project?, job? }`，前端 `apps/web/src/lib/api-client.ts:generateNow` 优先取 `errorBody.error` 而非 fastify 默认 `message`，并加 `[phase]` 前缀显示。
+
+前端 `handleGenerateNow` 是 **fire-and-forget**（`apps/web/src/features/studio/editorial-radio.tsx`）：立即 `setActiveView('library')` + `startJobTracking(briefId)` 启动轮询，不 await 整条流水线（30-120s）。后端 preparation 阶段直接挂掉时（job 还没创建，poll 不到任何东西），前端 catch 里构造 client-side failed trackedJob 让 `ProductionProgressPanel` 把错误亮出来；用 `console.warn` 而非 `console.error` 避免 Next.js dev overlay 弹"Internal Server Error"窗。
 
 ### DJ 聊天推荐歌曲
 
@@ -263,14 +308,38 @@ FakeRadio 通过预热提前生成完整 episode（含口播 TTS），让切歌�
 
 ## 导出管道
 
-导出采用异步任务模式：
+FakeRadio 有两条独立的导出路径，逻辑相同但触发方式不同：
 
-1. `POST /api/export/today` 或 `POST /api/projects/:id/export` 创建任务，立即返回 `202 { taskId }`
-2. 后台执行：音频混音 → 生成 show notes → 打包 ZIP
-3. `GET /api/export/status/:taskId` 轮询状态（`pending/running/completed/failed`）
-4. `GET /api/export/download/:date` 或 `GET /api/export/project/:id/download` 下载 ZIP
+| 端点 | 模式 | 用途 |
+|------|------|------|
+| `POST /api/export/today` | 异步（202 + taskId 轮询） | 把当日实际播放过的曲目按时间顺序串成一期可发布素材 |
+| `POST /api/projects/:id/export` | **同步**（200 直接返回 `{ downloadUrl, blocksCount, showMp3Size }`） | 把已完成的主题节目（ShowProject）导出为 ZIP |
 
-任务状态通过 module-level Map 管理，不持久化（server 重启后任务丢失）。
+两条路径均产出：`show.mp3`（混音后的整期音频）+ `show-notes.md`（DJ 故事文案）+ `production-trace.jsonl`（可选脱敏 trace）。
+
+### 逐 episode 混音（2026-06-24 调整）
+
+老实现用 `ffmpeg -f concat` 把 TTS 口播和歌曲音轨**裸串接**，导致口播和音乐同时全音量重叠、听不清。新实现走"逐 episode 混音 → concat 整期"两阶段：
+
+1. **混音单 episode**（`server/src/export/audio-mixer.ts:mixEpisodeAudio`）：
+   - 口播全程全音量（不淡出）
+   - 音乐 `adelay` 到口播结束前 1 秒开始，`afade=t=in` 在 3 秒内线性渐入到全音量
+   - `amix=normalize=0` 叠加两路，输出 libmp3lame/192k/44100/stereo
+   - 输出总长 = max(ttsDuration, ttsDuration - 1 + musicDuration)
+2. **concat 整期**：所有 segment 统一格式后 `ffmpeg -f concat -c copy` 无损快拼成 show.mp3
+3. **清理**：拼完删 segment-*.mp3 中间文件
+
+> 历史坑：早期用 `acrossfade` 衔接，它会同时把口播尾部淡出，用户听到的是"DJ 最后一句越说越轻"。已改为非对称 filter（口播不动 / 音乐渐入）。
+
+### 音乐文件解析
+
+ShowProject 导出走 `trackRegistry + audioDir` 解析本地 mp3（与 `exportToday` 对齐），不依赖 episode JSON 里那串可能过期的远端 audioUrl：
+
+- 优先按 `trackId` 找 `audioDir` 里的本地缓存
+- 没缓存 → 用 `music.resolve()` 拿当前可用的 audioUrl → 按需 `downloadToFile` 流式落盘
+- 第一次下载 403/失败 → 再 resolve 一次刷新 URL → 重试
+
+后台 worker 生成的 episode 用户从未在播放器里播过，第一次导出时本地必然没缓存，必须能按需下载。
 
 ## 收藏与推荐
 
