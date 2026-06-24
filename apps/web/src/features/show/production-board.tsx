@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ProgramBrief, ShowPlan, ShowJob, ShowProject } from "@fakeradio/shared";
-import { exportProject, deleteProject, deleteProjectTrace } from "../../lib/api-client";
+import { exportProject, deleteProject, deleteProjectTrace, getProjectExportFiles, downloadProjectFile } from "../../lib/api-client";
+import { downloadBlob } from "../../lib/download-blob";
 import { getJobsForBrief, getProjectsForBrief, computeActiveProject } from "../../lib/brief-filter";
 
 export type ProductionBoardProps = {
@@ -28,6 +29,16 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
   const [isGeneratingNow, setIsGeneratingNow] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  // 导出成功后保留结果, 用来渲染 "下载 MP3 / Show notes" 链接 + 完成提示。
+  // 没有这个 state 的时候, Export 按钮点完瞬间就回到 "Export", 看着就像没反应。
+  const [exportResult, setExportResult] = useState<{
+    projectId: string;
+    blocksCount: number;
+    showMp3Size?: number;
+    date: string;
+    files: string[];
+  } | null>(null);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
 
   const jobsForBrief = useMemo(() => getJobsForBrief(jobs, brief?.id), [jobs, brief?.id]);
   const projectsForBrief = useMemo(() => getProjectsForBrief(projects, brief?.id), [projects, brief?.id]);
@@ -43,12 +54,37 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
     }
   }, [brief?.id, selectedProjectId, projectsForBrief]);
 
+  // 切节目 / 切项目时, 把上一次的导出结果清掉, 否则旧节目的下载按钮会留着误导。
+  useEffect(() => {
+    setExportResult(null);
+    setExportError(null);
+  }, [brief?.id, selectedProjectId]);
+
   const handleExport = async () => {
     if (!activeProject) return;
     setIsExporting(true);
     setExportError(null);
+    setExportResult(null);
     try {
-      await exportProject(activeProject.id, { includeTrace });
+      const result = await exportProject(activeProject.id, { includeTrace });
+      // 拉一下产出文件列表, 供 UI 渲染下载链接。
+      // 拉失败也不算导出失败, 退化成 ["show.mp3"] (后端肯定写了)。
+      let files: string[] = ["show.mp3"];
+      try {
+        const listing = await getProjectExportFiles(activeProject.id);
+        if (listing?.files?.length) files = listing.files;
+      } catch (e) {
+        console.warn("[export] file listing failed, fallback to show.mp3:", e);
+      }
+      setExportResult({
+        projectId: activeProject.id,
+        blocksCount: (result as { blocksCount?: number })?.blocksCount ?? 0,
+        ...((result as { showMp3Size?: number })?.showMp3Size !== undefined
+          ? { showMp3Size: (result as { showMp3Size?: number }).showMp3Size as number }
+          : {}),
+        date: (result as { date?: string })?.date ?? "",
+        files,
+      });
       if (onExportStart) {
         onExportStart(activeProject.id);
       }
@@ -56,6 +92,18 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
       setExportError(e instanceof Error ? e.message : "Export failed");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleDownloadFile = async (projectId: string, file: string) => {
+    setDownloadingFile(file);
+    try {
+      const blob = await downloadProjectFile(projectId, file);
+      downloadBlob(blob, file);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : `下载 ${file} 失败`);
+    } finally {
+      setDownloadingFile(null);
     }
   };
 
@@ -94,6 +142,9 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
 
   const handleGenerateNow = async () => {
     if (!brief || !onGenerateNow) return;
+    // 注意: 父组件 (editorial-radio) 的 onGenerateNow 是 fire-and-forget 设计 -- 它会立刻切视图 +
+    // 启动 job 轮询,然后 promise 仍会在后端整条流水线跑完后才 resolve。
+    // 这里短时间设 isGeneratingNow 给视觉反馈,但即便用户在 generate 完成前导航走也无所谓。
     setIsGeneratingNow(true);
     setExportError(null);
     try {
@@ -204,6 +255,9 @@ export function ProductionBoard({ brief, briefs, showPlan, jobs, projects, isExp
               isGeneratingNow={isGeneratingNow}
               isDeleting={isDeleting}
               exportError={exportError}
+              exportResult={exportResult}
+              onDownloadFile={handleDownloadFile}
+              downloadingFile={downloadingFile}
             />
           ) : (
             <EmptyState />
@@ -330,6 +384,9 @@ function ShowProjectView({
   isGeneratingNow = false,
   isDeleting = false,
   exportError = null,
+  exportResult = null,
+  onDownloadFile,
+  downloadingFile = null,
 }: {
   brief?: ProgramBrief | null;
   showPlan?: ShowPlan | null;
@@ -345,6 +402,15 @@ function ShowProjectView({
   isGeneratingNow?: boolean;
   isDeleting?: boolean;
   exportError?: string | null;
+  exportResult?: {
+    projectId: string;
+    blocksCount: number;
+    showMp3Size?: number;
+    date: string;
+    files: string[];
+  } | null;
+  onDownloadFile?: (projectId: string, file: string) => void;
+  downloadingFile?: string | null;
 }) {
   return (
     <div style={{ color: "var(--text)" }}>
@@ -521,6 +587,47 @@ function ShowProjectView({
             >
               {exportError}
             </p>
+          )}
+
+          {exportResult && project && exportResult.projectId === project.id && (
+            <div style={{ marginTop: 12 }}>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  color: "#4ade80",
+                  letterSpacing: "0.08em",
+                  marginBottom: 8,
+                }}
+              >
+                导出完成 · {exportResult.blocksCount} blocks
+                {exportResult.showMp3Size ? ` · ${formatBytes(exportResult.showMp3Size)}` : ""}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {exportResult.files.map((file) => (
+                  <button
+                    key={file}
+                    onClick={() => onDownloadFile?.(exportResult.projectId, file)}
+                    disabled={downloadingFile === file}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 0,
+                      border: "1px solid var(--text)",
+                      background: "transparent",
+                      color: "var(--text)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: "0.15em",
+                      textTransform: "uppercase",
+                      cursor: downloadingFile === file ? "wait" : "pointer",
+                      opacity: downloadingFile === file ? 0.6 : 1,
+                    }}
+                  >
+                    {downloadingFile === file ? "..." : file.replace(/\.[^.]+$/, "").slice(0, 18)}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
@@ -781,4 +888,16 @@ function EmptyState() {
       </p>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
 }

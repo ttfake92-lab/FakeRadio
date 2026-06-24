@@ -692,11 +692,38 @@ export function EditorialRadio() {
   }, [playback]);
 
   const handleGenerateNow = useCallback(async (briefId: string) => {
-    startJobTracking(briefId);
-    await generateNow(briefId);
-    await refreshProductionData(briefId);
+    // 后端的 /api/shows/generate-now 是同步执行整条流水线 (每个 block 选歌 + LLM + TTS),
+    // 8 个 block 可能要 30-120 秒。await 在这里会让按钮一直停在 "Generating..." 没任何反馈。
+    //
+    // 改法: 先立刻切到 library 视图 + 启动 job 轮询, 让用户能实时看到右侧聊天栏底部的
+    // ProductionProgressPanel 显示生成进度; 然后 fire-and-forget 调 generateNow,
+    // 完成 / 失败时通过 polling 反映出来,不等响应才更新 UI。
     setActiveView('library');
-  }, [refreshProductionData, startJobTracking]);
+    startJobTracking(briefId);
+    generateNow(briefId)
+      .then(() => refreshProductionData(briefId))
+      .catch((err) => {
+        // 用 warn 而不是 error,避免 Next.js dev overlay 把它当作 unhandled error 弹窗。
+        // 真正的错误信息已经在后端日志和这条 warn 里、且会通过 trackedJob 状态展示给用户。
+        console.warn("[generate-now] failed:", err);
+        // 把错误塞到 trackedJob 里显示给用户。后端 preparation 阶段失败时 job 可能压根没创建,
+        // poll 会一直空转;构造一个 client-side 失败 job 让 ProductionProgressPanel 把错误亮出来。
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const nowIso = new Date().toISOString();
+        setTrackedJob({
+          id: `client-error-${briefId}`,
+          briefId,
+          planId: "",
+          status: "failed",
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          logs: [{ timestamp: nowIso, level: "error", message: errMsg, phase: "preparation" }],
+          trace: []
+        });
+        stopJobTracking();
+        refreshProductionData(briefId).catch(() => {});
+      });
+  }, [refreshProductionData, startJobTracking, stopJobTracking]);
 
   // Derived display data
   const durationSec = track?.durationMs

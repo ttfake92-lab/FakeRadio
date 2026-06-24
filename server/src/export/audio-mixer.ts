@@ -65,18 +65,35 @@ export async function mixEpisodeAudio(
     probeDuration(musicPath, ffprobePath)
   ]);
 
-  // 电台感垫乐：歌曲从 0 秒起以 DUCK_VOLUME 垫在整段口播下面，
-  // 口播结束后用 FADE_DURATION_S 秒渐入全音量，歌曲继续播到结尾。
-  // 叠加（amix）而非串联（concat），口播是"压"在歌曲前奏上的
-  const fadeStart = ttsDuration;
-  const duckExpr = `if(lt(t\\,${fadeStart})\\,${DUCK_VOLUME}\\,if(lt(t\\,${fadeStart + FADE_DURATION_S})\\,${DUCK_VOLUME}+(1-${DUCK_VOLUME})*(t-${fadeStart})/${FADE_DURATION_S}\\,1))`;
-  const totalDuration = Math.max(ttsDuration, musicDuration);
+  // 衔接策略 (用户要求): 口播全程全音量, 不淡出; 音乐从 0 渐入到全音量,
+  // 渐入持续 FADE_DURATION_S (3 秒), 起点是口播结束后 OVERLAP_S (1 秒) 处 --
+  // 也就是音乐头部小幅度叠在口播尾部, 避免衔接处出现死寂。
+  //
+  // 之前用 acrossfade 的 bug: 它强制把第一路 (口播) 尾部也淡出, 用户听到的是
+  // "口播最后一句越说越轻直到听不清"。acrossfade 是给两段对等音轨用的, 不适合
+  // "主播声音 + 后置 BGM" 这种非对称场景。
+  //
+  // 改为手工 filter 链:
+  //   [1:a] adelay=DELAY|DELAY,afade=t=in:st=DELAY:d=FADE  -> [music]
+  //   [0:a][music] amix=inputs=2:duration=longest:dropout_transition=0:normalize=0
+  //
+  // - adelay 把音乐推迟到口播尾部附近开始 (双通道都 delay, ms 单位)
+  // - afade=t=in:st=...:d=... 从 delay 起点开始线性渐入, FADE 秒达到全音量
+  // - amix normalize=0 防止 ffmpeg 自动按通道数把音量整体砍半
+  // - dropout_transition=0 防止"某路结束时另一路突然变响"的副作用
+  const OVERLAP_S = 1;
+  const musicStartS = Math.max(0, ttsDuration - OVERLAP_S);
+  const musicStartMs = Math.round(musicStartS * 1000);
 
   const filterComplex = [
-    `[1:a]volume='${duckExpr}'[bed]`,
-    `[0:a][bed]amix=inputs=2:duration=longest:normalize=0[mixed]`,
-    `[mixed]atrim=0:${totalDuration}[out]`
+    `[1:a]adelay=${musicStartMs}|${musicStartMs},afade=t=in:st=${musicStartS}:d=${FADE_DURATION_S}[music]`,
+    `[0:a][music]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[out]`
   ].join(";");
+
+  // amix duration=longest 让输出延伸到最长那路结束。
+  // 总长度 = max(ttsDuration, musicStartS + musicDuration)。
+  // 现实中 musicDuration (180s) 远大于 ttsDuration (10-30s), 所以就是 musicStartS + musicDuration。
+  const totalDuration = Math.max(ttsDuration, musicStartS + musicDuration);
 
   onProgress?.({ phase: "mixing", percent: 0 });
 

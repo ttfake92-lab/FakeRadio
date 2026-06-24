@@ -290,7 +290,11 @@ export function registerShowRoutes(deps: ShowRouteDeps) {
 
     let project = await showProjectRepo.getByBriefId(brief.id);
     if (!project) {
-      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
+      // slug 直接带毫秒时间戳保证唯一。同一天同一个主题如果用户在 chat 里重复说"做X的节目",
+      // 会产生多个 brief, 每个 brief 各自独立创建 project, slug 必须互不冲突, 否则 sqlite
+      // UNIQUE 报错把整个 generate-now 500 掉, 用户看到 "UNIQUE constraint failed" 完全没法继续。
+      const topicSlug = brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show";
+      const slug = `${formatRadioDate(nowProvider())}-${topicSlug}-${Date.now().toString(36)}`;
       project = await showProjectRepo.create({ briefId: brief.id, slug });
     }
 
@@ -314,35 +318,54 @@ export function registerShowRoutes(deps: ShowRouteDeps) {
       }));
     }
 
-    const activePlan = await generateActivePlan(deps, brief);
+    // ─── Plan/job 准备阶段 ─────────────────────────────────────────────────
+    // 之前这一段在 try 外面,任意一步报错(LLM 生成 plan 失败/repo 写入失败) 都直接冒泡
+    // 给 fastify 默认 500,前端拿不到 error 字段、只看到"Internal Server Error"。
+    // 把这一段也包进 try,统一返回 { error: <详细信息> },前端能告诉用户哪里出问题。
+    let activePlan: Awaited<ReturnType<typeof generateActivePlan>>;
+    let job: Awaited<ReturnType<typeof jobRegistry.create>>;
+    let startedJob: Awaited<ReturnType<typeof jobRegistry.start>>;
+    let targetJobId: string;
+    try {
+      activePlan = await generateActivePlan(deps, brief);
 
-    project = await showProjectRepo.update(project.id, {
-      activePlanId: activePlan.id,
-      status: "generating"
-    }) ?? project;
+      project = await showProjectRepo.update(project.id, {
+        activePlanId: activePlan.id,
+        status: "generating"
+      }) ?? project;
 
-    await showProjectRepo.saveShowPlan(project.id, activePlan);
+      await showProjectRepo.saveShowPlan(project.id, activePlan);
 
-    const job = await jobRegistry.create({ briefId: brief.id, planId: activePlan.id });
-    await jobRegistry.addLog(job.id, { level: "info", message: "Job created for generate-now", phase: "init" });
-    const startedJob = await jobRegistry.start(job.id);
-    if (startedJob) {
-      await jobRegistry.addLog(startedJob.id, { level: "info", message: "Job started immediately", phase: "running" });
+      job = await jobRegistry.create({ briefId: brief.id, planId: activePlan.id });
+      await jobRegistry.addLog(job.id, { level: "info", message: "Job created for generate-now", phase: "init" });
+      startedJob = await jobRegistry.start(job.id);
+      if (startedJob) {
+        await jobRegistry.addLog(startedJob.id, { level: "info", message: "Job started immediately", phase: "running" });
+      }
+
+      targetJobId = startedJob?.id ?? job.id;
+
+      project = await showProjectRepo.update(project.id, {
+        activeJobId: targetJobId
+      }) ?? project;
+
+      await showProjectRepo.appendTrace(project.id, {
+        type: "job-started",
+        jobId: targetJobId,
+        briefId: brief.id,
+        planId: activePlan.id,
+        status: "generating"
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "unknown error";
+      console.error("[generate-now] preparation failed:", err);
+      await programBriefRepo.updateStatus(brief.id, "failed").catch(() => {});
+      await showProjectRepo.update(project.id, { status: "failed" }).catch(() => {});
+      return reply.status(500).send({
+        error: `节目准备失败: ${errorMsg}`,
+        phase: "preparation"
+      });
     }
-
-    const targetJobId = startedJob?.id ?? job.id;
-
-    project = await showProjectRepo.update(project.id, {
-      activeJobId: targetJobId
-    }) ?? project;
-
-    await showProjectRepo.appendTrace(project.id, {
-      type: "job-started",
-      jobId: targetJobId,
-      briefId: brief.id,
-      planId: activePlan.id,
-      status: "generating"
-    });
 
     try {
       await programBriefRepo.updateStatus(brief.id, "generating");
@@ -368,6 +391,7 @@ export function registerShowRoutes(deps: ShowRouteDeps) {
       }));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "unknown error";
+      console.error("[generate-now] execution failed:", err);
       await jobRegistry.addLog(targetJobId, { level: "error", message: `executeScheduledJob failed: ${errorMsg}`, phase: "execution" });
       await jobRegistry.fail(targetJobId, errorMsg);
       await programBriefRepo.updateStatus(brief.id, "failed");
@@ -376,10 +400,14 @@ export function registerShowRoutes(deps: ShowRouteDeps) {
       await showProjectRepo.update(project.id, { status: "failed" });
       const projectWithTrace = await showProjectRepo.get(project.id);
 
-      return reply.status(500).send(GenerateNowResponseSchema.parse({
+      // 失败时仍返回 project+job 让前端能看到 job 状态/日志, 但额外带 error 字段。
+      // GenerateNowResponseSchema 已经包含 project+job, 加 error 不会破坏 parse。
+      return reply.status(500).send({
+        error: `节目生成失败: ${errorMsg}`,
+        phase: "execution",
         project: projectWithTrace ?? project,
         job: failedJob ?? startedJob ?? job
-      }));
+      });
     }
   });
 
@@ -393,7 +421,9 @@ export function registerShowRoutes(deps: ShowRouteDeps) {
 
     let project = await showProjectRepo.getByBriefId(brief.id);
     if (!project) {
-      const slug = `${formatRadioDate(nowProvider())}-${brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show"}`;
+      // 同上 generate-now: slug 带毫秒时间戳, 避免同一天同一主题重复 brief 产生 UNIQUE 冲突。
+      const topicSlug = brief.topic ? brief.topic.toLowerCase().replace(/\s+/g, "-") : "show";
+      const slug = `${formatRadioDate(nowProvider())}-${topicSlug}-${Date.now().toString(36)}`;
       project = await showProjectRepo.create({ briefId: brief.id, slug });
     }
 

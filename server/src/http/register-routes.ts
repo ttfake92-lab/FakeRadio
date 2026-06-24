@@ -851,6 +851,11 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         job: completedJob,
         includeTrace: body?.includeTrace ?? true,
         ttsCacheDir,
+        // 让导出能按 trackId 拿到本地 mp3 (没缓存就按需下载),
+        // 和今日导出走相同的本地文件解析路径。
+        trackRegistry,
+        audioDir,
+        music,
       });
 
       await showProjectRepo.update(id, { status: "exported" });

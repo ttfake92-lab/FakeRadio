@@ -362,6 +362,24 @@ export type EpisodeCompositionContext = {
   // 这首歌在用户历史里的关系(由调用方用 buildPersonalHistorySnippet 算好);
   // 为空就不注入。让 DJ 能说"你之前在晚上听过这位 N 次"这种带温度的话。
   personalHistory?: string;
+  // 节目编排上下文: 当前这一集在整期节目里的位置 + 叙事弧 + 前后衔接。
+  // 仅在主题节目编排路径上传入 (scheduler-integration), 普通播放/今日节目不传。
+  // 注入后 LLM 会按"整期剧本的第 N 段"的角色写口播,而不是把每首歌当独立解说。
+  showPlanContext?: ShowPlanNarrationContext;
+};
+
+// LLM 写口播时能看到的"剧本上下文"。
+// 字段刻意命名得人类可读, 因为最后会直接拼进 prompt 给 LLM 看。
+export type ShowPlanNarrationContext = {
+  topic: string;                       // 节目主题: "陈奕迅"
+  currentBlockIndex: number;           // 0-based
+  totalBlocks: number;
+  currentBlockRole: string;            // "opening" / "turning-point" / "closing" 之类
+  currentBlockTitle: string;           // "《我的快乐时代》：风格确立与市场认可"
+  currentBlockStoryGoal: string;       // "介绍 1998 年的转折点..."
+  previousBlock?: { role: string; title: string };  // 让 LLM 能自然承接
+  nextBlock?: { role: string; title: string };      // 让 LLM 能埋伏笔
+  allBlocksOutline: string;            // 8 段一览, 让 LLM 看到整体叙事弧
 };
 
 export type ComposedEpisode = {
@@ -404,7 +422,8 @@ export async function composeEpisodeFromTrack(
     context.routines,
     context.moodRules,
     context.profile,
-    context.personalHistory
+    context.personalHistory,
+    context.showPlanContext
   );
 
   const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(deps.tts, deps.ttsCacheDir, narration);
@@ -511,7 +530,8 @@ export async function narrateStoryWithSources(
   routines: string,
   moodRules: string,
   profile?: string,
-  personalHistory?: string
+  personalHistory?: string,
+  showPlanContext?: ShowPlanNarrationContext
 ): Promise<{ narration: string; storyType: RadioEpisode["story"]["type"] }> {
   const rawType = determineStoryType(sources);
   const effectiveType = rawType;
@@ -537,6 +557,35 @@ ${personalHistory.trim()}
 把这段事实当作"老朋友的共同记忆"——如果它有合适的角度可以带进口播,就自然带一句(比如"你之前听过这位三次,都是夜里"或"这位的另一首《X》你收藏过")。但不要硬塞、不要每次都用。`
     : "";
 
+  // 主题节目编排上下文: 当这一集是 "整期剧本的第 N 段" 时, 让 LLM 按叙事弧位置写口播,
+  // 承接上一段、铺垫下一段, 而不是把每首歌当独立解说。
+  // 关键约束: typeGuidance 仍然有效, 但剧本上下文优先级更高 -- 比如"低谷篇"就要写出失落感,
+  // 不能因为资料里有"获奖纪录"就只挑高光时刻讲。
+  const showPlanSection = showPlanContext
+    ? `
+
+【节目编排上下文 - 重要】
+这一集不是孤立播放,而是「${showPlanContext.topic}」主题节目的第 ${showPlanContext.currentBlockIndex + 1}/${showPlanContext.totalBlocks} 段。
+
+整期剧本纲要(让你知道全局叙事弧):
+${showPlanContext.allBlocksOutline}
+
+当前这一段:
+- 角色: ${showPlanContext.currentBlockRole}
+- 标题: ${showPlanContext.currentBlockTitle}
+- 叙事意图: ${showPlanContext.currentBlockStoryGoal}
+${showPlanContext.previousBlock ? `- 上一段刚讲的是: 「${showPlanContext.previousBlock.title}」 (${showPlanContext.previousBlock.role})` : "- 这是开场,从零起手。"}
+${showPlanContext.nextBlock ? `- 下一段会讲: 「${showPlanContext.nextBlock.title}」 (${showPlanContext.nextBlock.role})` : "- 这是收尾,要留余韵。"}
+
+按"剧本中的这一幕"来写这段口播:
+- 推进叙事弧,而不是只解说当前这首歌。把这首歌当作"讲到这一段时手边正好播的那张唱片"。
+- 如果上一段有铺垫,自然承接("从上一段我们听到的...到现在,他走到了..."这种过渡, 但不要直接复述上一段内容)。
+- 紧扣当前段的「叙事意图」: 低谷篇就要写出失落和挣扎; 顶点篇就要写出 momentum 和爆发感; 影响篇就要写传承的脉络。
+- 开场段(opening)定基调; 收尾段(closing)要回扣开场、留余韵; 中段(turning-point/signature-era 等)要推进故事。
+- 段落标题里的概念(如"低谷"/"巅峰"/"传承")是你这段口播必须传达的情绪基调。
+- 仍然保持 2-7 句的口播长度;不要变成讲故事大段长篇。剧本是隐线,情绪是表层。`
+    : "";
+
   const baseInput = {
     now: new Date(),
     systemPrompt: systemPrompt + `
@@ -551,7 +600,7 @@ ${personalHistory.trim()}
 - ${typeGuidance[effectiveType]}
 - 只讲一个点,讲透,不要面面俱到。
 - 行文中自然带到歌名或歌手名,但禁止用「接下来是 XXX 的 XXX」这种报幕腔开场。
-- 结尾把话头轻轻交给音乐即可,不要说「让我们一起聆听」之类的主持词。${personalSection}
+- 结尾把话头轻轻交给音乐即可,不要说「让我们一起聆听」之类的主持词。${personalSection}${showPlanSection}
 
 来源资料:
 ${sourceContext}`,

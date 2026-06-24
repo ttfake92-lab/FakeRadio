@@ -272,12 +272,23 @@ export async function generateNow(briefId: string) {
     body: JSON.stringify(body)
   });
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
+    const errorBody = await response.json().catch(() => ({})) as {
+      error?: string;
+      message?: string;
+      phase?: string;
+    };
     if (response.status >= 500) {
       const parsed = GenerateNowResponseSchema.safeParse(errorBody);
       if (parsed.success) return parsed.data;
     }
-    throw new Error((errorBody as { error?: string }).error ?? `Generate failed: ${response.status}`);
+    // fastify 默认 error response 是 { statusCode, error: "Internal Server Error", message: "..." }
+    // 其中 error 是错误类名 (不可读), message 才是具体原因。优先用我们后端 catch 块返回的 error 字段,
+    // 没有就 fallback 到 fastify 的 message。
+    const detailed = errorBody.error && errorBody.error !== "Internal Server Error"
+      ? errorBody.error
+      : errorBody.message;
+    const phasePrefix = errorBody.phase ? `[${errorBody.phase}] ` : "";
+    throw new Error(`${phasePrefix}${detailed ?? `Generate failed: ${response.status}`}`);
   }
   return GenerateNowResponseSchema.parse(await response.json());
 }

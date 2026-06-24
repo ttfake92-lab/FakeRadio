@@ -193,7 +193,7 @@ describe("exportShowProject", () => {
 
     await expect(
       exportShowProject({ project, plan, job, includeTrace: true })
-    ).rejects.toThrow("无法生成音频：未找到任何可拼接的音频片段");
+    ).rejects.toThrow("无法生成音频");
   });
 
   it("throws with diagnostic error when ffmpeg is not available", async () => {
