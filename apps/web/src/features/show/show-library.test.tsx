@@ -54,13 +54,8 @@ describe("ShowLibrary 历史节目库", () => {
     cleanup();
   });
 
-  it("不打开面板时不显示内容", () => {
-    render(<ShowLibrary isExpanded={false} isOpen={false} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
-    expect(screen.queryByText("历史节目库")).not.toBeInTheDocument();
-  });
-
   it("打开面板时显示项目列表", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
     });
@@ -68,14 +63,14 @@ describe("ShowLibrary 历史节目库", () => {
   });
 
   it("显示空状态", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={[]} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={[]} onRefresh={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText("暂无历史节目")).toBeInTheDocument();
     });
   });
 
   it("点击删除项目时显示确认对话框", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={() => {}} />);
     
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
@@ -91,7 +86,7 @@ describe("ShowLibrary 历史节目库", () => {
 
   it("确认删除项目后调用 API", async () => {
     const handleRefresh = vi.fn();
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={handleRefresh} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={handleRefresh} />);
     
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
@@ -117,7 +112,7 @@ describe("ShowLibrary 历史节目库", () => {
 
   it("取消删除项目时不调用 API", async () => {
     const handleRefresh = vi.fn();
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={handleRefresh} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={handleRefresh} />);
     
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
@@ -141,7 +136,7 @@ describe("ShowLibrary 历史节目库", () => {
   });
 
   it("点击删除 trace 时显示确认对话框", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={() => {}} />);
     
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
@@ -157,7 +152,7 @@ describe("ShowLibrary 历史节目库", () => {
 
   it("确认删除 trace 后调用 API", async () => {
     const handleRefresh = vi.fn();
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={handleRefresh} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={handleRefresh} />);
     
     await waitFor(() => {
       expect(screen.getByText("2024-01-15-bee-gees-special")).toBeInTheDocument();
@@ -183,7 +178,7 @@ describe("ShowLibrary 历史节目库", () => {
 
   it("点击刷新按钮调用 onRefresh", async () => {
     const handleRefresh = vi.fn();
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={handleRefresh} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={handleRefresh} />);
     
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
@@ -195,37 +190,8 @@ describe("ShowLibrary 历史节目库", () => {
     expect(handleRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it("点击关闭按钮调用 onClose", async () => {
-    const handleClose = vi.fn();
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={handleClose} onRefresh={() => {}} />);
-    
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
-    });
-
-    const closeButton = screen.getByRole("button", { name: "关闭" });
-    fireEvent.click(closeButton);
-
-    expect(handleClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("点击展开/折叠调用 onToggleExpand", async () => {
-    const handleToggleExpand = vi.fn();
-    const { rerender } = render(<ShowLibrary isExpanded={false} isOpen={true} projects={mockProjects} onToggleExpand={handleToggleExpand} onClose={() => {}} onRefresh={() => {}} />);
-    
-    await waitFor(() => {
-      expect(screen.getByText(">")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText(">"));
-    expect(handleToggleExpand).toHaveBeenCalledTimes(1);
-
-    rerender(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={handleToggleExpand} onClose={() => {}} onRefresh={() => {}} />);
-    expect(screen.getByText("V")).toBeInTheDocument();
-  });
-
   it("项目状态显示正确的标签", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={() => {}} />);
     
     await waitFor(() => {
       expect(screen.getAllByText("READY").length).toBeGreaterThan(0);
@@ -234,7 +200,7 @@ describe("ShowLibrary 历史节目库", () => {
   });
 
   it("项目显示相关的图标标签", async () => {
-    render(<ShowLibrary isExpanded={true} isOpen={true} projects={mockProjects} onToggleExpand={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+    render(<ShowLibrary projects={mockProjects} onRefresh={() => {}} />);
     
     await waitFor(() => {
       expect(screen.getAllByText("PLAN").length).toBeGreaterThan(0);

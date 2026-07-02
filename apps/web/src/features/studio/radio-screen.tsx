@@ -5,7 +5,9 @@ import type { Track } from '@fakeradio/shared';
 import type { AudioEngine } from '../player/use-audio-engine';
 
 // ─────────────────────────────────────────────────────────────
-// Audio-reactive EQ（5 根频谱柱，接真实 AnalyserNode；不可用时退回 CSS 动画）
+// Audio-reactive EQ（5 根频谱柱，接真实 AnalyserNode）
+// 同时分析音乐 + 口播两个元素：口播阶段音乐是暂停的，只看音乐会没有频谱，
+// DJ 说话时柱子应跟着人声跳。没有真实数据时柱子静止，绝不放假动画。
 // ─────────────────────────────────────────────────────────────
 const EQ_BARS = 5;
 const EMPTY_LEVELS = Array.from({ length: EQ_BARS }, () => 0);
@@ -68,63 +70,76 @@ function mapFrequencyDataToBars(data: Uint8Array<ArrayBuffer>): number[] {
 }
 
 function useAudioReactiveEq(
-  audioRef: React.RefObject<HTMLAudioElement | null>,
+  musicRef: React.RefObject<HTMLAudioElement | null>,
+  speechRef: React.RefObject<HTMLAudioElement | null>,
   active: boolean
 ): { levels: number[]; reactive: boolean; resume: () => void } {
   const [state, setState] = useState({ levels: EMPTY_LEVELS, reactive: false });
 
   const resume = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || typeof window === 'undefined') return;
-    const graph = getOrCreateVisualizerGraph(audio);
-    graph?.context.resume().catch(() => {});
-  }, [audioRef]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || typeof window === 'undefined') return;
-
-    const wakeVisualizer = () => {
+    if (typeof window === 'undefined') return;
+    for (const ref of [musicRef, speechRef]) {
+      const audio = ref.current;
+      if (!audio) continue;
       const graph = getOrCreateVisualizerGraph(audio);
       graph?.context.resume().catch(() => {});
-    };
+    }
+  }, [musicRef, speechRef]);
 
-    audio.addEventListener('play', wakeVisualizer);
-    audio.addEventListener('playing', wakeVisualizer);
-    return () => {
-      audio.removeEventListener('play', wakeVisualizer);
-      audio.removeEventListener('playing', wakeVisualizer);
-    };
-  }, [audioRef]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const cleanups: Array<() => void> = [];
+    for (const ref of [musicRef, speechRef]) {
+      const audio = ref.current;
+      if (!audio) continue;
+      const wakeVisualizer = () => {
+        const graph = getOrCreateVisualizerGraph(audio);
+        graph?.context.resume().catch(() => {});
+      };
+      audio.addEventListener('play', wakeVisualizer);
+      audio.addEventListener('playing', wakeVisualizer);
+      cleanups.push(() => {
+        audio.removeEventListener('play', wakeVisualizer);
+        audio.removeEventListener('playing', wakeVisualizer);
+      });
+    }
+    return () => cleanups.forEach((fn) => fn());
+  }, [musicRef, speechRef]);
 
   useEffect(() => {
     if (!active) {
       setState((current) => (current.reactive ? { levels: EMPTY_LEVELS, reactive: false } : current));
       return;
     }
+    if (typeof window === 'undefined') return;
 
-    const audio = audioRef.current;
-    if (!audio || typeof window === 'undefined') return;
-
-    const graph = getOrCreateVisualizerGraph(audio);
-    if (!graph) return;
+    const sources = [musicRef.current, speechRef.current]
+      .filter((audio): audio is HTMLAudioElement => audio !== null)
+      .map((audio) => ({ audio, graph: getOrCreateVisualizerGraph(audio) }))
+      .filter((s): s is { audio: HTMLAudioElement; graph: VisualizerGraph } => s.graph !== null);
+    if (sources.length === 0) return;
 
     let cancelled = false;
     let frame = 0;
     let lastUpdate = 0;
-    graph.context.resume().catch(() => {});
+    sources.forEach((s) => s.graph.context.resume().catch(() => {}));
 
     const tick = (now: number) => {
       if (cancelled) return;
       if (now - lastUpdate > 32) {
         lastUpdate = now;
-        graph.analyser.getByteFrequencyData(graph.data);
-        // reactive 只由"是否在播"决定，不看能量阈值：暂停恢复后头几帧能量低、
+        // reactive 只由"是否有元素在出声"决定，不看能量阈值：暂停恢复后头几帧能量低、
         // 或前奏/弱段时能量本就低，用阈值当开关会把真实频谱误判成"假"动效。
-        const audible = !audio.paused && !audio.ended;
+        let merged: number[] | null = null;
+        for (const { audio, graph } of sources) {
+          if (audio.paused || audio.ended) continue;
+          graph.analyser.getByteFrequencyData(graph.data);
+          const bars = mapFrequencyDataToBars(graph.data);
+          merged = merged ? merged.map((v, i) => Math.max(v, bars[i] ?? 0)) : bars;
+        }
         setState({
-          levels: audible ? mapFrequencyDataToBars(graph.data) : EMPTY_LEVELS,
-          reactive: audible,
+          levels: merged ?? EMPTY_LEVELS,
+          reactive: merged !== null,
         });
       }
       frame = requestAnimationFrame(tick);
@@ -135,7 +150,7 @@ function useAudioReactiveEq(
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [active, audioRef]);
+  }, [active, musicRef, speechRef]);
 
   return { ...state, resume };
 }
@@ -245,7 +260,7 @@ export function RadioScreen({
   overlayArea: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const eq = useAudioReactiveEq(musicRef, isPlaying);
+  const eq = useAudioReactiveEq(musicRef, audio.speechRef, isPlaying);
 
   const handlePlayPause = useCallback(() => {
     eq.resume();
@@ -293,7 +308,8 @@ export function RadioScreen({
             position: 'relative',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 28px 74px -20px rgba(0,0,0,.5)',
+            border: '1px solid var(--frame-border)',
+            boxShadow: 'var(--frame-shadow)',
           } as React.CSSProperties
         }
       >
@@ -540,16 +556,15 @@ function PlayerSection({
   const [progHover, setProgHover] = useState(false);
   const pct = `${Math.min(Math.max(progress, 0), 1) * 100}%`;
 
-  const eqBarStyle = (index: number, duration: string, delay: string): React.CSSProperties => ({
+  // 只画真实频谱：有数据跟着数据跳，没数据静止在低位。不放假动画。
+  const eqBarStyle = (index: number): React.CSSProperties => ({
     width: 2.5,
     height: '100%',
     background: 'var(--ink)',
     transformOrigin: 'bottom',
     ...(eqLevels
       ? { transform: `scaleY(${Math.max(0.12, eqLevels[index] ?? 0)})`, transition: 'transform 60ms linear' }
-      : isPlaying
-        ? { animation: `eqbar ${duration} ease-in-out infinite ${delay}` }
-        : { transform: 'scaleY(0.28)' }),
+      : { transform: 'scaleY(0.28)', transition: 'transform 200ms ease' }),
   });
 
   return (
@@ -571,11 +586,9 @@ function PlayerSection({
         {/* EQ + track */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 16, flex: 'none' }}>
-            <span style={eqBarStyle(0, '.9s', '0s')} />
-            <span style={eqBarStyle(1, '.7s', '.2s')} />
-            <span style={eqBarStyle(2, '1.1s', '.1s')} />
-            <span style={eqBarStyle(3, '.8s', '.35s')} />
-            <span style={eqBarStyle(4, '1s', '.15s')} />
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span key={i} style={eqBarStyle(i)} />
+            ))}
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <SingleLineMarquee

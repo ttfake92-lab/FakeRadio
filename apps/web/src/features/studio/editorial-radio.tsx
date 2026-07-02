@@ -525,6 +525,7 @@ export function EditorialRadio() {
         ref={audio.speechRef}
         preload="auto"
         playsInline
+        crossOrigin="anonymous"
         style={{ display: 'none' }}
       />
     </>
@@ -542,16 +543,9 @@ export function EditorialRadio() {
         onSwitchBrief={(id) => setActiveBriefId(id)}
         onProjectsChanged={refreshProjects}
         onGenerateNow={handleGenerateNow}
-        onClose={() => setActiveView('main')}
       />
     ) : activeView === 'settings' ? (
-      <SettingsPanel
-        isExpanded
-        isOpen
-        embedded
-        onToggleExpand={() => {}}
-        onClose={() => setActiveView('main')}
-      />
+      <SettingsPanel />
     ) : null;
 
   return (

@@ -4,14 +4,12 @@ import type { ShowProject } from "@fakeradio/shared";
 import React, { useState, useMemo } from "react";
 import { deleteProject, deleteProjectTrace, getProjectExportFiles, downloadProjectFile, exportProject } from "../../lib/api-client";
 import { downloadBlob } from "../../lib/download-blob";
+import { PANEL_LABEL, FIELD_DESC, pillButton } from "./panel-ui";
 
+// 历史节目库列表。只在节目库覆盖层内嵌渲染（frontend 4.0），
+// 旧的悬浮窗模式（自带 Library 头部 + 展开箭头）已移除。
 export type ShowLibraryProps = {
-  isExpanded: boolean;
-  isOpen: boolean;
-  embedded?: boolean;
   projects: ShowProject[];
-  onToggleExpand: () => void;
-  onClose: () => void;
   onRefresh: () => void;
 };
 
@@ -45,15 +43,7 @@ function getStatusLabel(status: string): string {
   }
 }
 
-export function ShowLibrary({
-  isExpanded,
-  isOpen,
-  embedded = false,
-  projects,
-  onToggleExpand,
-  onClose,
-  onRefresh,
-}: ShowLibraryProps) {
+export function ShowLibrary({ projects, onRefresh }: ShowLibraryProps) {
   const sortedProjects = useMemo(() => {
     return [...projects].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -68,8 +58,6 @@ export function ShowLibrary({
     id: string;
     type: "project" | "trace";
   } | null>(null);
-
-  if (!isOpen) return null;
 
   const handleDeleteProject = async (projectId: string) => {
     setDeletingId(projectId);
@@ -133,170 +121,63 @@ export function ShowLibrary({
   };
 
   return (
-    <div
-      style={{
-        position: embedded ? "relative" : "fixed",
-        ...(embedded ? {} : { bottom: 80, left: "50%", transform: "translateX(-50%)" }),
-        width: embedded ? "100%" : isExpanded ? "min(520px, calc(100vw - 32px))" : "min(240px, calc(100vw - 32px))",
-        maxHeight: embedded ? "100%" : isExpanded ? "calc(100vh - 160px)" : "auto",
-        background: embedded ? "transparent" : "var(--bg-2)",
-        border: embedded ? "none" : "1px solid var(--line)",
-        borderRadius: 0,
-        overflow: "auto",
-        transition: "width 0.2s ease, transform 0.2s ease",
-        ...(embedded ? {} : { zIndex: 100 }),
-      }}
-    >
-      {!embedded && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            borderBottom: isExpanded ? "1px solid var(--line)" : "none",
-            cursor: "pointer",
-            background: "var(--ink-soft)",
-          }}
-          onClick={onToggleExpand}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span
-              style={{
-                fontFamily: "var(--font-display)",
-                color: "var(--text)",
-                fontSize: 20,
-                fontStyle: "italic",
-              }}
-            >
-              Library
-            </span>
-            {projects.length > 0 && (
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  padding: "2px 8px",
-                  background: "var(--ink-soft)",
-                  color: "var(--accent)",
-                  borderRadius: 0,
-                  fontSize: 9,
-                  letterSpacing: "0.15em",
-                }}
-              >
-                {projects.length}
-              </span>
-            )}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRefresh();
-              }}
-              aria-label="刷新"
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--mute)",
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                letterSpacing: "0.15em",
-                padding: 4,
-              }}
-            >
-              SYNC
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              aria-label="关闭"
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--mute)",
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                letterSpacing: "0.15em",
-                padding: 4,
-              }}
-            >
-              CLOSE
-            </button>
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                color: "var(--faint)",
-                fontSize: 9,
-                letterSpacing: "0.15em",
-              }}
-            >
-              {isExpanded ? "V" : ">"}
-            </span>
-          </div>
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <span style={PANEL_LABEL}>
+          {sortedProjects.length} {sortedProjects.length === 1 ? "SHOW" : "SHOWS"}
+        </span>
+        <button aria-label="刷新" onClick={onRefresh} style={{ ...pillButton("ghost"), padding: "5px 13px" }}>
+          SYNC
+        </button>
+      </div>
+
+      {sortedProjects.length === 0 ? (
+        <EmptyLibrary />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {sortedProjects.map((project) => (
+            <ProjectItem
+              key={project.id}
+              project={project}
+              isDeleting={deletingId === project.id}
+              isDeletingTrace={deletingTraceId === project.id}
+              isDownloading={downloadingId === project.id}
+              error={itemErrors[project.id]}
+              onDelete={() =>
+                setShowConfirmDelete({ id: project.id, type: "project" })
+              }
+              onDeleteTrace={() =>
+                setShowConfirmDelete({ id: project.id, type: "trace" })
+              }
+              onDownload={() => handleDownload(project)}
+            />
+          ))}
         </div>
       )}
 
-      {(embedded || isExpanded) && (
-        <div
-          style={{
-            padding: embedded ? 0 : 16,
-            maxHeight: embedded ? "none" : "calc(100vh - 260px)",
-            overflowY: embedded ? "visible" : "auto",
+      {showConfirmDelete && (
+        <ConfirmDialog
+          title={
+            showConfirmDelete.type === "project"
+              ? "删除节目工程"
+              : "删除 Trace 信息"
+          }
+          message={
+            showConfirmDelete.type === "project"
+              ? "确定要删除这个节目工程吗？此操作无法撤销。"
+              : "确定要删除这个节目的 Trace 信息吗？此操作无法撤销。"
+          }
+          confirmText="删除"
+          cancelText="取消"
+          onConfirm={() => {
+            if (showConfirmDelete.type === "project") {
+              handleDeleteProject(showConfirmDelete.id);
+            } else {
+              handleDeleteTrace(showConfirmDelete.id);
+            }
           }}
-        >
-          {sortedProjects.length === 0 ? (
-            <EmptyLibrary />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {sortedProjects.map((project) => (
-                <ProjectItem
-                  key={project.id}
-                  project={project}
-                  isDeleting={deletingId === project.id}
-                  isDeletingTrace={deletingTraceId === project.id}
-                  isDownloading={downloadingId === project.id}
-                  error={itemErrors[project.id]}
-                  onDelete={() =>
-                    setShowConfirmDelete({ id: project.id, type: "project" })
-                  }
-                  onDeleteTrace={() =>
-                    setShowConfirmDelete({ id: project.id, type: "trace" })
-                  }
-                  onDownload={() => handleDownload(project)}
-                />
-              ))}
-            </div>
-          )}
-
-          {showConfirmDelete && (
-            <ConfirmDialog
-              title={
-                showConfirmDelete.type === "project"
-                  ? "删除节目工程"
-                  : "删除 Trace 信息"
-              }
-              message={
-                showConfirmDelete.type === "project"
-                  ? "确定要删除这个节目工程吗？此操作无法撤销。"
-                  : "确定要删除这个节目的 Trace 信息吗？此操作无法撤销。"
-              }
-              confirmText="删除"
-              cancelText="取消"
-              onConfirm={() => {
-                if (showConfirmDelete.type === "project") {
-                  handleDeleteProject(showConfirmDelete.id);
-                } else {
-                  handleDeleteTrace(showConfirmDelete.id);
-                }
-              }}
-              onCancel={() => setShowConfirmDelete(null)}
-            />
-          )}
-        </div>
+          onCancel={() => setShowConfirmDelete(null)}
+        />
       )}
     </div>
   );
@@ -305,31 +186,21 @@ export function ShowLibrary({
 function EmptyLibrary() {
   return (
     <div style={{ textAlign: "center", padding: "24px 0" }}>
-      <p
-        style={{
-          color: "var(--faint)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          letterSpacing: "0.08em",
-          margin: "0 0 8px",
-        }}
-      >
-        暂无历史节目
-      </p>
-      <p
-        style={{
-          color: "var(--faint)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 9,
-          letterSpacing: "0.08em",
-          margin: 0,
-        }}
-      >
-        生成并保存节目后，它们会显示在这里
-      </p>
+      <p style={{ ...FIELD_DESC, margin: "0 0 8px" }}>暂无历史节目</p>
+      <p style={{ ...FIELD_DESC, margin: 0 }}>生成并保存节目后，它们会显示在这里</p>
     </div>
   );
 }
+
+const BADGE: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 8.5,
+  color: "var(--muted)",
+  border: "1px solid var(--line)",
+  padding: "2px 7px",
+  borderRadius: 999,
+  letterSpacing: "0.1em",
+};
 
 type ProjectItemProps = {
   project: ShowProject;
@@ -354,13 +225,17 @@ function ProjectItem({
 }: ProjectItemProps) {
   const hasTrace = !!project.productionTracePath;
   const canDownload = project.status === "ready" || project.status === "exported";
+  const smallPill = (variant: "ghost" | "danger"): React.CSSProperties => ({
+    ...pillButton(variant),
+    padding: "4px 10px",
+    fontSize: 8.5,
+  });
 
   return (
     <div
       style={{
-        padding: 12,
-        background: "var(--ink-soft)",
-        borderRadius: 0,
+        padding: "12px 14px",
+        borderRadius: 12,
         border: "1px solid var(--line)",
       }}
     >
@@ -375,9 +250,10 @@ function ProjectItem({
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             style={{
-              color: "var(--text)",
-              fontFamily: "var(--font-display)",
-              fontSize: 16,
+              color: "var(--ink)",
+              fontFamily: "var(--font-courier)",
+              fontSize: 13,
+              fontWeight: 700,
               lineHeight: 1.3,
               margin: 0,
               overflow: "hidden",
@@ -387,32 +263,9 @@ function ProjectItem({
           >
             {project.slug}
           </p>
-          <p
-            style={{
-              color: "var(--mute)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              margin: "4px 0 0 0",
-            }}
-          >
-            {formatDate(project.createdAt)}
-          </p>
+          <p style={{ ...FIELD_DESC, margin: "4px 0 0 0" }}>{formatDate(project.createdAt)}</p>
         </div>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            padding: "2px 8px",
-            borderRadius: 0,
-            fontSize: 9,
-            letterSpacing: "0.15em",
-            textTransform: "uppercase",
-            background: "var(--ink-soft)",
-            color: "var(--accent)",
-            marginLeft: 8,
-            flexShrink: 0,
-          }}
-        >
+        <span style={{ ...PANEL_LABEL, color: "var(--ink)", marginLeft: 8, flexShrink: 0 }}>
           {getStatusLabel(project.status)}
         </span>
       </div>
@@ -426,67 +279,11 @@ function ProjectItem({
           gap: 6,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {hasTrace && (
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                color: "var(--faint)",
-                background: "var(--ink-soft)",
-                padding: "2px 6px",
-                borderRadius: 0,
-                letterSpacing: "0.1em",
-              }}
-            >
-              TRACE
-            </span>
-          )}
-          {project.showPlanPath && (
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                color: "var(--faint)",
-                background: "var(--ink-soft)",
-                padding: "2px 6px",
-                borderRadius: 0,
-                letterSpacing: "0.1em",
-              }}
-            >
-              PLAN
-            </span>
-          )}
-          {project.showNotesPath && (
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                color: "var(--faint)",
-                background: "var(--ink-soft)",
-                padding: "2px 6px",
-                borderRadius: 0,
-                letterSpacing: "0.1em",
-              }}
-            >
-              NOTES
-            </span>
-          )}
-          {project.showAudioPath && (
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                color: "var(--faint)",
-                background: "var(--ink-soft)",
-                padding: "2px 6px",
-                borderRadius: 0,
-                letterSpacing: "0.1em",
-              }}
-            >
-              AUDIO
-            </span>
-          )}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          {hasTrace && <span style={BADGE}>TRACE</span>}
+          {project.showPlanPath && <span style={BADGE}>PLAN</span>}
+          {project.showNotesPath && <span style={BADGE}>NOTES</span>}
+          {project.showAudioPath && <span style={BADGE}>AUDIO</span>}
         </div>
 
         <div style={{ display: "flex", gap: 6 }}>
@@ -495,15 +292,7 @@ function ProjectItem({
               onClick={onDownload}
               disabled={isDownloading}
               style={{
-                padding: "4px 8px",
-                borderRadius: 0,
-                border: "1px solid var(--accent)",
-                background: "var(--ink-soft)",
-                color: "var(--text)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.15em",
-                textTransform: "uppercase",
+                ...smallPill("ghost"),
                 cursor: isDownloading ? "not-allowed" : "pointer",
                 opacity: isDownloading ? 0.6 : 1,
               }}
@@ -516,15 +305,7 @@ function ProjectItem({
               onClick={onDeleteTrace}
               disabled={isDeletingTrace}
               style={{
-                padding: "4px 8px",
-                borderRadius: 0,
-                border: "1px solid var(--line)",
-                background: "transparent",
-                color: "var(--faint)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.15em",
-                textTransform: "uppercase",
+                ...smallPill("danger"),
                 cursor: isDeletingTrace ? "not-allowed" : "pointer",
                 opacity: isDeletingTrace ? 0.6 : 1,
               }}
@@ -536,15 +317,7 @@ function ProjectItem({
             onClick={onDelete}
             disabled={isDeleting}
             style={{
-              padding: "4px 8px",
-              borderRadius: 0,
-              border: "1px solid var(--faint)",
-              background: "transparent",
-              color: "var(--faint)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.15em",
-              textTransform: "uppercase",
+              ...smallPill("danger"),
               cursor: isDeleting ? "not-allowed" : "pointer",
               opacity: isDeleting ? 0.6 : 1,
             }}
@@ -553,19 +326,7 @@ function ProjectItem({
           </button>
         </div>
       </div>
-      {error && (
-        <p
-          style={{
-            color: "var(--faint)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.08em",
-            margin: "8px 0 0",
-          }}
-        >
-          {error}
-        </p>
-      )}
+      {error && <p style={{ ...FIELD_DESC, color: "var(--danger)", margin: "8px 0 0" }}>{error}</p>}
     </div>
   );
 }
@@ -591,11 +352,9 @@ function ConfirmDialog({
     <div
       style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "var(--bg)",
+        inset: 0,
+        // 半透明遮罩：之前用不透明 var(--bg) 会把手机框外的整个页面糊死
+        background: "rgba(0, 0, 0, 0.5)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -605,9 +364,9 @@ function ConfirmDialog({
     >
       <div
         style={{
-          background: "var(--bg-2)",
+          background: "var(--bg2)",
           border: "1px solid var(--line)",
-          borderRadius: 0,
+          borderRadius: 14,
           padding: 20,
           maxWidth: 320,
           width: "90%",
@@ -616,59 +375,21 @@ function ConfirmDialog({
       >
         <h3
           style={{
-            color: "var(--text)",
-            fontFamily: "var(--font-display)",
-            fontSize: 20,
-            margin: "0 0 12px 0",
+            color: "var(--ink)",
+            fontFamily: "var(--font-courier)",
+            fontSize: 16,
+            fontWeight: 700,
+            margin: "0 0 10px 0",
           }}
         >
           {title}
         </h3>
-        <p
-          style={{
-            color: "var(--mute)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.08em",
-            margin: "0 0 20px 0",
-            lineHeight: 1.5,
-          }}
-        >
-          {message}
-        </p>
+        <p style={{ ...FIELD_DESC, fontSize: 10.5, margin: "0 0 18px 0" }}>{message}</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 0,
-              border: "1px solid var(--line)",
-              background: "transparent",
-              color: "var(--text)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.15em",
-              textTransform: "uppercase",
-              cursor: "pointer",
-            }}
-          >
+          <button onClick={onCancel} style={pillButton("ghost")}>
             {cancelText}
           </button>
-          <button
-            onClick={onConfirm}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 0,
-              border: "1px solid var(--faint)",
-              background: "transparent",
-              color: "var(--faint)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.15em",
-              textTransform: "uppercase",
-              cursor: "pointer",
-            }}
-          >
+          <button onClick={onConfirm} style={pillButton("danger")}>
             {confirmText}
           </button>
         </div>

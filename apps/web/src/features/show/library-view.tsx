@@ -12,6 +12,7 @@ import {
 } from "../../lib/api-client";
 import { ProductionBoard } from "./production-board";
 import { ShowLibrary } from "./show-library";
+import { PANEL_LABEL, FIELD_DESC, pillButton } from "./panel-ui";
 
 export type LibraryViewProps = {
   brief?: ProgramBrief | null;
@@ -22,26 +23,7 @@ export type LibraryViewProps = {
   onSwitchBrief?: (briefId: string) => void | Promise<void>;
   onProjectsChanged?: () => void;
   onGenerateNow?: (briefId: string) => void | Promise<void>;
-  onClose: () => void;
 };
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 9,
-        letterSpacing: "0.28em",
-        color: "var(--mute)",
-        textTransform: "uppercase",
-        marginBottom: 16,
-        marginTop: 8,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────
 // TodayExportSection — 今日整期打包（搬迁自原 ExportView）
@@ -92,24 +74,18 @@ function TodayExportSection() {
 
   return (
     <div>
-      <SectionTitle>TODAY&apos;S SHOW · 今日电台</SectionTitle>
-      <div style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.6, marginBottom: 16 }}>
+      <div style={{ ...PANEL_LABEL, marginBottom: 12 }}>TODAY&apos;S SHOW · 今日电台</div>
+      <div style={{ ...FIELD_DESC, fontSize: 10.5, marginBottom: 14 }}>
         把今天播放过的节目按顺序串成一期可发布的素材（show.mp3 + show notes）。
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <button
           onClick={handleExportToday}
           disabled={isExportingToday}
           style={{
-            padding: "8px 20px",
-            border: "1px solid var(--line)",
-            borderRadius: 999,
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.15em",
-            color: "var(--text)",
+            ...pillButton("ghost"),
             cursor: isExportingToday ? "wait" : "pointer",
-            background: "transparent",
+            opacity: isExportingToday ? 0.6 : 1,
           }}
         >
           {isExportingToday ? "EXPORTING…" : "EXPORT TODAY"}
@@ -118,23 +94,14 @@ function TodayExportSection() {
           <a
             href={buildApiUrl(todayTask.result.downloadUrl)}
             download
-            style={{
-              padding: "8px 20px",
-              border: "1px solid var(--text)",
-              borderRadius: 999,
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.15em",
-              color: "var(--text)",
-              textDecoration: "none",
-            }}
+            style={{ ...pillButton("primary"), textDecoration: "none" }}
           >
             DOWNLOAD ZIP
           </a>
         )}
       </div>
       {isExportingToday && todayTask?.progress && (
-        <div style={{ fontSize: 11, color: "var(--mute)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
+        <div style={{ ...FIELD_DESC, fontSize: 10.5, marginBottom: 12 }}>
           {(() => {
             const p = todayTask.progress;
             const labels: Record<string, string> = {
@@ -153,12 +120,12 @@ function TodayExportSection() {
         </div>
       )}
       {todayTask?.status === "completed" && todayTask.result && (
-        <div style={{ fontSize: 12, color: "#4ade80", marginBottom: 12 }}>
+        <div style={{ ...FIELD_DESC, fontSize: 10.5, color: "#4ade80", marginBottom: 12 }}>
           导出完成 · {todayTask.result.trackCount} 首 · {todayTask.result.date}
         </div>
       )}
       {todayTask?.status === "failed" && (
-        <div style={{ fontSize: 12, color: "#c44", marginBottom: 12 }}>
+        <div style={{ ...FIELD_DESC, fontSize: 10.5, color: "var(--danger)", marginBottom: 12 }}>
           {todayTask.error ?? "导出失败"}
         </div>
       )}
@@ -189,18 +156,14 @@ function ScheduleSection() {
   }, []);
 
   if (loading) {
-    return (
-      <div style={{ fontSize: 10, color: "var(--mute)", fontFamily: "var(--font-mono)", letterSpacing: "0.15em" }}>
-        LOADING…
-      </div>
-    );
+    return <div style={{ ...PANEL_LABEL, letterSpacing: "0.15em" }}>LOADING…</div>;
   }
 
   return (
     <div>
-      <SectionTitle>DAILY SCHEDULE &nbsp;·&nbsp; {date}</SectionTitle>
+      <div style={{ ...PANEL_LABEL, marginBottom: 4 }}>DAILY SCHEDULE · {date}</div>
       {blocks.length === 0 ? (
-        <div style={{ fontSize: 13, color: "var(--faint)", fontStyle: "italic" }}>暂无节目安排</div>
+        <div style={{ ...FIELD_DESC, fontSize: 11, fontStyle: "italic", marginTop: 10 }}>暂无节目安排</div>
       ) : (
         <div>
           {blocks.map((b, i) => {
@@ -210,23 +173,21 @@ function ScheduleSection() {
                 key={i}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "64px 1fr auto",
+                  gridTemplateColumns: "52px 1fr auto",
                   alignItems: "baseline",
-                  gap: 16,
-                  padding: "16px 0",
-                  borderTop: "1px solid var(--line)",
+                  gap: 12,
+                  padding: "13px 0",
+                  borderBottom: "1px solid var(--line)",
                 }}
               >
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--mute)", letterSpacing: "0.08em" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", letterSpacing: "0.08em" }}>
                   {b.at}
                 </span>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 20, lineHeight: 1.3 }}>{b.label}</div>
+                <div style={{ fontFamily: "var(--font-courier)", fontSize: 14, fontWeight: 700, lineHeight: 1.3 }}>{b.label}</div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.15em", color: "var(--faint)", textTransform: "uppercase" }}>
-                    {b.moodHint}
-                  </span>
+                  <span style={PANEL_LABEL}>{b.moodHint}</span>
                   {pw && (
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.1em", color: pw.ready > 0 ? "var(--text)" : "var(--faint)" }}>
+                    <span style={{ ...PANEL_LABEL, fontSize: 8, color: pw.ready > 0 ? "var(--ink)" : "var(--faint)" }}>
                       {pw.ready}R · {pw.consumed}C{pw.failed > 0 ? ` · ${pw.failed}F` : ""}
                     </span>
                   )}
@@ -234,7 +195,6 @@ function ScheduleSection() {
               </div>
             );
           })}
-          <div style={{ borderTop: "1px solid var(--line)" }} />
         </div>
       )}
     </div>
@@ -255,37 +215,19 @@ export function LibraryView({
   onSwitchBrief,
   onProjectsChanged,
   onGenerateNow,
-  onClose,
 }: LibraryViewProps) {
   const [activeTab, setActiveTab] = useState<LibraryTab>("production");
 
-  const tabs: Array<{ key: LibraryTab; label: string; sub: string; count?: number }> = [
-    { key: "production", label: "Production", sub: "制作工作台" },
-    { key: "library", label: "Library", sub: "节目库", count: projects?.length ?? 0 },
-    { key: "today", label: "Today", sub: "今日整期 + 节目单" },
+  const tabs: Array<{ key: LibraryTab; label: string; count?: number }> = [
+    { key: "production", label: "制作" },
+    { key: "library", label: "节目库", count: projects?.length ?? 0 },
+    { key: "today", label: "今日" },
   ];
 
   return (
-    <div
-      style={{
-        width: "100%",
-        maxWidth: "min(820px, 100%)",
-        margin: "0 auto",
-        padding: "32px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 24,
-      }}
-    >
-      {/* Tab Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "stretch",
-          gap: 0,
-          borderBottom: "1px solid var(--line)",
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Tab 分段控件：与顶栏 DARK/LIGHT 同一交互语言 */}
+      <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--seg-line)", borderRadius: 18, padding: 3, gap: 2 }}>
         {tabs.map((t) => {
           const active = t.key === activeTab;
           return (
@@ -294,55 +236,27 @@ export function LibraryView({
               onClick={() => setActiveTab(t.key)}
               style={{
                 flex: 1,
-                padding: "16px 12px",
-                background: "transparent",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "1.5px",
                 border: "none",
-                cursor: "pointer",
-                borderBottom: active ? "1px solid var(--accent)" : "1px solid transparent",
-                marginBottom: -1,
+                borderRadius: 14,
+                padding: "6px 9px",
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "center",
+                justifyContent: "center",
                 gap: 6,
-                color: active ? "var(--text)" : "var(--mute)",
-                transition: "color 0.18s ease",
+                ...(active
+                  ? { background: "var(--seg-bg)", color: "var(--ink)", fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,.15)" }
+                  : { background: "transparent", color: "var(--muted)", fontWeight: 500 }),
               }}
             >
-              <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: 20,
-                    fontStyle: "italic",
-                    lineHeight: 1,
-                  }}
-                >
-                  {t.label}
+              {t.label}
+              {typeof t.count === "number" && t.count > 0 && (
+                <span style={{ fontSize: 8.5, letterSpacing: "0.1em", color: active ? "var(--ink)" : "var(--faint)" }}>
+                  {t.count}
                 </span>
-                {typeof t.count === "number" && t.count > 0 && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10,
-                      letterSpacing: "0.15em",
-                      color: "var(--accent)",
-                    }}
-                  >
-                    {t.count}
-                  </span>
-                )}
-              </span>
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 9,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  color: "var(--faint)",
-                }}
-              >
-                {t.sub}
-              </span>
+              )}
             </button>
           );
         })}
@@ -351,10 +265,6 @@ export function LibraryView({
       {/* Active panel */}
       {activeTab === "production" && (
         <ProductionBoard
-          isExpanded
-          embedded
-          onToggleExpand={() => {}}
-          onClose={onClose}
           {...(brief !== undefined ? { brief } : {})}
           {...(briefs !== undefined ? { briefs } : {})}
           {...(showPlan !== undefined ? { showPlan } : {})}
@@ -367,21 +277,13 @@ export function LibraryView({
       )}
 
       {activeTab === "library" && (
-        <ShowLibrary
-          isExpanded
-          isOpen
-          embedded
-          projects={projects ?? []}
-          onToggleExpand={() => {}}
-          onClose={onClose}
-          onRefresh={onProjectsChanged ?? (() => {})}
-        />
+        <ShowLibrary projects={projects ?? []} onRefresh={onProjectsChanged ?? (() => {})} />
       )}
 
       {activeTab === "today" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <TodayExportSection />
-          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 32 }}>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 20 }}>
             <ScheduleSection />
           </div>
         </div>

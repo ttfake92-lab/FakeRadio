@@ -29,8 +29,11 @@
   --deco: rgba(0, 0, 0, 0.11);
   --glow1: rgba(0, 0, 0, 0);
   --glow2: rgba(0, 0, 0, 0);
-  --glowC: rgba(150, 120, 88, 0.13);
+  --glowC: rgba(150, 120, 88, 0.07);
   --backdrop: #c9c6bd;
+  /* 手机框投影：浅色靠阴影和背景分离 */
+  --frame-shadow: 0 28px 74px -20px rgba(0, 0, 0, 0.5);
+  --frame-border: rgba(0, 0, 0, 0.08);
 
   /* 旧组件沿用的颜色别名 → 映射到新配色 */
   --text: var(--ink);
@@ -62,8 +65,14 @@
   --deco: rgba(255, 255, 255, 0.09);
   --glow1: rgba(104, 112, 158, 0.42);
   --glow2: rgba(150, 110, 96, 0.32);
-  --glowC: rgba(128, 140, 198, 0.36);
+  --glowC: rgba(128, 140, 198, 0.18);
   --backdrop: #0a0a0a;
+  /* 深色下框体和页面背景几乎同色，靠边缘光晕 + 细描边把播放器"抬"出来 */
+  --frame-shadow:
+    0 0 90px -18px rgba(120, 132, 195, 0.5),
+    0 0 30px -6px rgba(120, 132, 195, 0.28),
+    0 28px 74px -20px rgba(0, 0, 0, 0.85);
+  --frame-border: rgba(255, 255, 255, 0.12);
 
   --ink-soft: rgba(255, 255, 255, 0.04);
 }
@@ -113,11 +122,6 @@ h1, h2, h3, h4, p {
 }
 
 /* ── Animations ── */
-@keyframes eqbar {
-  0%, 100% { transform: scaleY(0.28); }
-  50%      { transform: scaleY(1); }
-}
-
 @keyframes blinklive {
   0%, 55%   { opacity: 1; }
   56%, 100% { opacity: 0.15; }

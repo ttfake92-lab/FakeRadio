@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { SettingsPanel } from "./settings-panel";
 import * as apiClient from "../../lib/api-client";
 
@@ -39,23 +39,15 @@ describe("SettingsPanel 用户流", () => {
     cleanup();
   });
 
-  it("打开面板时加载设置", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+  it("挂载即加载设置", async () => {
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(mockGetSettings).toHaveBeenCalledTimes(1);
     });
   });
 
-  it("不打开面板时不加载设置", async () => {
-    vi.useFakeTimers();
-    render(<SettingsPanel isExpanded={false} isOpen={false} onToggleExpand={() => {}} onClose={() => {}} />);
-    await act(async () => { vi.advanceTimersByTime(100); });
-    expect(mockGetSettings).not.toHaveBeenCalled();
-    vi.useRealTimers();
-  });
-
   it("可以切换外部资料研究设置", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByText("启用外部资料研究")).toBeInTheDocument();
     });
@@ -72,7 +64,7 @@ describe("SettingsPanel 用户流", () => {
   });
 
   it("不显示模拟 Provider，且可以修改网易云 API 地址", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByLabelText("Provider 模式")).toBeInTheDocument();
     });
@@ -97,7 +89,7 @@ describe("SettingsPanel 用户流", () => {
   });
 
   it("可以修改 TTS Provider", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByLabelText("TTS Provider")).toBeInTheDocument();
     });
@@ -119,7 +111,7 @@ describe("SettingsPanel 用户流", () => {
       grok: [{ value: "ara", label: "Ara · 温暖、友好" }],
       grokStyles: [{ value: "whisper", label: "耳语 <whisper>" }]
     });
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByLabelText("音色")).toBeInTheDocument();
     });
@@ -145,7 +137,7 @@ describe("SettingsPanel 用户流", () => {
   });
 
   it("可以修改 Trace 隐私级别", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByLabelText("Trace 隐私级别")).toBeInTheDocument();
     });
@@ -162,7 +154,7 @@ describe("SettingsPanel 用户流", () => {
   });
 
   it("可以修改外部曲目上限", async () => {
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByLabelText("外部曲目上限 (%)")).toBeInTheDocument();
     });
@@ -181,7 +173,7 @@ describe("SettingsPanel 用户流", () => {
   it("API 失败后回滚并重试", async () => {
     mockUpdateSettings.mockRejectedValueOnce(new Error("Network error"));
 
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByText("启用外部资料研究")).toBeInTheDocument();
     });
@@ -201,7 +193,7 @@ describe("SettingsPanel 用户流", () => {
   it("加载失败后显示重试按钮", async () => {
     mockGetSettings.mockRejectedValueOnce(new Error("Failed to load"));
 
-    render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+    render(<SettingsPanel />);
     await waitFor(() => {
       expect(screen.getByText("Retry")).toBeInTheDocument();
     });
@@ -213,63 +205,19 @@ describe("SettingsPanel 用户流", () => {
     });
   });
 
-  it("关闭面板后不显示内容", async () => {
-    const { rerender } = render(<SettingsPanel isExpanded={true} isOpen={true} onToggleExpand={() => {}} onClose={() => {}} />);
+  it("分区可折叠：收起后隐藏内容，再点展开", async () => {
+    render(<SettingsPanel />);
     await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeInTheDocument();
+      expect(screen.getByText("启用外部资料研究")).toBeInTheDocument();
     });
 
-    rerender(<SettingsPanel isExpanded={false} isOpen={false} onToggleExpand={() => {}} onClose={() => {}} />);
-    await waitFor(() => {
-      expect(screen.queryByText("Settings")).not.toBeInTheDocument();
-    });
-  });
+    const sectionToggle = screen.getByRole("button", { name: /Research/ });
+    expect(sectionToggle).toHaveAttribute("aria-expanded", "true");
 
-  it("展开/折叠切换", async () => {
-    const handleToggleExpand = vi.fn();
-    const { rerender } = render(
-      <SettingsPanel
-        isExpanded={false}
-        isOpen={true}
-        onToggleExpand={handleToggleExpand}
-        onClose={() => {}}
-      />
-    );
-    await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeInTheDocument();
-    });
+    fireEvent.click(sectionToggle);
+    expect(screen.queryByText("启用外部资料研究")).not.toBeInTheDocument();
 
-    // 点击展开
-    fireEvent.click(screen.getByText(">"));
-    expect(handleToggleExpand).toHaveBeenCalledTimes(1);
-
-    // 切换到展开状态
-    rerender(
-      <SettingsPanel
-        isExpanded={true}
-        isOpen={true}
-        onToggleExpand={handleToggleExpand}
-        onClose={() => {}}
-      />
-    );
-    expect(screen.getByText("V")).toBeInTheDocument();
-  });
-
-  it("关闭按钮关闭面板", async () => {
-    const handleClose = vi.fn();
-    render(
-      <SettingsPanel
-        isExpanded={true}
-        isOpen={true}
-        onToggleExpand={() => {}}
-        onClose={handleClose}
-      />
-    );
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    expect(handleClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(sectionToggle);
+    expect(screen.getByText("启用外部资料研究")).toBeInTheDocument();
   });
 });

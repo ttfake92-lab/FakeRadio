@@ -4,6 +4,7 @@ import React from 'react';
 import type { Track, TasteResponse, ShowJob } from '@fakeradio/shared';
 import type { AgentMessage } from '../player/use-stream-connection';
 import { QUICK_PROMPTS } from '../player/skin-config';
+import { Chevron } from '../show/panel-ui';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -126,10 +127,11 @@ export function ChatSection({
         <div style={{ margin: '12px 0 8px' }}>
           <button
             onClick={onToggleTaste}
+            aria-expanded={showTaste}
             style={{ ...MONO_LABEL, letterSpacing: '2px', display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <span style={{ fontSize: 8 }}>{showTaste ? '▼' : '▶'}</span>
             TASTE
+            <Chevron open={showTaste} />
           </button>
           {showTaste && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
