@@ -96,14 +96,12 @@ FakeRadio 当前已经有最小连续性闭环：
 
 ## 播放器观测面
 
-PWA 目前不是纯展示壳，而是本地运行态面板。它直接展示：
+PWA 直接展示：
 
-- 当前播放状态
-- stream 连接状态
-- 当前 music provider 状态
-- 当前曲目与队列来源
-- mock 回退提示
-- 今日计划与最新 `/api/next` 决策结果
+- 当前播放状态（ON AIR / STANDBY）与曲目信息
+- stream 连接状态（RADIO AI 区的 CONNECTED / OFFLINE）
+- 真实待播队列（QUEUE 栏展开）
+- DJ 口播与聊天记录、编排进度、播放错误提示
 
 播放器的音频管线当前遵循四条稳定性规则：
 
@@ -112,7 +110,7 @@ PWA 目前不是纯展示壳，而是本地运行态面板。它直接展示：
 - 切歌（`playEpisodeData`）时先 `pause()` 两个 audio 元素再设新 src，防止旧口播/旧音乐尾音与新口播并行（"两个音频打架"根因）。
 - 写入 `HTMLMediaElement.volume` 前，计算结果必须限制在 `[0, 1]`，避免浏览器抛出越界错误。
 - `dj-speech` WebSocket 事件到达时，若 episode story 正在播放（`speechAudio` 未暂停），仅更新 DJ 文字但不播放音频，避免覆盖正在进行的 story 口播。
-- 可视化动效（`useAudioReactiveVisualizer`）的 `reactive`（真实频谱 vs CSS 假波形）只由 `!audio.paused && !audio.ended` 决定，不看能量阈值——前奏/弱段能量本就低，用阈值当开关会在暂停恢复后卡在假动效。
+- 可视化动效（`radio-screen.tsx:useAudioReactiveEq`）**同时分析音乐和口播两个元素**（各建一套 AnalyserNode，按柱取 max）：口播阶段音乐是暂停的，只看音乐会没有频谱。`reactive` 只由「是否有元素在出声」（`!paused && !ended`）决定，不看能量阈值——前奏/弱段能量本就低，用阈值当开关会误判成假动效。没有真实频谱时柱子静止，**不存在 CSS 假动画退路**。两个 `<audio>` 元素都必须带 `crossOrigin="anonymous"`，否则分析器读不到数据。
 
 ## Story Episode 链路
 
@@ -133,31 +131,38 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 
 这条链路遵循现有边界：前端不直接访问资料 provider，所有外部资料源通过 server adapter 接入。
 
-## 播放器 UI 系统
+## 播放器 UI 系统（frontend 4.0，2026-07-02）
 
-FakeRadio 前端主界面为 **Editorial Radio**（`editorial-radio.tsx`），采用三栏桌面布局（260px / 1fr / 320px），支持 bone（浅色 `#f4f1ea`）和 graphite（深色 `#0e0e10`）两套主题，通过 `data-theme` 属性切换。
+前端主界面为**全端统一的 440×812 手机框**（设计稿来自 Claude Design 导出的 `FakeRadio.dc.html`）：桌面浏览器居中显示手机框，移动端占满视口。支持 light / dark 两套主题，`data-theme` 属性挂在 documentElement 和框体上；localStorage 旧值 `bone`/`graphite` 读取时自动迁移为 `light`/`dark`。
 
-### Editorial Radio 布局
+### 分层结构
 
-- **TopBar**（`position: fixed`，固定视口顶部）：左侧 `FakeRadio.` + 网易云登录状态，中间六导航标签（正在播放/节目单/制作/节目库/导出/设置），右侧 ON AIR 指示器 + 主题切换按钮
-- **LeftColumn**（260px）：封面、曲目信息（标题/艺术家/专辑）、进度条、播放控制（V/M 音量）、UP NEXT 队列
-- **CenterColumn**（1fr）：主内容区，支持六个视图 —— `main`（可视化 + DJ 引语）、`schedule`（节目单）、`production`（ProductionBoard）、`library`（ShowLibrary）、`export`（导出）、`settings`（SettingsPanel）
-- **RightColumn**（320px）：TRANSCRIPT 面板（DJ/YOU 消息、Agent 活动、TASTE 折叠区、快捷指令、输入框）
+| 文件 | 职责 |
+|------|------|
+| `apps/web/src/features/studio/editorial-radio.tsx` | 全部状态与逻辑（播放、SSE 聊天、编排 job 轮询、收藏、网易云登录弹窗），不含布局 |
+| `apps/web/src/features/studio/radio-screen.tsx` | 手机框渲染层：Header、条纹时钟（ON AIR/STANDBY）、播放器（悬停进度条 / EQ 5 柱 / 5 格音量）、可展开 QUEUE、右上角菜单抽屉、覆盖层容器 |
+| `apps/web/src/features/studio/radio-chat.tsx` | 聊天渲染层：AI/用户气泡（带 HH:MM 时间戳）、快捷指令、DJ 推荐候选卡、编排进度面板、TASTE 折叠区 |
+| `apps/web/src/features/show/panel-ui.tsx` | 面板共享设计语言：`CollapsibleSection`（QUEUE 栏同款展开交互）、`pillButton`、`FIELD_*` 字段样式令牌 |
 
-所有子页面（ProductionBoard、SettingsPanel、ShowLibrary）已统一为 editorial 风格：标题用 Instrument Serif 衬线体，标签和元数据用 JetBrains Mono 等宽体 9-10px + `letterSpacing: 0.15em`，无圆角，无 emoji 图标，颜色使用 CSS 变量（`--accent`、`--ink-soft`、`--line`、`--faint`、`--mute`）。
+### 导航与视图
 
-### 排版系统
+功能入口收在右上角汉堡菜单：**节目库**、**设置**、**网易云登录**（状态点）。视图为 `main` / `library` / `settings` 三值（`RadioView`），library 和 settings 以覆盖层渲染在手机框内，顶部有 BACK 栏。节目库覆盖层内部是分段控件式三 Tab：**制作**（ProductionBoard：Brief/History 下拉 + Plan/Jobs/Export 折叠区 + Generate Now）、**节目库**（ShowLibrary 历史工程列表）、**今日**（今日整期导出 + 只读节目单）。
+
+`SettingsPanel` / `ProductionBoard` / `ShowLibrary` 只有 embedded 形态（旧的悬浮窗模式及其 `isExpanded`/`onToggleExpand`/`onClose` props 已在 2026-07-02 删除）。
+
+### 排版与令牌
 
 | 用途 | 字体 |
 |------|------|
-| Display | Instrument Serif |
-| Serif EN | Cormorant Garamond |
-| Body | Manrope |
-| Mono | JetBrains Mono |
+| UI / 标签 | JetBrains Mono |
+| 聊天正文 / 曲目标题 | Courier Prime |
+| 中文兜底 | Noto Sans SC |
 
-### 旧版皮肤系统（已清理）
+颜色令牌定义在 `globals.css`：`--bg`/`--ink`/`--muted`/`--faint`/`--line`/`--bubble`/`--seg-*` 等，深色框体边缘光晕走 `--frame-shadow`/`--frame-border`，鼠标跟随光晕 `--glowC`。同时保留旧变量别名（`--text`→`--ink`、`--mute`→`--muted`、`--bg-2`→`--bg2`、`--accent`→`--ink` 等）兼容未迁移代码。
 
-此前支持 7 套主题（`terminal-fm`、`morning-console` 为旧版；`amber`、`pixel`、`terminal`、`bento`、`y2k` 为新版皮肤），通过 `skin-stage.tsx` 渲染。2026-05-29 前端清理（T2）删除了 `skin-pixel.tsx`、`skin-terminal.tsx`、`skin-bento.tsx`、`skin-y2k.tsx` 和 `on-air-terminal.tsx`，仅保留 `skin-amber.tsx` 作为可选皮肤。2026-06-21 架构简化进一步删除了前端 `ON_AIR_THEMES`、`OnAirThemeId` 类型和 `getThemeLabel` 函数（单值孤儿系统）。`useRadioBridge` hook 和 `skin-stage.tsx` 仍保留。
+### 旧版皮肤系统（已删除）
+
+历史上曾有 7 套皮肤（`skin-stage.tsx` 渲染），2026-05-29 清理到只剩 amber，2026-07-02 前端 4.0 重设计中 `skin-amber.tsx`、`skin-stage.tsx`、`useRadioBridge` 已全部删除；`skin-config.ts` 仅保留 `QUICK_PROMPTS` 快捷指令配置。
 
 ## Show Production 链路
 

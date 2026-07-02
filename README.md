@@ -93,7 +93,7 @@ FakeRadio 已实现 story-first 电台播放闭环：
 
 ## 结构
 
-- `apps/web`：Next.js PWA 播放器，Editorial Radio 主界面 + amber 可选皮肤。
+- `apps/web`：Next.js PWA 播放器，全端统一手机框界面（frontend 4.0）。
 - `server`：Fastify 本地服务中枢，含 SQLite 持久层。
 - `packages/shared`：前后端共享 contract。
 - `user`：用户品味、日程、歌单、收藏和 mood rules。

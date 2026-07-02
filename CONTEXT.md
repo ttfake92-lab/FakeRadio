@@ -178,15 +178,15 @@ FakeRadio 目前按四层理解：
 
 ### 播放器 UI
 
-- 主界面为 Editorial Radio（`editorial-radio.tsx`），三栏桌面布局，bone/graphite 双主题。
-- 旧版 5 套皮肤（pixel/terminal/bento/y2k/on-air-terminal）已在 2026-05-29 清理删除，仅保留 amber 作为可选皮肤。2026-06-21 进一步删除前端 `ON_AIR_THEMES`、`OnAirThemeId` 类型和 `getThemeLabel` 函数。
+- 主界面为全端统一的 440×812 手机框（frontend 4.0，2026-07-02），light/dark 双主题（localStorage 旧值 bone/graphite 自动迁移）。逻辑在 `editorial-radio.tsx`，渲染层拆在 `radio-screen.tsx` / `radio-chat.tsx`，面板共享设计语言在 `features/show/panel-ui.tsx`。
+- 节目库/设置/网易云登录收在右上角汉堡菜单；节目库覆盖层内含 制作/节目库/今日 三个 Tab。
+- 皮肤系统已全部删除（2026-07-02 删掉 `skin-amber.tsx`/`skin-stage.tsx`/`useRadioBridge`），`skin-config.ts` 仅保留 `QUICK_PROMPTS` 快捷指令。
 
 ### 播放器诊断
 
-- 播放器状态条会显示播放状态、stream 状态、music provider 状态和同步状态。
-- 当前曲目与队列会显示来源标签。
-- 当 music provider 回退到 mock 时，前端会给出显式提示。
-- 前端展示 story type 标签、source kind 标签、资料来源数量和降级提示。
+- RADIO AI 区显示 stream 连接状态（CONNECTED / OFFLINE）；播放错误显示在播放器下方错误行。
+- QUEUE 栏展开显示真实待播队列（episode 播放中 = 已预取的下一首）。
+- EQ 可视化只画真实频谱（音乐 + 口播双元素 AnalyserNode），无假动画退路。
 
 ### Story Episode 播放闭环
 
