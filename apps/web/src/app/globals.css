@@ -1,36 +1,71 @@
-/* Editorial Radio — design tokens & animations */
+/* FakeRadio — design tokens & animations (frontend 4.0, from FakeRadio.dc.html) */
 
 :root {
   color-scheme: light;
 
   /* Type system */
-  --font-display: "Instrument Serif", "Noto Serif SC", serif;
-  --font-serif-en: "Cormorant Garamond", "Noto Serif SC", serif;
-  --font-body: "Manrope", "Noto Sans SC", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  --font-courier: "Courier Prime", "Courier New", Courier, "Noto Sans SC", monospace;
+  /* 旧组件（节目库/设置/制作面板）沿用的字体别名，统一指向新字体栈 */
+  --font-display: "Courier Prime", "Courier New", Courier, "Noto Serif SC", monospace;
+  --font-serif-en: "Courier Prime", "Courier New", Courier, "Noto Serif SC", monospace;
+  --font-body: "JetBrains Mono", ui-monospace, "Noto Sans SC", monospace;
 
-  /* Bone (Light) — default */
-  --bg: #f4f1ea;
-  --bg-2: #ebe7dd;
-  --text: #1a1815;
-  --mute: rgba(26, 24, 21, 0.5);
-  --faint: rgba(26, 24, 21, 0.3);
-  --line: rgba(26, 24, 21, 0.12);
-  --accent: #2a2620;
-  --ink-soft: rgba(26, 24, 21, 0.03);
+  /* Light — default */
+  --bg: #efece4;
+  --bg2: #f4f1ea;
+  --ink: #1b1b19;
+  --muted: #98948b;
+  --faint: #c3bfb5;
+  --line: #d6d2c9;
+  --stripe: #232321;
+  --seg-bg: #ffffff;
+  --seg-line: #cbc7bd;
+  --send-bg: transparent;
+  --send-fg: #1b1b19;
+  --send-bd: #cbc7bd;
+  --bubble: #f6f3ec;
+  --grain: rgba(0, 0, 0, 0.3);
+  --deco: rgba(0, 0, 0, 0.11);
+  --glow1: rgba(0, 0, 0, 0);
+  --glow2: rgba(0, 0, 0, 0);
+  --glowC: rgba(150, 120, 88, 0.13);
+  --backdrop: #c9c6bd;
+
+  /* 旧组件沿用的颜色别名 → 映射到新配色 */
+  --text: var(--ink);
+  --mute: var(--muted);
+  --accent: var(--ink);
+  --bg-2: var(--bg2);
+  --paper: var(--bg);
+  --ink-soft: rgba(0, 0, 0, 0.03);
+  --danger: #c44;
 }
 
-[data-theme="graphite"] {
+[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0e0e10;
-  --bg-2: #15151a;
-  --text: #ebe8e1;
-  --mute: rgba(235, 232, 225, 0.5);
-  --faint: rgba(235, 232, 225, 0.3);
-  --line: rgba(235, 232, 225, 0.12);
-  --accent: #d0c8b8;
-  --ink-soft: rgba(235, 232, 225, 0.04);
+  --bg: #060606;
+  --bg2: #0d0d0d;
+  --ink: #ededed;
+  --muted: #6b6b6b;
+  --faint: #333333;
+  --line: #212121;
+  --stripe: #ededed;
+  --seg-bg: #282828;
+  --seg-line: #2c2c2c;
+  --send-bg: #d8d8d8;
+  --send-fg: #0a0a0a;
+  --send-bd: transparent;
+  --bubble: #0f0f0f;
+  --grain: rgba(255, 255, 255, 0.4);
+  --deco: rgba(255, 255, 255, 0.09);
+  --glow1: rgba(104, 112, 158, 0.42);
+  --glow2: rgba(150, 110, 96, 0.32);
+  --glowC: rgba(128, 140, 198, 0.36);
+  --backdrop: #0a0a0a;
+
+  --ink-soft: rgba(255, 255, 255, 0.04);
 }
 
 /* ── Reset ── */
@@ -45,9 +80,9 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-body);
+  background: var(--backdrop);
+  color: var(--ink);
+  font-family: var(--font-mono);
   -webkit-font-smoothing: antialiased;
   transition: background 240ms ease, color 240ms ease;
 }
@@ -78,6 +113,26 @@ h1, h2, h3, h4, p {
 }
 
 /* ── Animations ── */
+@keyframes eqbar {
+  0%, 100% { transform: scaleY(0.28); }
+  50%      { transform: scaleY(1); }
+}
+
+@keyframes blinklive {
+  0%, 55%   { opacity: 1; }
+  56%, 100% { opacity: 0.15; }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+  50%      { opacity: 1; transform: translateX(-50%) scale(1.18); }
+}
+
+@keyframes glowpulse {
+  0%, 100% { opacity: 0.72; }
+  50%      { opacity: 1; }
+}
+
 @keyframes fr-pulse {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 0.9; transform: scale(1.08); }
@@ -85,11 +140,6 @@ h1, h2, h3, h4, p {
 
 @keyframes fr-spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes fr-wave {
-  0%, 100% { transform: scaleY(0.3); }
-  50%      { transform: scaleY(1); }
 }
 
 @keyframes fr-caret {
