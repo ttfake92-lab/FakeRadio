@@ -10,6 +10,7 @@ import {
   createMimoTtsAdapter,
   createMusicAdapter,
   createNeteaseLyricAdapter,
+  createOpenMeteoWeatherAdapter,
   createWeatherAdapter,
   createWebResearchAdapter
 } from "../adapters/index.js";
@@ -133,10 +134,22 @@ async function buildSnapshot(
     });
   })();
 
-  const weather = overrides.weather ?? (env.FAKERADIO_OPENWEATHER_API_KEY
-    ? createWeatherAdapter({ apiKey: env.FAKERADIO_OPENWEATHER_API_KEY, city: env.FAKERADIO_WEATHER_CITY })
-    : createDisabledWeatherAdapter());
-  const weatherStatus: AdapterStatus = overrides.weather ? "ready" : env.FAKERADIO_OPENWEATHER_API_KEY ? "ready" : "disabled";
+  // 天气默认走 Open-Meteo(免 key 开箱即用);配置了 OpenWeatherMap key 时优先用它。
+  // 之前没 key 时天气 disabled,推荐/口播完全感知不到天气。
+  // FAKERADIO_WEATHER_PROVIDER=disabled 保留给单测(不打真实网络)。
+  const useOpenWeatherMap = env.FAKERADIO_WEATHER_PROVIDER === "openweathermap"
+    || (env.FAKERADIO_WEATHER_PROVIDER === "auto" && !!env.FAKERADIO_OPENWEATHER_API_KEY);
+  const weatherDisabled = env.FAKERADIO_WEATHER_PROVIDER === "disabled"
+    || (useOpenWeatherMap && !env.FAKERADIO_OPENWEATHER_API_KEY);
+  // 城市优先用 settings.weatherCity(个人资料面板可编辑,applySettings 时重建 adapter 生效),
+  // 空串回退到环境变量默认值。
+  const weatherCity = settings.weatherCity?.trim() || env.FAKERADIO_WEATHER_CITY;
+  const weather = overrides.weather ?? (weatherDisabled
+    ? createDisabledWeatherAdapter()
+    : useOpenWeatherMap
+      ? createWeatherAdapter({ apiKey: env.FAKERADIO_OPENWEATHER_API_KEY!, city: weatherCity })
+      : createOpenMeteoWeatherAdapter({ city: weatherCity }));
+  const weatherStatus: AdapterStatus = overrides.weather ? "ready" : weatherDisabled ? "disabled" : "ready";
 
   const calendar = overrides.calendar ?? (env.FAKERADIO_LARK_CALENDAR_CLIENT_ID && env.FAKERADIO_LARK_CALENDAR_CLIENT_SECRET
     ? createLarkCalendarAdapter({

@@ -42,15 +42,26 @@ import { buildRecommendationContext, selectRecommendedCandidates } from "../reco
 import { createPlaybackState } from "./playback-state.js";
 import { registerRoutes } from "./register-routes.js";
 import { createRuntimeAdapterManager } from "./runtime-adapter-manager.js";
-import { SettingsSchema } from "@fakeradio/shared";
+import { SettingsSchema, type DjPersonaOverride } from "@fakeradio/shared";
+import { DJ_PERSONA_PREF_KEY, setPersonaOverride } from "../user/dj-persona-store.js";
 
 function loadSystemPrompt(): string {
-  try {
-    const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
-    return readFileSync(resolve(projectRoot, "prompts/dj-persona.md"), "utf-8").trim();
-  } catch {
-    return "你是 FakeRadio DJ。";
+  // 本文件在 server/src/http/ 下,仓库根是 ../../../ (之前写成 ../../ 只到 server/,
+  // prompts/dj-persona.md 永远读不到,DJ 一直在用兜底的一句话人设)。
+  // 两个候选路径: import.meta 推出的仓库根 + process.cwd()(dev 脚本从仓库根启动)。
+  const candidates = [
+    resolve(fileURLToPath(new URL("../../../", import.meta.url)), "prompts/dj-persona.md"),
+    resolve(process.cwd(), "prompts/dj-persona.md")
+  ];
+  for (const path of candidates) {
+    try {
+      return readFileSync(path, "utf-8").trim();
+    } catch {
+      // 尝试下一个候选
+    }
   }
+  console.warn("[server] prompts/dj-persona.md not found, using minimal fallback persona");
+  return "你是 FakeRadio DJ。";
 }
 
 type CreateRadioServerOptions = {
@@ -90,6 +101,9 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const baseDir = options.baseDir ?? resolve(process.cwd());
   const ttsCacheDir = options.ttsCacheDir ?? resolve(process.cwd(), env.FAKERADIO_TTS_CACHE_DIR);
   const stateRepo = createStateRepository(resolve(baseDir, "fakeradio.db"));
+  // 恢复用户自定义 DJ 人设(头像面板可编辑),对聊天/口播/预热的 LLM 调用生效
+  const savedPersona = await stateRepo.getPref<DjPersonaOverride>(DJ_PERSONA_PREF_KEY);
+  setPersonaOverride(savedPersona ?? null);
   const neteaseCookieStore = createNeteaseCookieStore(resolve(process.cwd(), env.FAKERADIO_NETEASE_COOKIE_FILE));
   const defaultSettings = SettingsSchema.parse({
     providerMode: "netease",

@@ -65,6 +65,16 @@ vi.mock("../../lib/api-client", () => ({
   downloadProjectFile: vi.fn(),
   exportTodayShow: vi.fn(),
   getExportTodayStatus: vi.fn(),
+  insertNextTrack: vi.fn(),
+  getPersona: vi.fn().mockResolvedValue({ base: "", override: null }),
+  updatePersona: vi.fn(),
+  getUserProfile: vi.fn().mockRejectedValue(new Error("not mocked")),
+  getSettings: vi.fn().mockResolvedValue({ settings: { weatherCity: "" } }),
+  updateSettings: vi.fn(),
+  // 天气拉取失败 → TopBar 显示回退文案 "[ LOCAL RADIO ]"
+  getWeatherNow: vi.fn().mockRejectedValue(new Error("offline")),
+  buildAvatarUrl: (kind: string, version: number) => `http://localhost:3301/api/avatar/${kind}?v=${version}`,
+  uploadAvatar: vi.fn(),
 }));
 
 function installMatchMedia() {
@@ -111,7 +121,8 @@ describe("EditorialRadio phone-frame runtime wiring", () => {
     const { container } = render(<EditorialRadio />);
 
     expect(await screen.findByText("FakeRadio")).toBeInTheDocument();
-    expect(screen.getByText("[ LOCAL RADIO • 88.7 FM ]")).toBeInTheDocument();
+    // 天气未加载(测试环境 fetch 不通)时,TopBar 第二行回退纯电台文案
+    expect(screen.getByText("[ LOCAL RADIO ]")).toBeInTheDocument();
     expect(container.querySelectorAll("audio")).toHaveLength(2);
   });
 
@@ -183,7 +194,8 @@ describe("EditorialRadio phone-frame runtime wiring", () => {
       options.onDone({ text: "现在播的是 Bloom，来自 LANY。" });
     });
 
-    expect(screen.getByText(/现在播的是 Bloom，来自 LANY。/)).toBeInTheDocument();
+    // DJ 回复走打字机逐字渲染,全文要等动画播完才出现
+    expect(await screen.findByText(/现在播的是 Bloom，来自 LANY。/)).toBeInTheDocument();
     // 用户消息也进对话流
     expect(screen.getByText("现在这首歌是什么？")).toBeInTheDocument();
   });

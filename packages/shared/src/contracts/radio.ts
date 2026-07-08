@@ -570,7 +570,9 @@ export const SettingsSchema = z.object({
   tracePrivacy: z.enum(["full", "summary", "off"]).default("summary"),
   externalTrackLimit: z.number().int().min(0).max(100).default(60),
   dailyShowAvoidRecentPlay: z.boolean().default(true),
-  themeShowAvoidRecentPlay: z.boolean().default(false)
+  themeShowAvoidRecentPlay: z.boolean().default(false),
+  // 天气城市(个人资料面板可编辑)。空串 = 用服务端 FAKERADIO_WEATHER_CITY 默认值。
+  weatherCity: z.string().trim().max(60).default("")
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -593,6 +595,46 @@ export const UpdateSettingsRequestSchema = z.object({
   tracePrivacy: z.enum(["full", "summary", "off"]).optional(),
   externalTrackLimit: z.number().int().min(0).max(100).optional(),
   dailyShowAvoidRecentPlay: z.boolean().optional(),
-  themeShowAvoidRecentPlay: z.boolean().optional()
+  themeShowAvoidRecentPlay: z.boolean().optional(),
+  weatherCity: z.string().trim().max(60).optional()
 });
 export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>;
+
+// DJ 人设自定义: 用户在 DJ 头像面板里可编辑的覆盖项。
+// base 人设来自 prompts/dj-persona.md,override 追加在 system prompt 末尾且优先级更高。
+export const DjPersonaOverrideSchema = z.object({
+  name: z.string().trim().max(30).default(""),
+  personaText: z.string().trim().max(2000).default(""),
+  replyStyle: z.string().trim().max(500).default(""),
+  tone: z.string().trim().max(500).default("")
+});
+export type DjPersonaOverride = z.infer<typeof DjPersonaOverrideSchema>;
+
+export const PersonaResponseSchema = z.object({
+  base: z.string(),
+  override: DjPersonaOverrideSchema.nullable()
+});
+export type PersonaResponse = z.infer<typeof PersonaResponseSchema>;
+
+// TopBar 天气行: 城市 + 当前天气 + 温度
+export const WeatherNowResponseSchema = z.object({
+  city: z.string(),
+  summary: z.string(),
+  moodHint: z.string(),
+  temperatureC: z.number().optional(),
+  status: z.enum(["ready", "disabled", "error"])
+});
+export type WeatherNowResponse = z.infer<typeof WeatherNowResponseSchema>;
+
+// 用户个人资料面板: profile.md + 品味摘要 + 标签化展示数据
+export const UserProfileResponseSchema = z.object({
+  profile: z.string(),
+  taste: z.string(),
+  routines: z.string(),
+  moodRules: z.string(),
+  tasteTags: z.array(z.string()),
+  topArtists: z.array(z.string()),
+  favoritesCount: z.number().int().nonnegative(),
+  likedSongsCount: z.number().int().nonnegative()
+});
+export type UserProfileResponse = z.infer<typeof UserProfileResponseSchema>;

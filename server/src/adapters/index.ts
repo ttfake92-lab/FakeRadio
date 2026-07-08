@@ -9,6 +9,7 @@ export * from "./tts/mimo-tts-adapter.js";
 export * from "./tts/macos-say-tts-adapter.js";
 export * from "./io/disabled-io-adapters.js";
 export * from "./io/weather-adapter.js";
+export * from "./io/open-meteo-weather-adapter.js";
 export * from "./io/lark-calendar-adapter.js";
 export * from "./story-source/empty-story-source-adapter.js";
 export * from "./story-source/netease-lyric-adapter.js";

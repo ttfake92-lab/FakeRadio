@@ -1,6 +1,7 @@
 import { formatRadioDateTime } from "../utils/time.js";
 import type { ContextFragment, Track } from "@fakeradio/shared";
 import type { CalendarItem, PlaybackDevice, WeatherSnapshot } from "../adapters/types.js";
+import { composePersonaPrompt } from "../user/dj-persona-store.js";
 
 export type ContextEnvironment = {
   weather: WeatherSnapshot;
@@ -37,7 +38,9 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
     {
       id: "system",
       label: "System prompt",
-      content: input.systemPrompt,
+      // 用户自定义 DJ 人设(名字/回复方式/语气)在这里统一追加——
+      // 这是所有 DJ LLM 调用的汇聚点,编辑人设后无需重启即对聊天/口播/预热生效。
+      content: composePersonaPrompt(input.systemPrompt),
       priority: 1,
       source: "system"
     },

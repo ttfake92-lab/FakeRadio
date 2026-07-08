@@ -1,4 +1,5 @@
-import type { LlmAdapter } from "../adapters/types.js";
+import type { LlmAdapter, MusicAdapter } from "../adapters/types.js";
+import type { Track } from "@fakeradio/shared";
 
 // 节目主题分类。
 //
@@ -62,21 +63,75 @@ function parseClassification(raw: unknown): ShowTopicClassification | null {
   return { kind, anchors };
 }
 
+// 用真实音乐搜索验证"主题是不是一个歌手名"。
+//
+// LLM 分类靠的是先验知识,小众歌手(如"门尼")它不认识,会误判成 mood/style/none,
+// 整期节目就跑偏了。音乐 provider 的搜索结果是事实证据:
+// 搜"门尼"如果 top 结果里有 >=2 首歌的 artist 字段与主题名匹配,那它就是歌手,
+// 不管 LLM 认不认识。返回 provider 侧的规范歌手名作为 anchors(可能与用户输入大小写/全半角不同)。
+async function verifyTopicAsArtist(
+  music: MusicAdapter,
+  topic: string
+): Promise<{ isArtist: boolean; canonicalNames: string[] }> {
+  const normalize = (s: string) => s.trim().toLocaleLowerCase().normalize("NFKC");
+  const target = normalize(topic);
+  if (!target) return { isArtist: false, canonicalNames: [] };
+
+  let results: Track[] = [];
+  try {
+    results = await music.search(topic);
+  } catch {
+    return { isArtist: false, canonicalNames: [] };
+  }
+
+  const canonical = new Map<string, number>();
+  for (const track of results.slice(0, 12)) {
+    // 多歌手 "A / B" 拆开逐个比;歌手名与主题互相包含即算命中
+    // (用户可能写简称"五月天",provider 写"五月天 Mayday")。
+    for (const piece of (track.artist ?? "").split(/[\/、,&]/).map((s) => s.trim()).filter(Boolean)) {
+      const normalized = normalize(piece);
+      if (normalized === target || normalized.includes(target) || target.includes(normalized)) {
+        canonical.set(piece, (canonical.get(piece) ?? 0) + 1);
+      }
+    }
+  }
+  const names = [...canonical.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  const matchCount = [...canonical.values()].reduce((sum, n) => sum + n, 0);
+  return { isArtist: matchCount >= 2, canonicalNames: names };
+}
+
 export async function classifyShowTopic(
   llm: LlmAdapter,
-  topic: string | undefined
+  topic: string | undefined,
+  music?: MusicAdapter
 ): Promise<ShowTopicClassification> {
   const safeTopic = (topic ?? "").trim();
   if (!safeTopic) return { kind: "none", anchors: [] };
 
+  let llmResult: ShowTopicClassification | null = null;
   try {
     const raw = await llm.computeJson<unknown>(SYSTEM_PROMPT, `[主题]\n${safeTopic}`);
-    const parsed = parseClassification(raw);
-    if (parsed) return parsed;
-    console.warn(`[topic-classify] LLM returned invalid classification for "${safeTopic}", raw=${JSON.stringify(raw).slice(0, 200)}`);
+    llmResult = parseClassification(raw);
+    if (!llmResult) {
+      console.warn(`[topic-classify] LLM returned invalid classification for "${safeTopic}", raw=${JSON.stringify(raw).slice(0, 200)}`);
+    }
   } catch (err) {
     console.warn(`[topic-classify] failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+
+  // 音乐搜索事实校验: 只在 LLM 没有把主题认成 artist/album、且主题足够短
+  // (长句是场景描述,不可能是歌手名)时介入。搜索证据强于 LLM 先验。
+  const llmSaysArtist = llmResult?.kind === "artist" || llmResult?.kind === "album";
+  if (music && !llmSaysArtist && safeTopic.length <= 24) {
+    const verified = await verifyTopicAsArtist(music, safeTopic);
+    if (verified.isArtist) {
+      const anchors = [...new Set([safeTopic, ...verified.canonicalNames])];
+      console.log(`[topic-classify] music search verified "${safeTopic}" as artist (canonical: ${JSON.stringify(verified.canonicalNames)}), overriding LLM kind=${llmResult?.kind ?? "(failed)"}`);
+      return { kind: "artist", anchors };
+    }
+  }
+
+  if (llmResult) return llmResult;
 
   // LLM 失败或输出格式不对时: 退化成 none, 不做硬过滤、不强行把主题当艺术家。
   // 比"猜成 artist"安全 -- 用户主题里 "粤语金曲" 这种风格词被强行当成艺术家会把整期搞砸,
@@ -85,4 +140,4 @@ export async function classifyShowTopic(
 }
 
 // 导出供测试用
-export const __internals = { parseClassification, SYSTEM_PROMPT };
+export const __internals = { parseClassification, SYSTEM_PROMPT, verifyTopicAsArtist };

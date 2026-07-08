@@ -1,5 +1,17 @@
 import { z } from "zod";
-import { SettingsSchema, SettingsResponseSchema, UpdateSettingsRequestSchema } from "@fakeradio/shared";
+import {
+  DjPersonaOverrideSchema,
+  PersonaResponseSchema,
+  SettingsSchema,
+  SettingsResponseSchema,
+  UpdateSettingsRequestSchema,
+  type DjPersonaOverride
+} from "@fakeradio/shared";
+import {
+  DJ_PERSONA_PREF_KEY,
+  getPersonaOverride,
+  setPersonaOverride
+} from "../../user/dj-persona-store.js";
 import type { FastifyInstance } from "fastify";
 import type { StateRepository } from "../../state/state-repository.js";
 import type { RuntimeAdapterManager } from "../runtime-adapter-manager.js";
@@ -62,10 +74,35 @@ type SettingsRouteDeps = {
   stateRepo: StateRepository;
   runtimeManager: RuntimeAdapterManager | undefined;
   ttsCacheDir: string;
+  /** 基础 DJ 人设(prompts/dj-persona.md 内容),persona 面板展示用 */
+  systemPrompt: string;
 };
 
 export function registerSettingsRoutes(deps: SettingsRouteDeps) {
-  const { app, stateRepo, runtimeManager, ttsCacheDir } = deps;
+  const { app, stateRepo, runtimeManager, ttsCacheDir, systemPrompt } = deps;
+
+  app.get("/api/persona", async (_request, reply) => {
+    return reply.send(PersonaResponseSchema.parse({
+      base: systemPrompt,
+      override: getPersonaOverride()
+    }));
+  });
+
+  app.put("/api/persona", async (request, reply) => {
+    const parsed = DjPersonaOverrideSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "人设格式不合法", details: parsed.error.issues });
+    }
+    const override: DjPersonaOverride = parsed.data;
+    const isEmpty = [override.name, override.personaText, override.replyStyle, override.tone]
+      .every((field) => field.trim().length === 0);
+    setPersonaOverride(isEmpty ? null : override);
+    await stateRepo.upsertPref(DJ_PERSONA_PREF_KEY, isEmpty ? null : override);
+    return reply.send(PersonaResponseSchema.parse({
+      base: systemPrompt,
+      override: getPersonaOverride()
+    }));
+  });
 
   app.get("/api/settings", async (_request, reply) => {
     return reply.send(SettingsResponseSchema.parse({

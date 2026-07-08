@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Track } from '@fakeradio/shared';
 import type { AudioEngine } from '../player/use-audio-engine';
+import { RoundAvatar, useWeatherNow } from './round-avatar';
 
 // ─────────────────────────────────────────────────────────────
 // Audio-reactive EQ（5 根频谱柱，接真实 AnalyserNode）
@@ -204,7 +205,14 @@ function SingleLineMarquee({ text, style }: { text: string; style: React.CSSProp
 // ─────────────────────────────────────────────────────────────
 // RadioScreen — 手机框整体（全端统一布局）
 // ─────────────────────────────────────────────────────────────
-export type RadioView = 'main' | 'library' | 'settings';
+export type RadioView = 'main' | 'library' | 'settings' | 'persona' | 'profile';
+
+const OVERLAY_TITLES: Record<Exclude<RadioView, 'main'>, string> = {
+  library: 'LIBRARY',
+  settings: 'SETTINGS',
+  persona: 'DJ PERSONA',
+  profile: 'MY PROFILE',
+};
 
 export function RadioScreen({
   theme,
@@ -324,6 +332,7 @@ export function RadioScreen({
           onSetTheme={onSetTheme}
           menuOpen={menuOpen}
           onToggleMenu={() => setMenuOpen((v) => !v)}
+          onOpenProfile={() => onNavigate('profile')}
         />
 
         {view === 'main' ? (
@@ -360,7 +369,7 @@ export function RadioScreen({
                 BACK
               </button>
               <span style={{ fontSize: 9.5, letterSpacing: '2.5px', marginLeft: 'auto', color: 'var(--muted)' }}>
-                {view === 'library' ? 'LIBRARY' : 'SETTINGS'}
+                {OVERLAY_TITLES[view]}
               </span>
             </div>
             <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '16px 20px' }}>
@@ -392,12 +401,20 @@ function Header({
   onSetTheme,
   menuOpen,
   onToggleMenu,
+  onOpenProfile,
 }: {
   theme: 'light' | 'dark';
   onSetTheme: (theme: 'light' | 'dark') => void;
   menuOpen: boolean;
   onToggleMenu: () => void;
+  onOpenProfile: () => void;
 }) {
+  // 第二行显示城市 • 天气 温度;天气还没拉到时回退纯电台文案
+  const weather = useWeatherNow();
+  const weatherLine = weather && weather.status === 'ready' && weather.summary
+    ? `[ ${weather.city.toUpperCase()} • ${weather.summary}${weather.temperatureC !== undefined ? ` ${Math.round(weather.temperatureC)}°C` : ''} ]`
+    : '[ LOCAL RADIO ]';
+
   const seg = (active: boolean): React.CSSProperties => ({
     fontFamily: 'inherit',
     fontSize: 9.5,
@@ -412,26 +429,17 @@ function Header({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '19px 20px 16px', borderBottom: '1px solid var(--line)', position: 'relative', zIndex: 2 }}>
-      <div
-        style={{
-          width: 36,
-          height: 36,
-          flex: 'none',
-          border: '1px solid var(--line)',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 10,
-          fontWeight: 800,
-          letterSpacing: '0.5px',
-        }}
-      >
-        FR
-      </div>
+      <RoundAvatar
+        kind="user"
+        size={36}
+        fallback="FR"
+        fallbackStyle={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.5px' }}
+        onClick={onOpenProfile}
+        ariaLabel="打开个人资料"
+      />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.5px', lineHeight: 1 }}>FakeRadio</div>
-        <div style={{ fontSize: 8.5, letterSpacing: '1.3px', color: 'var(--muted)', marginTop: 5 }}>[ LOCAL RADIO • 88.7 FM ]</div>
+        <div suppressHydrationWarning style={{ fontSize: 8.5, letterSpacing: '1.3px', color: 'var(--muted)', marginTop: 5 }}>{weatherLine}</div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--seg-line)', borderRadius: 18, padding: 3, gap: 2, flex: 'none' }}>
         <button onClick={() => onSetTheme('dark')} style={seg(theme === 'dark')}>DARK</button>

@@ -63,9 +63,11 @@ function decisionMentionsTrack(decision: DjDecision, track: Track): boolean {
     decision.play.trackId ?? "",
     decision.segue
   ].join("\n"));
-  const title = normalizeForMatch(track.title);
-  const artist = normalizeForMatch(track.artist);
-  return haystack.includes(title) || haystack.includes(artist) || haystack.includes(normalizeForMatch(track.id));
+  return (
+    titleVariants(track.title).some((v) => haystack.includes(v)) ||
+    artistVariants(track.artist).some((v) => haystack.includes(v)) ||
+    haystack.includes(normalizeForMatch(track.id))
+  );
 }
 
 const FORBIDDEN_DJ_PHRASES = [
@@ -502,21 +504,69 @@ function formatSourcesForLLM(sources: RadioEpisode["sources"]): string {
   return sources.map((s) => `[${s.kind}] ${s.title}\n${s.content}`).join("\n---\n");
 }
 
+// 歌名变体: 完整名 + 去掉括号内容/副标题后的"核心名"。
+// 网易云歌名常带 "(Live)" "(Remastered 2011)" "- From XXX" 这类后缀,
+// LLM 口播里只会写核心名,全字匹配会误杀大量合格口播。
+function titleVariants(title: string): string[] {
+  const full = normalizeForMatch(title);
+  const core = normalizeForMatch(
+    title
+      .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, " ")
+      .split(/\s+-\s+/)[0] ?? ""
+  );
+  return [...new Set([full, core])].filter((v) => v.length >= 2);
+}
+
+// 歌手变体: "A / B / C" 多人合作拆开逐个算,口播里提到其中一位就算命中。
+function artistVariants(artist: string): string[] {
+  return artist
+    .split(/[\/、,&]|feat\.?/i)
+    .map((piece) => normalizeForMatch(piece))
+    .filter((v) => v.length >= 2);
+}
+
 function narrationMentionsTrack(narration: string, track: Track): boolean {
   const haystack = normalizeForMatch(narration);
-  const title = normalizeForMatch(track.title);
-  const artist = normalizeForMatch(track.artist);
-  return haystack.includes(title) || haystack.includes(artist);
+  return (
+    titleVariants(track.title).some((v) => haystack.includes(v)) ||
+    artistVariants(track.artist).some((v) => haystack.includes(v))
+  );
+}
+
+// 兜底口播文案池: 每种 storyType 多条变体,按 track.id 哈希确定性选取。
+// 之前每种类型只有一句固定模板,校验一失败就重复出现"这首 X 我留了很久",
+// 听感像复读机。兜底本身仍是最后手段——上游已先做一次带反馈的 LLM 重试。
+const FALLBACK_NARRATIONS: Record<RadioEpisode["story"]["type"], Array<(t: Track) => string>> = {
+  "lyric-theme": [
+    (t) => `${t.artist} 写 ${t.title} 的时候，大概也是这样一个安静的时段。歌词不用我念，你听到那句就明白了。`,
+    (t) => `${t.title} 的词值得留神听一句，${t.artist} 把想说的都放在里面了。`,
+    (t) => `这首 ${t.title}，词比旋律先打动我。${t.artist} 的表达，你自己听。`
+  ],
+  background: [
+    (t) => `这首 ${t.title} 我留了很久，${t.artist} 的版本最耐听。先放歌，背景的事下次慢慢说。`,
+    (t) => `${t.artist} 的 ${t.title}，这个时段放它刚好。来。`,
+    (t) => `接下来这首是 ${t.title}。${t.artist} 的东西不用多介绍，直接听。`,
+    (t) => `换 ${t.artist}。${t.title}，放给现在的你。`
+  ],
+  "mood-reading": [
+    (t) => `不解释了，${t.artist} 的 ${t.title}，放在现在这个时间点刚刚好。`,
+    (t) => `${t.title}。${t.artist} 的声音适合此刻，别的不多说。`,
+    (t) => `这个时间，我想放 ${t.artist} 的 ${t.title}。你听听看对不对。`
+  ]
+};
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
 }
 
 function buildGroundedFallbackNarration(track: Track, storyType: RadioEpisode["story"]["type"]): string {
-  if (storyType === "lyric-theme") {
-    return `${track.artist} 写 ${track.title} 的时候，大概也是这样一个安静的时段。歌词不用我念，你听到那句就明白了。`;
-  }
-  if (storyType === "background") {
-    return `这首 ${track.title} 我留了很久，${track.artist} 的版本最耐听。先放歌，背景的事下次慢慢说。`;
-  }
-  return `不解释了，${track.artist} 的 ${track.title}，放在现在这个时间点刚刚好。`;
+  const pool = FALLBACK_NARRATIONS[storyType];
+  const pick = pool[hashString(track.id) % pool.length] ?? pool[0]!;
+  return pick(track);
 }
 
 export async function narrateStoryWithSources(
@@ -618,9 +668,39 @@ ${sourceContext}`,
     : buildContextWindow(baseInput);
 
   const decision = await llm.compute(fragments);
-  const narration = narrationMentionsTrack(decision.say, track)
-    && respectsPersonaRules(decision.say)
-    ? decision.say
-    : buildGroundedFallbackNarration(track, effectiveType);
-  return { narration, storyType: effectiveType };
+  if (narrationMentionsTrack(decision.say, track) && respectsPersonaRules(decision.say)) {
+    return { narration: decision.say, storyType: effectiveType };
+  }
+
+  // 首次校验失败: 不直接丢弃,带上具体失败原因重试一次。
+  // 之前的行为是立刻替换成固定模板,导致模板高频出现;
+  // 大多数失败只是口播没带完整歌名/踩了禁词,给 LLM 明确反馈后基本都能修正。
+  const failureHints: string[] = [];
+  if (!narrationMentionsTrack(decision.say, track)) {
+    failureHints.push(`口播必须自然提到歌名「${track.title}」或歌手名「${track.artist}」中的至少一个(可以只提核心名,不用带括号后缀)。`);
+  }
+  const hitPhrases = FORBIDDEN_DJ_PHRASES.filter((phrase) => decision.say.includes(phrase));
+  if (hitPhrases.length > 0) {
+    failureHints.push(`禁止使用这些词句: ${hitPhrases.map((p) => `「${p}」`).join("、")}。换成具体、克制的表达。`);
+  }
+  const retryFragments = buildContextWindow({
+    ...baseInput,
+    ...(profile && profile.trim().length > 0 ? { profile } : {}),
+    systemPrompt: `${baseInput.systemPrompt}
+
+【重写要求】你上一版口播是: "${decision.say.slice(0, 200)}"
+它没有通过校验,原因:
+- ${failureHints.join("\n- ")}
+保持原来的角度和语气,只修正上述问题,重写这段口播。`
+  });
+  try {
+    const retry = await llm.compute(retryFragments);
+    if (narrationMentionsTrack(retry.say, track) && respectsPersonaRules(retry.say)) {
+      return { narration: retry.say, storyType: effectiveType };
+    }
+  } catch {
+    // 重试失败落回兜底文案
+  }
+  console.warn(`[narrate] LLM narration failed validation twice for "${track.title} - ${track.artist}" (${failureHints.join(" / ")}), using fallback narration`);
+  return { narration: buildGroundedFallbackNarration(track, effectiveType), storyType: effectiveType };
 }

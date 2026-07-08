@@ -206,16 +206,21 @@ function buildQueries(
   const weatherSuffix = weatherMood.length > 0 ? weatherMood : "";
   // 优先级:
   // 1) 艺术家名(用户实际听过、网易云搜命中率最高)
-  // 2) taste 关键词 + 场景词组合(品味与场景对齐)
-  // 3) taste 关键词单独
-  // 4) 场景词 + 天气(纯场景兜底,排最后)
+  // 2) taste 关键词 + 天气组合(天气是即时环境,权重高于每日编排的场景词)
+  // 3) taste 关键词 + 场景词组合(品味与编排场景对齐)
+  // 4) taste 关键词单独
+  // 5) 场景词 + 天气(纯场景兜底,排最后)
   const artistQueries = likedArtists.flatMap((artist) => uniqueNonEmpty([
     artist,
     baseSeeds[0] ? `${artist} ${baseSeeds[0]}` : artist
   ]));
+  // 天气组合排在编排场景词组合之前: 每日编排是提前定好的静态节奏,
+  // 而天气反映"此刻窗外真实发生的事",与听感的相关性更强(下雨天早晨不该按晴天早晨选歌)。
+  const tasteWithWeather = weatherSuffix
+    ? tasteKeywords.map((keyword) => `${keyword} ${weatherSuffix}`)
+    : [];
   const tasteWithMood = tasteKeywords.flatMap((keyword) => uniqueNonEmpty([
-    baseSeeds[0] ? `${keyword} ${baseSeeds[0]}` : keyword,
-    weatherSuffix ? `${keyword} ${weatherSuffix}` : keyword
+    baseSeeds[0] ? `${keyword} ${baseSeeds[0]}` : keyword
   ]));
   const tasteOnly = tasteKeywords;
   const moodQueries = baseSeeds.flatMap((seed) => uniqueNonEmpty([
@@ -224,6 +229,7 @@ function buildQueries(
   ]));
   return uniqueNonEmpty([
     ...artistQueries,
+    ...tasteWithWeather,
     ...tasteWithMood,
     ...tasteOnly,
     ...moodQueries
@@ -236,8 +242,8 @@ function buildSignals(
   likedArtists: string[]
 ): string[] {
   return uniqueNonEmpty([
-    `daypart:${input.block.label}`,
     input.weather.moodHint ? `weather:${input.weather.moodHint}` : "",
+    `daypart:${input.block.label}`,
     input.calendar.length > 0 ? "calendar:busy" : "calendar:open",
     input.userPreferences.playlists.length > 0 ? "playlist-seeds" : "",
     input.likedSongs.length > 0 ? "liked-song-seeds" : "",
@@ -247,6 +253,12 @@ function buildSignals(
 }
 
 function inferEnergy(block: RecommendationBlock, weather: WeatherSnapshot, moodRules: string): RecommendationIntent["energy"] {
+  // 天气单独先判: 雨雪雷天气直接压低能量,不管编排 block 是什么时段。
+  // 天气因子的权重高于每日编排——编排是静态计划,天气是即时现实。
+  const weatherText = `${weather.summary} ${weather.moodHint}`.toLocaleLowerCase();
+  if (/rain|storm|snow|雨|雪|雷/.test(weatherText)) {
+    return "low";
+  }
   const text = `${block.at} ${block.label} ${block.moodHint} ${weather.summary} ${weather.moodHint} ${moodRules}`.toLocaleLowerCase();
   if (
     text.includes("rain") ||

@@ -18,6 +18,9 @@ import type { AgentMessage } from '../player/use-stream-connection';
 import { useChatSSE } from '../player/use-chat-sse';
 import { SettingsPanel } from '../show/settings-panel';
 import { LibraryView } from '../show/library-view';
+import { PersonaPanel } from '../show/persona-panel';
+import { ProfilePanel } from '../show/profile-panel';
+import { createTypewriter, type Typewriter } from '../player/typewriter';
 import { RadioScreen, type RadioView } from './radio-screen';
 import { ChatSection, ChatInput, type ChatMessage } from './radio-chat';
 
@@ -397,7 +400,12 @@ export function EditorialRadio() {
     }
   }, [track, isFavorited]);
 
-  // Chat send via SSE streaming
+  // Chat send via SSE streaming + 打字机逐字渲染
+  // 服务端按句一次性 emit 所有 chunk,直接 append 看不到流式效果;
+  // typewriter 把到达文本按 ~80 字/秒匀速放出,积压时加速追赶。
+  const typewriterRef = useRef<Typewriter | null>(null);
+  useEffect(() => () => typewriterRef.current?.cancel(), []);
+
   const handleSend = useCallback(
     (text: string) => {
       if (!text.trim()) return;
@@ -410,20 +418,28 @@ export function EditorialRadio() {
       let streamedText = '';
       setMessages((prev) => [...prev, userMsg, djPlaceholder]);
 
+      // 用户连发消息时,上一条的打字机立刻停掉,避免两个 interval 同时改消息列表
+      typewriterRef.current?.cancel();
+      const typewriter = createTypewriter({
+        onUpdate(shown) {
+          setMessages((prev) => prev.map((m) => (m.id === djId ? { ...m, text: shown } : m)));
+        },
+        onDone(finalShown) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === djId ? { ...m, text: finalShown, streaming: false } : m)),
+          );
+        },
+      });
+      typewriterRef.current = typewriter;
+
       chatSSE.sendMessage(trimmed, {
         onChunk(chunk) {
           streamedText += chunk;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === djId ? { ...m, text: m.text + chunk } : m)),
-          );
+          typewriter.push(chunk);
         },
         onDone(data) {
           const finalText = data.text || streamedText;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === djId ? { ...m, text: finalText || m.text, streaming: false } : m,
-            ),
-          );
+          typewriter.finish(finalText);
           if (data.action?.type === 'next-track') {
             handleNext();
             return;
@@ -546,6 +562,10 @@ export function EditorialRadio() {
       />
     ) : activeView === 'settings' ? (
       <SettingsPanel />
+    ) : activeView === 'persona' ? (
+      <PersonaPanel />
+    ) : activeView === 'profile' ? (
+      <ProfilePanel />
     ) : null;
 
   return (
@@ -588,6 +608,7 @@ export function EditorialRadio() {
             pendingSuggestions={pendingSuggestions}
             onConfirmSuggestion={handleConfirmSuggestion}
             onDismissSuggestions={() => setPendingSuggestions([])}
+            onOpenPersona={() => setActiveView('persona')}
           />
         }
         inputArea={

@@ -5,6 +5,7 @@ import type { Track, TasteResponse, ShowJob } from '@fakeradio/shared';
 import type { AgentMessage } from '../player/use-stream-connection';
 import { QUICK_PROMPTS } from '../player/skin-config';
 import { Chevron } from '../show/panel-ui';
+import { RoundAvatar } from './round-avatar';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -41,6 +42,7 @@ export function ChatSection({
   pendingSuggestions,
   onConfirmSuggestion,
   onDismissSuggestions,
+  onOpenPersona,
 }: {
   connected: boolean;
   messages: ChatMessage[];
@@ -54,6 +56,8 @@ export function ChatSection({
   pendingSuggestions: Track[];
   onConfirmSuggestion: (track: Track) => void;
   onDismissSuggestions: () => void;
+  /** 点 DJ 头像 → 打开人设面板 */
+  onOpenPersona: () => void;
 }) {
   const chatMessages = messages.filter((m) => m.text.trim().length > 0 || m.streaming);
 
@@ -65,7 +69,14 @@ export function ChatSection({
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span style={{ width: 24, height: 24, borderRadius: '50%', border: '1.5px dotted var(--muted)', flex: 'none' }} />
+          <RoundAvatar
+            kind="dj"
+            size={24}
+            fallback=""
+            border="1.5px dotted var(--muted)"
+            onClick={onOpenPersona}
+            ariaLabel="查看 DJ 人设"
+          />
           <div>
             <div style={{ fontSize: 10, letterSpacing: '1.5px' }}>RADIO AI</div>
             <div style={{ ...MONO_LABEL, fontSize: 8.5, marginTop: 3 }}>{connected ? 'CONNECTED' : 'OFFLINE'}</div>
@@ -82,11 +93,12 @@ export function ChatSection({
         {chatMessages.length === 0 && (
           <ChatBubble
             from="DJ"
-            text={'晚上好，这里是 FakeRadio 88.7。\n想听点什么？跟我说说今晚的心情。'}
+            text={'晚上好，这里是 FakeRadio。\n想听点什么？跟我说说今晚的心情。'}
+            onAvatarClick={onOpenPersona}
           />
         )}
         {chatMessages.map((m) => (
-          <ChatBubble key={m.id} from={m.from} text={m.text} streaming={m.streaming} at={m.at} />
+          <ChatBubble key={m.id} from={m.from} text={m.text} streaming={m.streaming} at={m.at} onAvatarClick={onOpenPersona} />
         ))}
 
         {pendingSuggestions.length > 0 && (
@@ -169,7 +181,7 @@ function TasteBlock({ label, body }: { label: string; body: string }) {
 // ─────────────────────────────────────────────────────────────
 // ChatBubble — AI 左侧带头像气泡 / 用户右对齐气泡
 // ─────────────────────────────────────────────────────────────
-function ChatBubble({ from, text, streaming, at }: { from: 'DJ' | 'YOU'; text: string; streaming?: boolean | undefined; at?: string | undefined }) {
+function ChatBubble({ from, text, streaming, at, onAvatarClick }: { from: 'DJ' | 'YOU'; text: string; streaming?: boolean | undefined; at?: string | undefined; onAvatarClick?: (() => void) | undefined }) {
   const isMe = from === 'YOU';
 
   const bubble = (
@@ -212,24 +224,15 @@ function ChatBubble({ from, text, streaming, at }: { from: 'DJ' | 'YOU'; text: s
   }
   return (
     <div style={{ display: 'flex', gap: 9 }}>
-      <span
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: '50%',
-          border: '1.5px solid var(--muted)',
-          flex: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'var(--font-courier)',
-          fontSize: 12,
-          letterSpacing: '1px',
-          color: 'var(--muted)',
-        }}
-      >
-        AI
-      </span>
+      <RoundAvatar
+        kind="dj"
+        size={34}
+        fallback="AI"
+        border="1.5px solid var(--muted)"
+        fallbackStyle={{ fontFamily: 'var(--font-courier)', fontSize: 12, letterSpacing: '1px', color: 'var(--muted)' }}
+        onClick={onAvatarClick}
+        ariaLabel="查看 DJ 人设"
+      />
       {bubble}
     </div>
   );

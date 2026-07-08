@@ -566,7 +566,10 @@ describe("scheduler-integration", () => {
       await executeScheduledJob(deps, brief.id, plan.id, job.id);
 
       expect(search).toHaveBeenCalled();
-      expect(search.mock.calls[0][0]).toContain("Macintosh Plus");
+      // 第一条可能是主题分类的验证搜索(搜主题名本身),选歌搜索从其后开始;
+      // 断言意图不变: selectionGoal 里的实体名要排在通用 DJ 搜索词之前。
+      const selectionQueries = search.mock.calls.map((c) => c[0]).filter((q) => q !== brief.topic);
+      expect(selectionQueries[0]).toContain("Macintosh Plus");
 
       const episodeFiles = readdirSync(project.directoryPath).filter(f => f.startsWith("episode-"));
       expect(episodeFiles).toHaveLength(1);

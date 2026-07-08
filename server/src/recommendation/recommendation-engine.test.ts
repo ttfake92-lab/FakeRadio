@@ -72,6 +72,35 @@ describe("Recommendation Engine", () => {
     expect(context.signals).toContain("weather:rainy");
   });
 
+  it("ranks weather-flavored taste queries above block-seed taste queries", () => {
+    const context = buildRecommendationContext({
+      now: new Date("2026-06-21T09:30:00+08:00"),
+      block: { at: "09:00", label: "专注工作", moodHint: "focus instrumental" },
+      weather: { summary: "雨", moodHint: "冷冽而深邃", temperatureC: 15 },
+      calendar: [],
+      userPreferences: {
+        taste: "喜欢后摇和钢琴。",
+        routines: "",
+        moodRules: "",
+        playlists: []
+      },
+      likedSongs: [],
+      recentTrackIds: new Set(),
+      queuedTrackIds: new Set()
+    });
+
+    // 天气因子权重高于每日编排: "post rock + 天气" 必须排在 "post rock + 编排场景词" 之前
+    const weatherQueryIndex = context.queries.indexOf("post rock 冷冽而深邃");
+    const blockQueryIndex = context.queries.indexOf("post rock focus instrumental");
+    expect(weatherQueryIndex).toBeGreaterThanOrEqual(0);
+    expect(blockQueryIndex).toBeGreaterThanOrEqual(0);
+    expect(weatherQueryIndex).toBeLessThan(blockQueryIndex);
+    // 雨天直接压低能量,不管编排 block 是白天专注时段
+    expect(context.intent.energy).toBe("low");
+    // 信号里天气排在 daypart 之前
+    expect(context.signals.indexOf("weather:冷冽而深邃")).toBeLessThan(context.signals.indexOf("daypart:专注工作"));
+  });
+
   it("uses liked songs as taste seeds but selects similar or search candidates before original liked songs", async () => {
     const liked = track("fav-queen", "Somebody To Love", "Queen");
     const similar = track("sim-bowie", "Life On Mars?", "David Bowie");

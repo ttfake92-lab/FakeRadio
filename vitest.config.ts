@@ -21,7 +21,9 @@ export default defineConfig({
             TZ: "Asia/Shanghai",
             FAKERADIO_BRAVE_API_KEY: "",
             FAKERADIO_DEEPSEEK_API_KEY: "",
-            FAKERADIO_MIMO_API_KEY: ""
+            FAKERADIO_MIMO_API_KEY: "",
+            // 单测不打真实天气网络请求(Open-Meteo 是无 key 默认 provider)
+            FAKERADIO_WEATHER_PROVIDER: "disabled"
           },
         }
       },

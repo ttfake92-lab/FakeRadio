@@ -14,10 +14,12 @@ import {
   StreamEventSchema,
   TasteResponseSchema,
   TodayPlanResponseSchema,
+  UserProfileResponseSchema,
+  WeatherNowResponseSchema,
   type RadioEpisode
 } from "@fakeradio/shared";
 import { createReadStream } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
@@ -474,6 +476,93 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     })
   );
 
+  // TopBar 天气行: 城市 + 当前天气 + 温度。城市可在个人资料面板编辑(settings.weatherCity)。
+  app.get("/api/weather", async () => {
+    const status = getAdapterStatuses().weather;
+    const city = runtimeManager?.getSettings().weatherCity?.trim() || env.FAKERADIO_WEATHER_CITY;
+    if (status === "disabled") {
+      return WeatherNowResponseSchema.parse({ city, summary: "", moodHint: "", status: "disabled" });
+    }
+    try {
+      const snapshot = await weather.current();
+      return WeatherNowResponseSchema.parse({ city, ...snapshot, status: "ready" });
+    } catch {
+      return WeatherNowResponseSchema.parse({ city, summary: "", moodHint: "", status: "error" });
+    }
+  });
+
+  // 头像上传/读取: dj = 聊天区 DJ 头像, user = TopBar 用户头像。
+  // 前端上传前已用 canvas 压到 256px,dataUrl 通常 <100KB;bodyLimit 放宽到 3MB 兜底。
+  const AVATAR_MIME_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+  const avatarsDir = resolve(baseDir, "user", "avatars");
+  const isAvatarKind = (value: string): value is "dj" | "user" => value === "dj" || value === "user";
+
+  app.put("/api/avatar/:kind", { bodyLimit: 3 * 1024 * 1024 }, async (request, reply) => {
+    const { kind } = request.params as { kind: string };
+    if (!isAvatarKind(kind)) return reply.status(400).send({ error: "unknown avatar kind" });
+    const dataUrl = (request.body as { dataUrl?: string } | null)?.dataUrl ?? "";
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!match) return reply.status(400).send({ error: "需要 data:image/png|jpeg|webp;base64 格式的图片" });
+    const bytes = Buffer.from(match[2]!, "base64");
+    if (bytes.length > 1024 * 1024) return reply.status(400).send({ error: "图片太大，请控制在 1MB 以内" });
+    await mkdir(avatarsDir, { recursive: true });
+    // 清掉同 kind 的旧扩展名文件,避免换格式后 GET 命中旧图
+    for (const ext of Object.values(AVATAR_MIME_EXT)) {
+      await rm(join(avatarsDir, `${kind}.${ext}`), { force: true });
+    }
+    await writeFile(join(avatarsDir, `${kind}.${AVATAR_MIME_EXT[match[1]!]}`), bytes);
+    return { ok: true };
+  });
+
+  app.get("/api/avatar/:kind", async (request, reply) => {
+    const { kind } = request.params as { kind: string };
+    if (!isAvatarKind(kind)) return reply.status(400).send({ error: "unknown avatar kind" });
+    for (const [mime, ext] of Object.entries(AVATAR_MIME_EXT)) {
+      const filePath = join(avatarsDir, `${kind}.${ext}`);
+      const exists = await access(filePath).then(() => true, () => false);
+      if (exists) {
+        return reply
+          .header("content-type", mime)
+          .header("cache-control", "no-cache")
+          .send(createReadStream(filePath));
+      }
+    }
+    return reply.status(404).send({ error: "avatar not set" });
+  });
+
+  // 个人资料面板: profile.md + 品味摘要 + 标签(风格关键词/常听艺术家/收藏统计)。
+  // 标签复用推荐引擎同一套提取逻辑,保证"面板展示的"和"推荐实际用的"一致。
+  app.get("/api/profile", async () => {
+    const { extractTasteKeywords } = await import("../recommendation/recommendation-engine.js");
+    const [likedList, favoritesList] = await Promise.all([
+      likedSongs.list().catch(() => []),
+      favorites.list().catch(() => [])
+    ]);
+    const artistCounts = new Map<string, number>();
+    for (const track of likedList) {
+      for (const piece of (track.artist ?? "").split(/[\/、,&]/).map((s: string) => s.trim()).filter(Boolean)) {
+        artistCounts.set(piece, (artistCounts.get(piece) ?? 0) + 1);
+      }
+    }
+    const topArtists = [...artistCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([artist]) => artist);
+    const tasteTags = extractTasteKeywords(
+      [userPreferences.taste, userPreferences.moodRules, userPreferences.profile].join("\n")
+    );
+    return UserProfileResponseSchema.parse({
+      profile: userPreferences.profile,
+      taste: userPreferences.taste,
+      routines: userPreferences.routines,
+      moodRules: userPreferences.moodRules,
+      tasteTags,
+      topArtists,
+      favoritesCount: favoritesList.length,
+      likedSongsCount: likedList.length
+    });
+  });
+
   app.post("/api/taste/infer", async (request, reply) => {
     const todaySession = await sessionRepo.getToday();
     if (todaySession.length < 3) {
@@ -920,7 +1009,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
     publicMetadataAdapter, webResearchAdapter, likedSongs, systemPrompt
   });
 
-  registerSettingsRoutes({ app, stateRepo, runtimeManager, ttsCacheDir });
+  registerSettingsRoutes({ app, stateRepo, runtimeManager, ttsCacheDir, systemPrompt });
 
   app.get("/stream", { websocket: true }, (connection) => {
     const removeClient = stream.add(connection);

@@ -38,6 +38,9 @@ const EnvSchema = z.object({
   FAKERADIO_PREWARM_LOW_WATER_MARK: z.coerce.number().int().positive().default(2),
   FAKERADIO_OPENWEATHER_API_KEY: z.string().optional(),
   FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai"),
+  // auto: 有 OpenWeatherMap key 用它,否则走免 key 的 Open-Meteo。
+  // disabled 主要给单测用(避免真实网络请求)。
+  FAKERADIO_WEATHER_PROVIDER: z.enum(["auto", "open-meteo", "openweathermap", "disabled"]).default("auto"),
   FAKERADIO_LARK_CALENDAR_CLIENT_ID: z.string().optional(),
   FAKERADIO_LARK_CALENDAR_CLIENT_SECRET: z.string().optional()
 });

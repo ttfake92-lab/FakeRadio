@@ -21,6 +21,10 @@ import {
   TasteResponseSchema,
   TodayPlanResponseSchema,
   SettingsResponseSchema,
+  PersonaResponseSchema,
+  UserProfileResponseSchema,
+  WeatherNowResponseSchema,
+  type DjPersonaOverride,
   type Settings,
   type UpdateSettingsRequest,
   type Track
@@ -407,6 +411,61 @@ export async function updateSettings(settings: UpdateSettingsRequest) {
     throw new Error((body as { error?: string }).error ?? `Failed to update settings: ${response.status}`);
   }
   return SettingsResponseSchema.parse(await response.json());
+}
+
+export async function getPersona() {
+  const response = await fetch(buildApiUrl("/api/persona"));
+  if (!response.ok) {
+    throw new Error(`Failed to get persona: ${response.status}`);
+  }
+  return PersonaResponseSchema.parse(await response.json());
+}
+
+export async function updatePersona(override: DjPersonaOverride) {
+  const response = await fetch(buildApiUrl("/api/persona"), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(override),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Failed to update persona: ${response.status}`);
+  }
+  return PersonaResponseSchema.parse(await response.json());
+}
+
+export async function getUserProfile() {
+  const response = await fetch(buildApiUrl("/api/profile"));
+  if (!response.ok) {
+    throw new Error(`Failed to get profile: ${response.status}`);
+  }
+  return UserProfileResponseSchema.parse(await response.json());
+}
+
+export async function getWeatherNow() {
+  const response = await fetch(buildApiUrl("/api/weather"));
+  if (!response.ok) {
+    throw new Error(`Failed to get weather: ${response.status}`);
+  }
+  return WeatherNowResponseSchema.parse(await response.json());
+}
+
+export type AvatarKind = "dj" | "user";
+
+export function buildAvatarUrl(kind: AvatarKind, version: number) {
+  return buildApiUrl(`/api/avatar/${kind}?v=${version}`);
+}
+
+export async function uploadAvatar(kind: AvatarKind, dataUrl: string) {
+  const response = await fetch(buildApiUrl(`/api/avatar/${kind}`), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dataUrl }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `Failed to upload avatar: ${response.status}`);
+  }
 }
 
 export type TtsVoiceOption = { value: string; label: string };

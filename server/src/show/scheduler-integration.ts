@@ -361,7 +361,7 @@ export async function executeScheduledJob(
   // 在 block 循环外做一次主题分类: 整期节目共用,避免每个 block 多调用一次 LLM。
   // brief.topic="陈奕迅" -> {kind:"artist", anchors:["陈奕迅","Eason Chan"]}
   // 选歌时 artist/album 类型走硬过滤, style/mood 走 query 前缀辅助召回。
-  const topicClassification = await classifyShowTopic(deps.llm, brief?.topic);
+  const topicClassification = await classifyShowTopic(deps.llm, brief?.topic, deps.music);
   await jobRegistry.addLog(jobId, {
     level: "info",
     message: `Show topic classified: kind=${topicClassification.kind} anchors=${JSON.stringify(topicClassification.anchors)} (from "${brief?.topic ?? "(none)"}")`,
