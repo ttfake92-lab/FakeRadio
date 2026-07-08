@@ -55,7 +55,7 @@ FakeRadio 当前已经有最小连续性闭环：
 
 - `buildTodayPlan(playlists?)` 生成当天的时段计划；当传入 `user/playlists.json` 内容时，block 的 `label` 和 `moodHint` 取自对应 playlist 的 `name` 与首个 `seed`，未传入时回退到硬编码默认值
 - `getCurrentPlanBlock()` 选出当前时段 block
-- 初始队列、daypart 切换队列、实时 `/api/next` 都通过 Recommendation Engine (`server/src/recommendation/recommendation-engine.ts`) 生成候选；它会综合当前 block、天气、日程、用户品味、mood rules、playlist seeds、网易喜欢歌曲 seed、最近播放和当前队列。query 优先级：**艺术家 → 品味关键词 → 场景词**（不是按场景词倒推的简单路径）。网易云 adapter 走 `/simi/song` 时使用这些 `seeds`
+- 初始队列、daypart 切换队列、实时 `/api/next` 都通过 Recommendation Engine (`server/src/recommendation/recommendation-engine.ts`) 生成候选；它会综合当前 block、天气、日程、用户品味、mood rules、playlist seeds、网易喜欢歌曲 seed、最近播放和当前队列。query 优先级：**艺术家 → 品味+天气组合 → 品味+编排场景词组合 → 品味单独 → 场景词**（2026-07-08 起天气因子权重高于每日编排——编排是静态计划，天气是即时现实；雨/雪/雷天气还会在 `inferEnergy` 里直接压低能量档，不管 block 是什么时段）。网易云 adapter 走 `/simi/song` 时使用这些 `seeds`
 - 每次成功生成下一首后，server 追加 `playedTrack` 记忆
 - 后续 DJ 口播可引用上一首歌，形成连续过渡
 
@@ -118,7 +118,7 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 
 1. 前端请求 `GET /api/episode/next`
 2. server 选择下一首曲目（复用现有 music adapter 搜索/队列/回退逻辑）
-3. `composeEpisodeFromTrack()`（`server/src/http/episode-runner.ts`）统一完成：收集资料（`StorySourceAdapter` 聚合歌词/元数据/网页研究）→ 口播生成（含 `narrationMentionsTrack` 安全守卫，未提及曲目时回退确定性文案）→ TTS 合成（真实失败回退静音 WAV）
+3. `composeEpisodeFromTrack()`（`server/src/http/episode-runner.ts`）统一完成：收集资料（`StorySourceAdapter` 聚合歌词/元数据/网页研究）→ 口播生成 → TTS 合成（真实失败回退静音 WAV）。口播校验守卫（2026-07-08 重做）：`narrationMentionsTrack` 用**宽松匹配**（歌名去括号后缀/副标题、多歌手 credit 拆开逐个比，命中任一即可）+ 禁词检查；校验失败**先带具体失败原因让 LLM 重写一次**，两次都失败才落到兜底文案池（每种 storyType 多条变体，按 track.id 哈希确定性选取）。旧实现全字匹配 + 单一固定模板，导致"这首 X 我留了很久"高频复读
 4. server 更新播放状态、广播 `dj-speech` / `agent-message` WebSocket 事件
 5. 前端先播放 story
 6. story 剩余约 3 秒时音乐从安全音量（0.2）渐入
@@ -143,10 +143,22 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 | `apps/web/src/features/studio/radio-screen.tsx` | 手机框渲染层：Header、条纹时钟（ON AIR/STANDBY）、播放器（悬停进度条 / EQ 5 柱 / 5 格音量）、可展开 QUEUE、右上角菜单抽屉、覆盖层容器 |
 | `apps/web/src/features/studio/radio-chat.tsx` | 聊天渲染层：AI/用户气泡（带 HH:MM 时间戳）、快捷指令、DJ 推荐候选卡、编排进度面板、TASTE 折叠区 |
 | `apps/web/src/features/show/panel-ui.tsx` | 面板共享设计语言：`CollapsibleSection`（QUEUE 栏同款展开交互）、`pillButton`、`FIELD_*` 字段样式令牌 |
+| `apps/web/src/features/studio/round-avatar.tsx` | 头像与天气共享层：`RoundAvatar`（图 + 文字占位回退）、`useAvatar` / `pickAndUploadAvatar`（上传 + 跨组件事件刷新）、`useWeatherNow`（TopBar 天气行） |
+| `apps/web/src/features/show/persona-panel.tsx` / `profile-panel.tsx` | DJ 人设面板（查看 + 编辑覆盖）/ 个人资料面板（品味标签、城市编辑、头像上传） |
+| `apps/web/src/features/player/typewriter.ts` | 聊天打字机渲染器（SSE chunk 匀速逐字放出） |
 
 ### 导航与视图
 
-功能入口收在右上角汉堡菜单：**节目库**、**设置**、**网易云登录**（状态点）。视图为 `main` / `library` / `settings` 三值（`RadioView`），library 和 settings 以覆盖层渲染在手机框内，顶部有 BACK 栏。节目库覆盖层内部是分段控件式三 Tab：**制作**（ProductionBoard：Brief/History 下拉 + Plan/Jobs/Export 折叠区 + Generate Now）、**节目库**（ShowLibrary 历史工程列表）、**今日**（今日整期导出 + 只读节目单）。
+功能入口收在右上角汉堡菜单：**节目库**、**设置**、**网易云登录**（状态点）。视图为 `main` / `library` / `settings` / `persona` / `profile` 五值（`RadioView`），非 main 视图以覆盖层渲染在手机框内，顶部有 BACK 栏。节目库覆盖层内部是分段控件式三 Tab：**制作**（ProductionBoard：Brief/History 下拉 + Plan/Jobs/Export 折叠区 + Generate Now）、**节目库**（ShowLibrary 历史工程列表）、**今日**（今日整期导出 + 只读节目单）。
+
+两个头像入口（2026-07-08 新增）：
+
+- **TopBar 左上角用户头像** → `profile` 视图（`profile-panel.tsx`）：品味标签（风格关键词 + top 艺术家）、品味画像、关于我、日常节奏、情绪规则、**城市位置编辑**（写 `settings.weatherCity`）、上传用户头像
+- **聊天区 DJ 头像**（区头 + 每条气泡）→ `persona` 视图（`persona-panel.tsx`）：基础人设全文（只读）+ 自定义覆盖编辑（名字/人设/回复方式/语气，保存即注入所有 DJ LLM 调用）+ 上传 DJ 头像
+
+头像用 `round-avatar.tsx` 的 `RoundAvatar` 统一渲染：有上传图显示图（`GET /api/avatar/:kind`），404 回退文字占位（FR / AI）；上传走 canvas 压缩到 256px → dataUrl → `PUT /api/avatar/:kind`，成功后广播 window 事件让 TopBar / 气泡 / 面板同步换图。TopBar 第二行是天气行「[ 城市 • 天气 温度 ]」（`useWeatherNow`，未加载时回退 `[ LOCAL RADIO ]`）。
+
+**聊天流式输出**：服务端 `/api/chat/stream` 是 LLM 整段完成后按句一次性 emit（结构化 DjDecision 不适合 token 级流式），前端用 `typewriter.ts` 打字机匀速逐字渲染（约 80 字/秒，积压加速追赶，`finish` 时对齐服务端最终全文），`editorial-radio.handleSend` 接入。
 
 `SettingsPanel` / `ProductionBoard` / `ShowLibrary` 只有 embedded 形态（旧的悬浮窗模式及其 `isExpanded`/`onToggleExpand`/`onClose` props 已在 2026-07-02 删除）。
 
@@ -209,7 +221,7 @@ FakeRadio 支持通过自然对话完成节目编排，用户可以像和 DJ 聊
 
 ### 主题分类与选歌
 
-`POST /api/shows/generate-now` 执行节目时（`scheduler-integration.ts:executeScheduledJob`），先对 `brief.topic` 做一次 LLM 主题分类（`classify-show-topic.ts`），输出 `{ kind, anchors }`：
+`POST /api/shows/generate-now` 执行节目时（`scheduler-integration.ts:executeScheduledJob`），先对 `brief.topic` 做一次 LLM 主题分类（`classify-show-topic.ts`），输出 `{ kind, anchors }`。**分类结果会用真实音乐搜索做事实校验**（2026-07-08 新增 `verifyTopicAsArtist`）：LLM 没判成 artist/album 且主题 ≤24 字时，搜一次 music provider——top 12 结果里 ≥2 首歌的 artist 字段与主题名互相包含，就强制 `kind: "artist"` 并用 provider 侧规范歌手名做 anchors。这解决了小众歌手（如「门尼」）LLM 不认识、被误判成 mood/none 导致整期节目跑偏的问题；搜索证据强于 LLM 先验。分类类型：
 
 | kind | 含义 | anchors 示例 | 选歌行为 |
 |------|------|-------------|---------|
@@ -269,12 +281,12 @@ prompt 里追加"按剧本中的这一幕来写"约束：紧扣段落情绪基�
 
 ### Weather Adapter
 
-`WeatherAdapter`（`server/src/adapters/io/weather-adapter.ts`）：
+天气开箱即用（2026-07-08 起），provider 由 `FAKERADIO_WEATHER_PROVIDER` 决定：
 
-- `mock`：返回固定天气数据
-- `auto`（默认）：有 `FAKERADIO_OPENWEATHER_API_KEY` 时使用 OpenWeatherMap，否则回退 mock
+- `auto`（默认）：有 `FAKERADIO_OPENWEATHER_API_KEY` 用 OpenWeatherMap（`weather-adapter.ts`），否则用免 key 的 **Open-Meteo**（`open-meteo-weather-adapter.ts`：地理编码缓存坐标 + WMO code 映射中文描述与 mood hint）
+- `disabled`：单测专用（vitest 配置已设，单测不打真实网络）
 
-环境变量：`FAKERADIO_OPENWEATHER_API_KEY`、`FAKERADIO_WEATHER_CITY`（默认 `Beijing`）。
+环境变量：`FAKERADIO_WEATHER_PROVIDER`、`FAKERADIO_OPENWEATHER_API_KEY`、`FAKERADIO_WEATHER_CITY`（默认 `Shanghai`）。城市可在运行时通过 `settings.weatherCity`（个人资料面板编辑，`PUT /api/settings`）修改，`applySettings` 重建 adapter 即时生效。前端 TopBar 第二行通过 `GET /api/weather` 显示「城市 • 天气 温度」，每 15 分钟刷新、城市修改后立即刷新。
 
 ### Calendar Adapter
 

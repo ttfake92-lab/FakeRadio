@@ -157,6 +157,9 @@ screen -S fakeradio-netease -X quit
 | `FAKERADIO_MIMO_BASE_URL` | MiMo API 地址 | `https://api.xiaomimimo.com/v1` | 否 |
 | `FAKERADIO_MIMO_TTS_VOICE` | MiMo 音色 | `茉莉` | 否 |
 | `FAKERADIO_BRAVE_API_KEY` | Brave Search API key（网页研究） | — | 否（无 key 时优雅降级） |
+| `FAKERADIO_WEATHER_PROVIDER` | 天气来源：`auto` / `open-meteo` / `openweathermap` / `disabled` | `auto`（无 key 时用免 key 的 Open-Meteo） | 否 |
+| `FAKERADIO_WEATHER_CITY` | 天气城市（支持中文名；运行时可被 `settings.weatherCity` 覆盖） | `Shanghai` | 否 |
+| `FAKERADIO_OPENWEATHER_API_KEY` | OpenWeatherMap API key | — | 否（有 key 时 auto 模式优先用它） |
 | `FAKERADIO_GROK_HTTPS_PROXY` | Grok TTS 专用代理（`https://...` URL）。优先于下面两个 | — | 否 |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` | 系统级代理变量，Grok adapter 也会读。**境内用户**建议显式设 `HTTPS_PROXY=http://127.0.0.1:7897` | — | 否 |
 

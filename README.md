@@ -47,6 +47,8 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 | LLM | Mock（无 key 时自动回退） | — |
 | TTS | Grok TTS（默认） | `FAKERADIO_TTS_PROVIDER=grok` + `FAKERADIO_XAI_API_KEY`（也兼容 `XAI_API_KEY`） |
 | TTS | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` + `FAKERADIO_MIMO_API_KEY` |
+| 天气 | Open-Meteo（默认，免 key 开箱即用） | 无需配置；城市用 `FAKERADIO_WEATHER_CITY` 或在个人资料面板编辑 |
+| 天气 | OpenWeatherMap | `FAKERADIO_OPENWEATHER_API_KEY` |
 
 所有配置统一在项目根目录 `.env` 文件中。详见 `docs/adapters.md`。
 
@@ -64,6 +66,9 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 - **用户偏好接入**：server 启动时读取 `user/taste.md`、`user/routines.md`、`user/mood-rules.md` 和 `user/playlists.json`，注入 DJ 决策与选歌流程。
 - **播放稳定性**：story audio 播放失败时不再自动回退到纯音乐，而是进入错误状态并提示用户。
 - **收藏与推荐**：支持导入网易云收藏歌曲，选歌时优先从收藏列表候选，LLM 可从候选中指定曲目。
+- **天气感知**：TopBar 显示实时城市/天气/温度；推荐引擎中天气因子权重高于每日编排，城市可在个人资料面板编辑。
+- **DJ 人设与头像**：点聊天区 DJ 头像可查看/编辑人设（名字、回复方式、语气，保存即生效）并上传头像；点左上角用户头像进入个人资料面板（品味标签、top 艺术家、城市、头像）。
+- **聊天流式输出**：DJ 回复以打字机效果逐字渲染。
 
 ### Show Production（节目制作）
 

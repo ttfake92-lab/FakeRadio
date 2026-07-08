@@ -2,7 +2,7 @@
 
 ## HTTP
 
-- `GET /api/health`：返回 server 和 adapter 状态。当前至少包含 `adapters.llm`、`adapters.music`、`adapters.tts`、`adapters.weather`、`adapters.calendar`、`adapters.upnp`。其中 `adapters.music` 当前会返回 `ready` 或 `mock`。
+- `GET /api/health`：返回 server 和 adapter 状态。当前至少包含 `adapters.llm`、`adapters.music`、`adapters.tts`、`adapters.weather`、`adapters.calendar`、`adapters.upnp`。其中 `adapters.music` 当前会返回 `ready` 或 `mock`；`adapters.weather` 默认 `ready`（免 key 的 Open-Meteo 兜底，仅 `FAKERADIO_WEATHER_PROVIDER=disabled` 时为 `disabled`）。
 - `GET /api/now`：返回当前播放、DJ 口播和队列。`track.source` 与 `queue[].source` 会直接告诉前端当前曲目来自 `netease` 还是 `mock`。
 - `GET /api/next`：计算下一首歌，返回 DJ 决策、歌曲、TTS 结果和诊断信息。选歌先经过 server 侧 Recommendation Engine，综合 daypart、天气、日程、`taste.md`、`mood-rules.md`、`playlists.json`、网易喜欢歌曲 seed、最近播放和当前队列。`diagnostics` 字段包含：`candidateSource`（curated/favorites/search/queue）、`rerankSource`（llm-pick/fallback）、`favoritesAvailable`（收藏曲目数）、`candidatesCount`（候选总数）、`signals`（本次使用的推荐信号）、`queries`（实际扩展出的 provider 查询）、`seedCount`（liked song seed 数）、`isFallback`、`musicProvider`。LLM 可从策划候选曲目列表中选择曲目，选中时 `rerankSource` 为 `llm-pick`，否则走确定性兜底。TTS provider 失败时会回退到本地可听 TTS，避免主流程返回未处理的 500。
 - `POST /api/chat`：向 DJ 发送自然语言消息。支持的意图：切歌（"下一首"）、收藏（"喜欢这首歌"）、节目编排（自然语言触发，如"帮我做一期后摇主题节目"、"做陈奕迅的节目"、"做一期 Pink Floyd"、"策划一期粤语金曲节目"、"最近在听很多 City Pop"）、品味更新、故事讲述等。节目编排支持多轮对话：创建 → 修改 → 确认。意图 regex 详见 `server/src/show/brief-intent-parser.ts:THEME_SHOW_PATTERNS`。
@@ -10,6 +10,12 @@
 - `POST /api/queue/insert-next`：DJ 候选确认插入。请求体 `{ track: Track }`，把 track 写入 `state` 的**优先槽**（`priorityNextTrack`，与推荐缓冲池 `queue` 分离的最高播放优先级槽位），并从 `queue` 去重移除同一首。广播 `now-playing` 事件（让前端立即刷新）。返回 `{ ok: true }`。**优先槽在 `/api/episode/next`、`/api/episode/prefetch` 里拥有最高消费优先级**——这是修复「DJ 说插到下一首了但实际没插入」的关键：以前 push 进 `queue` 后会被 prewarm 预生成 episode 和推荐引擎抢先消费，`queue` 仅作最后兜底几乎永远轮不到。前端 `editorial-radio` 在用户点击候选卡片时调用，并在成功后调 `playback.refreshPrefetch()` 丢掉旧预取、重新预取，让 UP NEXT 立即显示选中曲目。
 - `GET /api/taste`：返回规范化用户品味。
 - `POST /api/taste/infer`：根据今日对话和收藏记录，自动推断并更新用户品味文件。需要今日至少有 3 条互动记录，否则返回 400。
+- `GET /api/profile`：个人资料面板数据（入口：TopBar 左上角用户头像）。返回 `{ profile, taste, routines, moodRules, tasteTags: string[], topArtists: string[], favoritesCount, likedSongsCount }`。`tasteTags` 复用推荐引擎的 `extractTasteKeywords`（面板展示的标签 = 推荐实际使用的信号）；`topArtists` 从网易喜欢歌曲按出现频次取 top 10。
+- `GET /api/persona`：DJ 人设（入口：聊天区 DJ 头像）。返回 `{ base: string, override: DjPersonaOverride | null }`。`base` 是 `prompts/dj-persona.md` 全文（只读展示）；`override` 是用户自定义覆盖。
+- `PUT /api/persona`：保存用户自定义 DJ 人设。请求体 `{ name?, personaText?, replyStyle?, tone? }`（全部字段为空 = 清除覆盖、恢复默认）。覆盖持久化到 SQLite pref `dj:persona`，并通过 `dj-persona-store` 单例在 `buildContextWindow` 的 system fragment 统一追加——**保存后立即对聊天回复、歌曲口播、预热生效，无需重启**。
+- `GET /api/weather`：TopBar 天气行数据。返回 `{ city, summary, moodHint, temperatureC?, status: "ready"|"disabled"|"error" }`。城市来自 `settings.weatherCity`（空串回退 `FAKERADIO_WEATHER_CITY`）。
+- `PUT /api/avatar/:kind`：上传头像，`kind` 为 `dj`（聊天区 DJ 头像）或 `user`（TopBar 用户头像）。请求体 `{ dataUrl: "data:image/png|jpeg|webp;base64,..." }`，解码后 ≤1MB（前端已用 canvas 压到 256px）。文件落 `user/avatars/<kind>.<ext>`。
+- `GET /api/avatar/:kind`：读取头像图片（带正确 content-type，`cache-control: no-cache`）。未上传过返回 404，前端回退到文字占位（FR / AI）。
 - `GET /api/plan/today`：返回当天电台计划。`blocks[]` 当前包含 `at`、`label` 和 `moodHint`，供 scheduler 和前端共同消费。
 - `POST /api/netease/login/cookie`：直接注入网易云 cookie 字符串。请求体 `{ cookie: string }`，返回 `{ success: boolean, message: string }`。当前因 music.163.com 封禁网页版二维码登录（code 8821），此接口为推荐登录方式。
 - `POST /api/export/today`：启动异步节目导出任务。立即返回 `202 { taskId, status: "pending" }`，后台执行音频混音、生成 show notes 和打包 ZIP。
@@ -36,6 +42,11 @@
 
 - `GET /api/netease/login/status`：查看当前网易云 cookie 登录状态。
 - `POST /api/netease/logout`：清除当前网易云登录 cookie。
+
+## 设置
+
+- `GET /api/settings`：返回当前运行时设置（`SettingsSchema`）。
+- `PUT /api/settings`：部分更新设置并热应用（`applySettings` 重建 adapter snapshot，无需重启）。字段含 provider/音色/语速等 TTS 项、netease 项、`weatherCity`（天气城市，个人资料面板可编辑，支持中文城市名）等，完整清单以 `packages/shared` 的 `UpdateSettingsRequestSchema` 为准。
 
 ## TTS
 

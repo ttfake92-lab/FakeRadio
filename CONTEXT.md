@@ -128,10 +128,11 @@ FakeRadio 目前按四层理解：
 
 ### 真实天气
 
-- `WeatherAdapter` 已支持 `mock` 和 `OpenWeatherMap`。
-- 有 `FAKERADIO_OPENWEATHER_API_KEY` 时自动使用 OpenWeatherMap，否则回退到 mock。
-- 遵循与 LLM/TTS 相同的 auto-detect 模式，不需手动切换 provider。
-- `/api/health` 暴露 `adapters.weather` 状态。
+- `WeatherAdapter` 已支持 `Open-Meteo`（默认，免 key 开箱即用）和 `OpenWeatherMap`（有 `FAKERADIO_OPENWEATHER_API_KEY` 时优先）。
+- 城市由 `FAKERADIO_WEATHER_CITY`（默认 Shanghai）或运行时 `settings.weatherCity`（个人资料面板可编辑）决定。
+- 推荐引擎中天气因子权重高于每日编排场景词；雨雪雷天气直接压低能量档。
+- 前端 TopBar 第二行显示「城市 • 天气 温度」（`GET /api/weather`）。
+- `/api/health` 暴露 `adapters.weather` 状态（默认 `ready`；`FAKERADIO_WEATHER_PROVIDER=disabled` 仅供单测）。
 
 ### 真实日历
 
@@ -180,6 +181,8 @@ FakeRadio 目前按四层理解：
 
 - 主界面为全端统一的 440×812 手机框（frontend 4.0，2026-07-02），light/dark 双主题（localStorage 旧值 bone/graphite 自动迁移）。逻辑在 `editorial-radio.tsx`，渲染层拆在 `radio-screen.tsx` / `radio-chat.tsx`，面板共享设计语言在 `features/show/panel-ui.tsx`。
 - 节目库/设置/网易云登录收在右上角汉堡菜单；节目库覆盖层内含 制作/节目库/今日 三个 Tab。
+- 视图为 `RadioView` 五值：`main` / `library` / `settings` / `persona` / `profile`（2026-07-08 新增后两个）。TopBar 左上角用户头像 → 个人资料面板（品味标签、城市编辑、头像上传）；聊天区 DJ 头像 → 人设面板（基础人设 + 可编辑覆盖 + 头像上传）。
+- TopBar 第二行显示「[ 城市 • 天气 温度 ]」实时天气行；DJ 聊天回复走打字机逐字渲染（`typewriter.ts`）。
 - 皮肤系统已全部删除（2026-07-02 删掉 `skin-amber.tsx`/`skin-stage.tsx`/`useRadioBridge`），`skin-config.ts` 仅保留 `QUICK_PROMPTS` 快捷指令。
 
 ### 播放器诊断

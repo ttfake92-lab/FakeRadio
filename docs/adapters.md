@@ -151,7 +151,7 @@ FAKERADIO_DEEPSEEK_MODEL=deepseek-v4-flash
 FAKERADIO_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 ```
 
-LLM 接收 6 类 ContextFragment（system、user、environment、memory、request、execution），输出符合 `DjDecisionSchema` 的 JSON。system prompt 从 `prompts/dj-persona.md` 读取。
+LLM 接收 6 类 ContextFragment（system、user、environment、memory、request、execution），输出符合 `DjDecisionSchema` 的 JSON。system prompt 从 `prompts/dj-persona.md` 读取（`create-server.loadSystemPrompt`，候选路径为仓库根 + `process.cwd()`——2026-07-08 前该路径少算一层导致人设从未加载）。用户在 DJ 人设面板保存的自定义覆盖（名字/人设/回复方式/语气）由 `server/src/user/dj-persona-store.ts` 单例持有，在 `buildContextWindow` 组装 system fragment 时统一追加，编辑即时生效。
 
 `LlmAdapter` 接口有三个方法：
 
@@ -161,23 +161,25 @@ LLM 接收 6 类 ContextFragment（system、user、environment、memory、reques
 
 ## Weather adapter
 
-Weather 通过 `WeatherAdapter` 边界接入。当前支持两种 provider：
+Weather 通过 `WeatherAdapter` 边界接入。当前支持三种 provider（2026-07-08 起天气开箱即用，不再默认 disabled）：
 
-| Provider | 环境变量 | 说明 |
+| Provider | 触发条件 | 说明 |
 |----------|----------|------|
-| Mock | 无 key 时自动使用 | 返回固定天气数据 |
-| OpenWeatherMap | `FAKERADIO_OPENWEATHER_API_KEY` | OpenWeatherMap Current Weather API |
+| Open-Meteo | 默认（无需任何 key） | `open-meteo-weather-adapter.ts`：免费 API，城市名一次地理编码后缓存坐标，WMO weather code 映射为中文天气描述 + mood hint |
+| OpenWeatherMap | 有 `FAKERADIO_OPENWEATHER_API_KEY` | OpenWeatherMap Current Weather API |
+| Disabled | `FAKERADIO_WEATHER_PROVIDER=disabled` | 单测专用（vitest 配置里已设置，避免单测打真实网络） |
 
-### OpenWeatherMap 配置
+### 配置
 
 ```bash
-FAKERADIO_OPENWEATHER_API_KEY=your_api_key
-FAKERADIO_WEATHER_CITY=Beijing
+FAKERADIO_WEATHER_PROVIDER=auto   # auto | open-meteo | openweathermap | disabled
+FAKERADIO_WEATHER_CITY=Shanghai   # 默认 Shanghai，支持中文城市名
+FAKERADIO_OPENWEATHER_API_KEY=    # 可选；auto 模式下有 key 用 OpenWeatherMap，否则 Open-Meteo
 ```
 
-auto-detect 逻辑：有 `FAKERADIO_OPENWEATHER_API_KEY` 时自动使用 OpenWeatherMap，否则回退 mock。不需手动设置 provider mode。
+城市还可以在**运行时**通过设置（`PUT /api/settings` 的 `weatherCity` 字段，入口为个人资料面板）修改，`applySettings` 重建 weather adapter 即时生效；`weatherCity` 为空串时回退环境变量默认值。
 
-输出字段包含天气描述、温度、湿度和 mood hint（如 `warm`、`cool`、`rainy`），注入 DJ brain 的 environment context。
+输出字段包含天气描述、温度和 mood hint，注入 DJ brain 的 environment context；同时供 `GET /api/weather` 给前端 TopBar 显示「城市 • 天气 温度」。**推荐引擎中天气因子的权重高于每日编排场景词**（详见 `architecture.md` 连续性章节）。
 
 ## Calendar adapter
 
