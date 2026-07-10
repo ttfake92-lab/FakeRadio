@@ -352,6 +352,13 @@ export type ComposeEpisodeDeps = {
   calendar: CalendarAdapter;
   devices: DeviceAdapter;
   systemPrompt: string;
+  /**
+   * TTS 失败时是否允许回退到 macOS say 兜底（默认 true）。
+   * live 播放路径保持 true（电台不能突然静音）；prewarm / 主题节目等持久化路径
+   * 必须传 false——否则设置切换的过渡窗口（如 provider 已切 Fish 但 Voice ID 未填）
+   * 会把系统 say 音频永久烘进 prepared episodes，之后播放命中就是"系统音"。
+   */
+  audibleTtsFallback?: boolean;
 };
 
 export type EpisodeCompositionContext = {
@@ -428,7 +435,9 @@ export async function composeEpisodeFromTrack(
     context.showPlanContext
   );
 
-  const { result: storyTtsResult, fallbackReason } = await synthesizeWithFallback(deps.tts, deps.ttsCacheDir, narration);
+  const { result: storyTtsResult, fallbackReason } = deps.audibleTtsFallback === false
+    ? { result: await deps.tts.synthesize(narration), fallbackReason: undefined }
+    : await synthesizeWithFallback(deps.tts, deps.ttsCacheDir, narration);
 
   const episode: RadioEpisode = {
     track,

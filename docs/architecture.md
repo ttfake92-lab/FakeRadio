@@ -19,7 +19,7 @@ FakeRadio 由四层组成：
 4. music adapter 用该 query 搜索候选曲目，并解析出最终可播放 `audioUrl`
 5. server 优先选择不同于当前播放的候选曲目；候选和队列都为空时，单次回退到 mock music adapter
 6. server 把真实曲目、provider 状态和当前队列再次注入 DJ brain，生成 grounded 文案
-7. TTS adapter 生成口播音频路径；真实 TTS 失败时回退到 mock TTS
+7. TTS adapter 生成口播音频路径；live 路径下真实 TTS 失败时回退到 macOS say 本地可听 TTS（预热/主题节目等持久化路径不回退，见「启动批量预热」）
 8. server 更新当前播放状态、追加播放记忆，并通过 `/stream` 广播
 9. 前端刷新当前曲目、队列、DJ 口播和诊断状态
 
@@ -79,8 +79,8 @@ FakeRadio 当前已经有最小连续性闭环：
 **关键步骤**（`daily-episode-prewarmer.generatePrewarmEpisode`）：
 
 1. `music.resolve(track)` 必须先调——`/api/episode/next` 的 live 路径内部 resolve，但 `claimPreparedEpisode` 不会 resolve
-2. 然后 `composeEpisodeFromTrack` 生成口播文案 + TTS（注入 `profile` + `personalHistory`，与 live 路径对齐，否则预热口播质量退化）
-3. 存到 `prepared_episodes`，`status: "ready"`
+2. 然后 `composeEpisodeFromTrack` 生成口播文案 + TTS（注入 `profile` + `personalHistory`，与 live 路径对齐，否则预热口播质量退化）。预热传 `audibleTtsFallback: false`：TTS 失败**不**回退 macOS say，直接让该次生成失败——否则设置切换的过渡窗口（如 provider 已切 Fish 但 Voice ID 未填）会把系统 say 音频永久烘进 prepared episodes（2026-07-10 修复）
+3. 存到 `prepared_episodes`，`status: "ready"`（TTS 失败记 `failed`，等低水位补生成重试）
 
 进度通过 `agent-message` WebSocket 事件广播到前端对话框，让用户看到"正在准备 N 首口播…"。后台 `void` 异步，不阻塞启动和首次播放；第一首就绪后即可播，其余陆续准备。失败时 fallback live（`/api/episode/next` 仍能正常返回）。
 
@@ -118,7 +118,7 @@ FakeRadio 已经实现 story-first 电台播放闭环：
 
 1. 前端请求 `GET /api/episode/next`
 2. server 选择下一首曲目（复用现有 music adapter 搜索/队列/回退逻辑）
-3. `composeEpisodeFromTrack()`（`server/src/http/episode-runner.ts`）统一完成：收集资料（`StorySourceAdapter` 聚合歌词/元数据/网页研究）→ 口播生成 → TTS 合成（真实失败回退静音 WAV）。口播校验守卫（2026-07-08 重做）：`narrationMentionsTrack` 用**宽松匹配**（歌名去括号后缀/副标题、多歌手 credit 拆开逐个比，命中任一即可）+ 禁词检查；校验失败**先带具体失败原因让 LLM 重写一次**，两次都失败才落到兜底文案池（每种 storyType 多条变体，按 track.id 哈希确定性选取）。旧实现全字匹配 + 单一固定模板，导致"这首 X 我留了很久"高频复读
+3. `composeEpisodeFromTrack()`（`server/src/http/episode-runner.ts`）统一完成：收集资料（`StorySourceAdapter` 聚合歌词/元数据/网页研究）→ 口播生成 → TTS 合成（live 路径失败回退 macOS say 可听 TTS；预热/主题节目持久化路径 `audibleTtsFallback: false`，失败即失败）。口播校验守卫（2026-07-08 重做）：`narrationMentionsTrack` 用**宽松匹配**（歌名去括号后缀/副标题、多歌手 credit 拆开逐个比，命中任一即可）+ 禁词检查；校验失败**先带具体失败原因让 LLM 重写一次**，两次都失败才落到兜底文案池（每种 storyType 多条变体，按 track.id 哈希确定性选取）。旧实现全字匹配 + 单一固定模板，导致"这首 X 我留了很久"高频复读
 4. server 更新播放状态、广播 `dj-speech` / `agent-message` WebSocket 事件
 5. 前端先播放 story
 6. story 剩余约 3 秒时音乐从安全音量（0.2）渐入

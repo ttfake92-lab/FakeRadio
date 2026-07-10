@@ -138,7 +138,10 @@ async function generatePrewarmEpisode(
   const composeDeps: ComposeEpisodeDeps = {
     llm, tts, ttsCacheDir, storySource,
     publicMetadataAdapter, webResearchAdapter,
-    weather, calendar, devices, systemPrompt
+    weather, calendar, devices, systemPrompt,
+    // 预热是持久化路径：TTS 失败必须让本次生成失败（下次补生成），
+    // 不允许把 macOS say 兜底音频烘进 prepared episodes。
+    audibleTtsFallback: false
   };
   // 与 live 路径对齐：注入 profile + personalHistory，否则预热出的口播质量退化。
   const playedHistory = await stateRepo.getRecentlyPlayed(50);

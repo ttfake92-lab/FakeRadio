@@ -149,13 +149,18 @@ screen -S fakeradio-netease -X quit
 | `FAKERADIO_DEEPSEEK_API_KEY` | DeepSeek API key（LLM） | — | 否（无 key 时回退到 mock LLM） |
 | `FAKERADIO_DEEPSEEK_MODEL` | DeepSeek 模型名 | `deepseek-v4-flash` | 否 |
 | `FAKERADIO_DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/v1` | 否 |
-| `FAKERADIO_TTS_PROVIDER` | TTS provider：`grok` / `mimo` | `grok` | 否 |
+| `FAKERADIO_TTS_PROVIDER` | TTS provider：`grok` / `mimo` / `fish` | `grok` | 否 |
 | `FAKERADIO_XAI_API_KEY` | xAI / Grok TTS API key（也兼容 `XAI_API_KEY`） | — | 否（provider=grok 时必需） |
 | `FAKERADIO_XAI_TTS_BASE_URL` | xAI TTS API 地址 | `https://api.x.ai/v1` | 否 |
 | `FAKERADIO_XAI_TTS_LANGUAGE` | Grok TTS 语言代码，如 `zh` / `en` / `auto` | `zh` | 否 |
 | `FAKERADIO_MIMO_API_KEY` | MiMo TTS API key | — | 否（provider=mimo 时必需） |
 | `FAKERADIO_MIMO_BASE_URL` | MiMo API 地址 | `https://api.xiaomimimo.com/v1` | 否 |
 | `FAKERADIO_MIMO_TTS_VOICE` | MiMo 音色 | `茉莉` | 否 |
+| `FAKERADIO_FISH_API_KEY` | Fish Audio API key | — | 否（provider=fish 时必需） |
+| `FAKERADIO_FISH_BASE_URL` | Fish Audio API 地址 | `https://api.fish.audio` | 否 |
+| `FAKERADIO_FISH_TTS_MODEL` | Fish Audio 模型（`model` header），如 `s2-pro` / `s1` / `s2.1-pro-free` | `s2-pro` | 否 |
+| `FAKERADIO_FISH_TTS_TIMEOUT_MS` | Fish Audio 合成超时 | `60000` | 否 |
+| `FAKERADIO_FISH_HTTPS_PROXY` | Fish Audio 专用代理，优先于系统级代理变量 | — | 否 |
 | `FAKERADIO_BRAVE_API_KEY` | Brave Search API key（网页研究） | — | 否（无 key 时优雅降级） |
 | `FAKERADIO_WEATHER_PROVIDER` | 天气来源：`auto` / `open-meteo` / `openweathermap` / `disabled` | `auto`（无 key 时用免 key 的 Open-Meteo） | 否 |
 | `FAKERADIO_WEATHER_CITY` | 天气城市（支持中文名；运行时可被 `settings.weatherCity` 覆盖） | `Shanghai` | 否 |
@@ -280,6 +285,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3301$(curl -s http://loc
 2. **低水位补生成**：`register-routes.ensurePreparedEpisodes()` 在 next/prefetch 消费 prepared 成功后触发；当前 block ready 数 < `FAKERADIO_PREWARM_LOW_WATER_MARK` 时后台补到 `FAKERADIO_PREWARM_STARTUP_EPISODES` 首。防重入（`prewarmRefilling` 标志），不阻塞响应。
 3. **`appendRecommendedTracks` 异步化**：原来 `await appendRecommendedTracks(10)` 阻塞 next/prefetch 响应（9 次网易云搜索），现改为 `void ... .catch()` fire-and-forget。它只补 track 元数据进内存 queue，不生成口播——真正秒切靠 prepared_episodes。
 4. **`/api/episode/next`、`/api/episode/prefetch` 选歌优先级**：优先槽（用户"插到下一首"）→ prepared episode（`source: "prepared"`）→ live 推荐（`source: "live"`）。
+5. **TTS 失败即 failed，不降级入库**（2026-07-10 起）：预热路径禁用 macOS say 兜底（`audibleTtsFallback: false`），TTS 合成失败时该 episode 记 `failed`，等低水位补生成重试。此前设置切换的过渡窗口（provider 已切但 Voice ID 未填 → adapter disabled）会把系统 say 音频烘进 prepared episodes，用户播放命中即听到"系统音"。
 
 ### 环境变量
 

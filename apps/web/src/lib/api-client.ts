@@ -484,7 +484,7 @@ export async function getTtsVoices(): Promise<TtsVoicesResponse> {
 }
 
 export type TtsPreviewParams = {
-  provider: "mimo" | "grok";
+  provider: "mimo" | "grok" | "fish";
   voice: string;
   style?: string;
   rate?: number;

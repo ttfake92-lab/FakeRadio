@@ -19,6 +19,7 @@ import type { Settings } from "@fakeradio/shared";
 import { env } from "../../config/env.js";
 import { createMimoTtsAdapter } from "../../adapters/tts/mimo-tts-adapter.js";
 import { createGrokTtsAdapter } from "../../adapters/tts/grok-tts-adapter.js";
+import { createFishTtsAdapter } from "../../adapters/tts/fish-tts-adapter.js";
 
 const MIMO_VOICES = [
   { value: "茉莉", label: "茉莉 · 中文女声" },
@@ -55,7 +56,7 @@ const GROK_STYLES = [
 
 const TtsPreviewRequestSchema = z.object({
   text: z.string().optional(),
-  provider: z.enum(["mimo", "grok"]),
+  provider: z.enum(["mimo", "grok", "fish"]),
   voice: z.string().min(1),
   style: z.string().optional(),
   rate: z.number().int().min(-50).max(200).optional()
@@ -67,6 +68,10 @@ function getXaiApiKey() {
 
 function rateToGrokSpeed(rate: number | undefined): number {
   return Math.min(1.5, Math.max(0.7, 1 + (rate ?? 0) / 100));
+}
+
+function rateToFishSpeed(rate: number | undefined): number {
+  return Math.min(2, Math.max(0.5, 1 + (rate ?? 0) / 100));
 }
 
 type SettingsRouteDeps = {
@@ -139,6 +144,9 @@ export function registerSettingsRoutes(deps: SettingsRouteDeps) {
     if (body.provider === "mimo" && !env.FAKERADIO_MIMO_API_KEY) {
       return reply.status(503).send({ error: "未配置 MiMo API key，无法试听" });
     }
+    if (body.provider === "fish" && !env.FAKERADIO_FISH_API_KEY) {
+      return reply.status(503).send({ error: "未配置 Fish Audio API key（FAKERADIO_FISH_API_KEY），无法试听" });
+    }
     const xaiApiKey = getXaiApiKey();
     if (body.provider === "grok" && !xaiApiKey) {
       return reply.status(503).send({ error: "未配置 xAI API key，无法试听 Grok TTS" });
@@ -152,6 +160,17 @@ export function registerSettingsRoutes(deps: SettingsRouteDeps) {
             voice: body.voice,
             ...(body.style !== undefined ? { style: body.style } : {}),
             timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
+          })
+        : body.provider === "fish"
+        ? createFishTtsAdapter({
+            apiKey: env.FAKERADIO_FISH_API_KEY ?? "",
+            cacheDir: ttsCacheDir,
+            baseUrl: env.FAKERADIO_FISH_BASE_URL,
+            model: env.FAKERADIO_FISH_TTS_MODEL,
+            voiceId: body.voice,
+            speed: rateToFishSpeed(body.rate),
+            ...(body.style !== undefined ? { style: body.style } : {}),
+            timeoutMs: env.FAKERADIO_FISH_TTS_TIMEOUT_MS
           })
         : createGrokTtsAdapter({
             apiKey: xaiApiKey ?? "",

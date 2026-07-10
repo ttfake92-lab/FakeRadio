@@ -4,6 +4,7 @@ import {
   createDisabledLlmAdapter,
   createDisabledWeatherAdapter,
   createEmptyStorySourceAdapter,
+  createFishTtsAdapter,
   createGrokTtsAdapter,
   createLarkCalendarAdapter,
   createLocalBrowserDeviceAdapter,
@@ -34,6 +35,10 @@ function getXaiApiKey() {
 
 function rateToGrokSpeed(rate: number): number {
   return Math.min(1.5, Math.max(0.7, 1 + rate / 100));
+}
+
+function rateToFishSpeed(rate: number): number {
+  return Math.min(2, Math.max(0.5, 1 + rate / 100));
 }
 
 export type RuntimeAdapterStatuses = {
@@ -115,6 +120,26 @@ async function buildSnapshot(
         voice: settings.mimoVoice,
         style: settings.ttsStyle,
         timeoutMs: env.FAKERADIO_MIMO_TTS_TIMEOUT_MS
+      });
+    }
+    if (settings.ttsProvider === "fish") {
+      if (!env.FAKERADIO_FISH_API_KEY) {
+        ttsStatus = "disabled";
+        return createDisabledTtsAdapter("FAKERADIO_FISH_API_KEY is not configured");
+      }
+      if (!settings.fishVoiceId.trim()) {
+        ttsStatus = "disabled";
+        return createDisabledTtsAdapter("Fish Audio Voice ID 未填写，请在设置 → TTS Voice 中填入");
+      }
+      return createFishTtsAdapter({
+        apiKey: env.FAKERADIO_FISH_API_KEY,
+        cacheDir: ttsCacheDir,
+        baseUrl: env.FAKERADIO_FISH_BASE_URL,
+        model: env.FAKERADIO_FISH_TTS_MODEL,
+        voiceId: settings.fishVoiceId,
+        speed: rateToFishSpeed(settings.ttsRate),
+        style: settings.ttsStyle,
+        timeoutMs: env.FAKERADIO_FISH_TTS_TIMEOUT_MS
       });
     }
     const xaiApiKey = getXaiApiKey();
@@ -225,7 +250,12 @@ export async function createRuntimeAdapterManager(options: RuntimeAdapterManager
     },
 
     async applySettings(nextSettings: Settings) {
-      console.log(`[runtime-adapter] applySettings called: provider=${nextSettings.ttsProvider} voice=${nextSettings.ttsProvider === 'mimo' ? nextSettings.mimoVoice : nextSettings.ttsVoice} style=${nextSettings.ttsStyle}`);
+      const nextVoice = nextSettings.ttsProvider === 'mimo'
+        ? nextSettings.mimoVoice
+        : nextSettings.ttsProvider === 'fish'
+          ? nextSettings.fishVoiceId
+          : nextSettings.ttsVoice;
+      console.log(`[runtime-adapter] applySettings called: provider=${nextSettings.ttsProvider} voice=${nextVoice} style=${nextSettings.ttsStyle}`);
       const nextSnapshot = await buildSnapshot({
         cookieStore: options.cookieStore,
         ttsCacheDir: options.ttsCacheDir,

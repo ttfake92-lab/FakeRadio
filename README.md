@@ -47,6 +47,7 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 | LLM | Mock（无 key 时自动回退） | — |
 | TTS | Grok TTS（默认） | `FAKERADIO_TTS_PROVIDER=grok` + `FAKERADIO_XAI_API_KEY`（也兼容 `XAI_API_KEY`） |
 | TTS | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` + `FAKERADIO_MIMO_API_KEY` |
+| TTS | Fish Audio | `FAKERADIO_TTS_PROVIDER=fish` + `FAKERADIO_FISH_API_KEY`，Voice ID 在设置页填 |
 | 天气 | Open-Meteo（默认，免 key 开箱即用） | 无需配置；城市用 `FAKERADIO_WEATHER_CITY` 或在个人资料面板编辑 |
 | 天气 | OpenWeatherMap | `FAKERADIO_OPENWEATHER_API_KEY` |
 
@@ -59,7 +60,7 @@ FakeRadio 支持通过环境变量切换 LLM 和 TTS provider：
 - 前端展示当前曲目、队列、DJ 口播、今日计划和 provider 状态。
 - `/api/next` 先生成选歌 query，再用真实 music adapter 搜索并回填 grounded DJ 文案。
 - `/api/next` 会尽量避开当前正在播放的曲目；当真实搜索结果为空时会单次回退到 mock 曲目。
-- TTS 合成失败时会回退到 mock TTS，不阻断”生成下一首”的主流程。
+- live 路径 TTS 合成失败时会回退到本地可听 TTS，不阻断”生成下一首”的主流程；预热/主题节目持久化路径失败即记 failed，不降级入库。
 - 初始队列会按当前 daypart 的 `moodHint` 生成，不再固定使用单一 mood。
 - server 会记录近期播放历史，后续 DJ 文案可引用上一首歌，形成连续感。
 - 前端音量淡入淡出会限制在浏览器允许的 `[0, 1]` 区间内。
@@ -93,7 +94,7 @@ FakeRadio 已实现 story-first 电台播放闭环：
 - 口播快结束时音乐自动渐入（crossfade），播放过程中后台预取下一集
 - 故事资料来自网易云歌词、MusicBrainz 公开元数据和 Brave Search 网页研究
 - 故事类型和资料来源在前端可见，非创作背景时有免责提示
-- TTS 失败时自动回退到真实可播放的静音音频，不阻断电台循环
+- live 路径 TTS 失败时自动回退到本地可听 TTS（macOS say），不阻断电台循环；预热等持久化路径失败即失败，不产出降级音频
 - 详细规划见 `docs/superpowers/specs/`
 
 ## 结构

@@ -86,12 +86,13 @@ cookie 默认保存到 `user/secrets/netease-cookie.txt`，该目录不应提交
 
 ## TTS adapter
 
-TTS 通过 `TtsAdapter` 边界接入。当前支持两种 provider：
+TTS 通过 `TtsAdapter` 边界接入。当前支持三种 provider：
 
 | Provider | 环境变量 | 说明 |
 |----------|----------|------|
 | Grok TTS | `FAKERADIO_TTS_PROVIDER=grok`（默认） | 调用 xAI `POST /v1/tts`，返回原始 MP3 bytes |
 | MiMo V2.5 TTS | `FAKERADIO_TTS_PROVIDER=mimo` | 小米 MiMo 开放平台语音合成 |
+| Fish Audio | `FAKERADIO_TTS_PROVIDER=fish` | 调用 `api.fish.audio POST /v1/tts`，音色用 Voice ID（`reference_id`）指定 |
 
 > **境内网络**：Grok TTS 默认在境内不可达（`api.x.ai` 解析到 Meta CDN IP，被 GFW 阻断）。Node 的 `fetch` 不像 curl 会自动读 `HTTPS_PROXY`，**必须显式配代理**。Grok adapter 自动读 `.env` 的 `HTTPS_PROXY=http://...` 字段并通过 `undici.ProxyAgent` 走代理。无代理时听到的是 macOS 系统声（`synthesizeWithFallback` 兜底）。详见 `local-runbook.md` 踩坑 #5/#6。
 
@@ -118,21 +119,36 @@ FAKERADIO_MIMO_TTS_VOICE=茉莉
 
 可用音色：`茉莉`（中文女声）、`冰糖`（中文女声）、`苏打`（中文男声）、`白桦`（中文男声）、`Mia`（英文女声）、`Chloe`（英文女声）、`Milo`（英文男声）、`Dean`（英文男声）、`mimo_default`、`default_zh`、`default_en`。前端通过 `GET /api/tts/voices` 获取下拉列表，无需手填。
 
+### Fish Audio TTS 配置（2026-07-10 起）
+
+```bash
+FAKERADIO_TTS_PROVIDER=fish
+FAKERADIO_FISH_API_KEY=your_fish_key
+# 可选覆盖（默认值已内置）
+FAKERADIO_FISH_BASE_URL=https://api.fish.audio
+FAKERADIO_FISH_TTS_MODEL=s2-pro        # 也可 s1 / s2.1-pro-free 等，作为 model header 传给 API
+FAKERADIO_FISH_TTS_TIMEOUT_MS=60000
+FAKERADIO_FISH_HTTPS_PROXY=            # 专用代理，不填则按 HTTPS_PROXY → HTTP_PROXY → ALL_PROXY 探测
+```
+
+Fish 没有预置音色列表：音色是 fish.audio 音色页面复制的 **Voice ID**（API 的 `reference_id`），在设置页 provider 切到 Fish Audio 后的 Voice ID 文本框填入（存 settings 的 `fishVoiceId`）。请求以 `model` header 指定模型，输出 mp3。播报风格走 s2-pro 的自由文本 bracket 标签（`[温柔治愈] 口播文本`），语速映射到 `prosody.speed`（0.5–2）。代理策略与 Grok 相同（undici `ProxyAgent`）。
+
+> **前端保护**：设置页切到 Fish 但 Voice ID 还没填时，前端只保留本地状态、**不推服务端**（提示「填入 Voice ID 后设置才会生效」），避免服务端进入 "fish + 空 ID" 的 disabled 过渡态。
+
 ### 运行时音色 / 风格 / 语速
 
 除环境变量默认值外，音色、播报风格、语速可在运行时通过设置页（`GET/PUT /api/settings`）调整，`applySettings` 重建 adapter，无需重启：
 
-- `ttsVoice` / `mimoVoice`：音色，按当前 provider 生效。
-- `ttsStyle`：播报风格。MiMo 使用中文自由文本注入 user message；Grok 使用官方 speech tag 风格下拉（空串表示自然）。
-- `ttsRate`：语速偏移百分比（设置页对 Grok 使用 -30~50，0 为正常），Grok adapter 会转换为 xAI `speed`（0.7~1.5）。MiMo 未确认支持结构化语速参数，改用 `ttsStyle` 文本暗示（如「语速稍慢」）。
+- `ttsVoice` / `mimoVoice` / `fishVoiceId`：音色，按当前 provider 生效（Fish 是自由填写的 Voice ID，不是下拉）。
+- `ttsStyle`：播报风格。MiMo 使用中文自由文本注入 user message；Grok 使用官方 speech tag 风格下拉（空串表示自然）；Fish 使用自由文本 bracket 标签前缀。
+- `ttsRate`：语速偏移百分比（设置页 -30~50，0 为正常）。Grok 转换为 xAI `speed`（0.7~1.5），Fish 转换为 `prosody.speed`（0.5~2）。MiMo 未确认支持结构化语速参数，改用 `ttsStyle` 文本暗示（如「语速稍慢」）。
 
 缓存键纳入 provider/model/voice/style(或 rate)/text，同文案不同参数不会复用缓存。设置页提供试听按钮（`POST /api/tts/preview`），用当前表单值临时合成一句示例音频。
 
-### 回退策略
+### 回退策略（2026-07-10 起区分路径）
 
-- route 调用选定的 TTS adapter 生成 DJ 口播音频。
-- 如果真实 TTS provider 在运行时失败，server 会单次回退到 mock TTS。
-- 回退结果仍写入当前 DJ 状态，`/api/now` 与 `/api/next` 中的 DJ 文案和音频路径保持一致。
+- **live 播放路径**（`/api/next`、`/api/episode/next` live 生成、聊天口播）：真实 TTS 失败时 `synthesizeWithFallback` 单次回退到 macOS `say`（本地可听 TTS），电台不断播。回退结果仍写入当前 DJ 状态，`fallbackReason` 记录原因。
+- **持久化路径**（后台预热 `runPrewarmForDate`、主题节目生成 `scheduler-integration`）：通过 `ComposeEpisodeDeps.audibleTtsFallback: false` **禁用** say 兜底——TTS 失败直接让该次生成失败（prepared episode 记 `failed`，show block 记 error），等下次补生成。否则设置切换的过渡窗口（如 provider 已切 Fish 但 Voice ID 未填）会把系统 say 音频永久烘进 prepared episodes，用户之后播放命中就是"系统音"。
 
 ## LLM adapter
 

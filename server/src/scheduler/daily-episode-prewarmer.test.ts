@@ -200,6 +200,30 @@ describe("runPrewarmForDate", () => {
     expect(new Set(trackIds).size).toBe(3);
   });
 
+  it("marks episode failed instead of baking audible say fallback when TTS fails", async () => {
+    const deps = createPrewarmDeps();
+    // 模拟 TTS adapter 处于 disabled/故障态（如用户切换 provider 但 Voice ID 未填的过渡窗口）
+    deps.tts = {
+      async synthesize(): Promise<never> {
+        throw new Error("Fish Audio Voice ID 未填写");
+      }
+    };
+
+    const results = await runPrewarmForDate(
+      deps,
+      "2026-05-01",
+      [{ at: "07:00", label: "早晨", moodHint: "warm morning indie" }],
+      1,
+      "你是 FakeRadio DJ。"
+    );
+
+    // 预热是持久化路径：TTS 失败必须记为 failed，绝不能把 macOS say 兜底音频存进 prepared_episodes
+    expect(results[0]?.prepared).toBe(0);
+    expect(results[0]?.failed).toBe(1);
+    const claimed = await deps.stateRepo.claimPreparedEpisode("2026-05-01", "07:00");
+    expect(claimed).toBeNull();
+  });
+
   it("uses liked songs as recommendation seeds instead of prewarming the liked songs directly", async () => {
     const deps = createPrewarmDeps();
     const likedTrack: Track = {

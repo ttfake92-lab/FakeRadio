@@ -19,6 +19,7 @@ const defaultSettings = {
   ttsProvider: "grok" as const,
   ttsVoice: "eve",
   mimoVoice: "crimson",
+  fishVoiceId: "",
   ttsStyle: "",
   ttsRate: 0,
   tracePrivacy: "summary" as const,
@@ -103,6 +104,36 @@ describe("SettingsPanel 用户流", () => {
         ttsProvider: "mimo",
       });
     });
+  });
+
+  it("切到 Fish Audio 且 Voice ID 为空时不推服务端，填入 Voice ID 后一次性生效", async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("TTS Provider")).toBeInTheDocument();
+    });
+
+    // 切到 fish：Voice ID 还没填，不应触发保存（否则服务端进入 disabled 过渡态，
+    // 后台预热会在这个窗口内降级到系统 say 音频）
+    fireEvent.change(screen.getByLabelText("TTS Provider"), { target: { value: "fish" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("已切到 Fish Audio，填入 Voice ID 后设置才会生效")).toBeInTheDocument();
+    });
+    expect(mockUpdateSettings).not.toHaveBeenCalled();
+
+    // 填入 Voice ID：provider + ID 作为一份完整设置一次性保存
+    const input = screen.getByLabelText("Voice ID");
+    fireEvent.change(input, { target: { value: "demo-voice-abc" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith({
+        ...defaultSettings,
+        ttsProvider: "fish",
+        fishVoiceId: "demo-voice-abc",
+      });
+    });
+    expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
   });
 
   it("Grok TTS 显示官方音色和风格下拉", async () => {

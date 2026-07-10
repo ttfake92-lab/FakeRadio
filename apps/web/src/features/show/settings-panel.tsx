@@ -58,6 +58,15 @@ export function SettingsPanel() {
     const existingTimer = pendingTimersRef.current.get(key as string);
     if (existingTimer) clearTimeout(existingTimer);
     const timer = setTimeout(async () => {
+      // 切到 Fish Audio 但 Voice ID 还没填：只保留本地状态（让 Voice ID 输入框可见），
+      // 不推服务端。否则服务端会进入 "fish + 空 ID" 的 disabled 过渡态，
+      // 后台预热在这个窗口内会失败/降级。填入 Voice ID 后整份设置一次性生效。
+      const pending = settingsSnapshotRef.current;
+      if (pending && pending.ttsProvider === "fish" && !pending.fishVoiceId.trim()) {
+        setSaveMessage("已切到 Fish Audio，填入 Voice ID 后设置才会生效");
+        pendingTimersRef.current.delete(key as string);
+        return;
+      }
       setSaving(true);
       try {
         const currentSettings = settingsSnapshotRef.current;
@@ -95,8 +104,16 @@ export function SettingsPanel() {
     setPreviewError(null);
     try {
       const provider = settings.ttsProvider;
-      const voice = provider === "mimo" ? settings.mimoVoice : settings.ttsVoice;
-      const voiceList = provider === "mimo" ? voices?.mimo : voices?.grok;
+      const voice = provider === "mimo"
+        ? settings.mimoVoice
+        : provider === "fish"
+          ? settings.fishVoiceId
+          : settings.ttsVoice;
+      if (provider === "fish" && !voice.trim()) {
+        setPreviewError("请先填写 Fish Audio Voice ID");
+        return;
+      }
+      const voiceList = provider === "mimo" ? voices?.mimo : provider === "grok" ? voices?.grok : undefined;
       const lang = detectLang(voice, voiceList);
       const text = lang === "en"
         ? "Welcome to FakeRadio. This is a preview of the current voice."
@@ -106,7 +123,7 @@ export function SettingsPanel() {
         voice,
         text,
         style: settings.ttsStyle,
-        ...(provider === "grok" ? { rate: settings.ttsRate } : {})
+        ...(provider !== "mimo" ? { rate: settings.ttsRate } : {})
       });
       const audio = previewAudioRef.current;
       if (audio) {
@@ -199,11 +216,20 @@ export function SettingsPanel() {
           options={[
             { value: "grok", label: "Grok TTS" },
             { value: "mimo", label: "MIMO TTS" },
+            { value: "fish", label: "Fish Audio" },
           ]}
           onChange={(v) => handleSettingChange("ttsProvider", v)}
           disabled={saving}
         />
-        {(() => {
+        {settings.ttsProvider === "fish" ? (
+          <TextSetting
+            label="Voice ID"
+            description="Fish Audio 音色 ID，在 fish.audio 音色页面复制。回车或失焦后自动生效。"
+            value={settings.fishVoiceId}
+            onChange={(v) => handleSettingChange("fishVoiceId", v)}
+            disabled={saving}
+          />
+        ) : (() => {
           const isMimo = settings.ttsProvider === "mimo";
           const presetVoices = isMimo ? (voices?.mimo ?? []) : (voices?.grok ?? []);
           const currentVoice = isMimo ? settings.mimoVoice : settings.ttsVoice;
@@ -246,13 +272,13 @@ export function SettingsPanel() {
         )}
         <RangeSetting
           label="语速"
-          description="Grok TTS 支持。0% 为正常语速。"
+          description="Grok / Fish Audio 支持。0% 为正常语速。"
           value={settings.ttsRate}
           min={-30}
           max={50}
           step={5}
           onChange={(v) => handleSettingChange("ttsRate", v)}
-          disabled={saving || settings.ttsProvider !== "grok"}
+          disabled={saving || settings.ttsProvider === "mimo"}
         />
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
           <button

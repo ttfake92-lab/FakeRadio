@@ -210,7 +210,10 @@ async function generateEpisodeForBlock(
   const composeDeps: ComposeEpisodeDeps = {
     llm, tts, ttsCacheDir, storySource,
     publicMetadataAdapter, webResearchAdapter,
-    weather, calendar, devices, systemPrompt
+    weather, calendar, devices, systemPrompt,
+    // 主题节目是持久化产物：TTS 失败让该 block 走 error 路径记 failed，
+    // 不允许把 macOS say 兜底音频烘进节目文件。
+    audibleTtsFallback: false
   };
 
   // 组装节目编排上下文: 让 LLM 写口播时知道这一集在"整期剧本"里的位置 + 叙事弧。
@@ -235,15 +238,21 @@ async function generateEpisodeForBlock(
     allBlocksOutline
   };
 
-  const { episode } = await composeEpisodeFromTrack(track, composeDeps, {
-    recentMemory: [],
-    taste: deps.userPreferences?.taste ?? "",
-    routines: deps.userPreferences?.routines ?? "",
-    moodRules: deps.userPreferences?.moodRules ?? "",
-    showPlanContext
-  });
-
-  return { episode, track };
+  try {
+    const { episode } = await composeEpisodeFromTrack(track, composeDeps, {
+      recentMemory: [],
+      taste: deps.userPreferences?.taste ?? "",
+      routines: deps.userPreferences?.routines ?? "",
+      moodRules: deps.userPreferences?.moodRules ?? "",
+      showPlanContext
+    });
+    return { episode, track };
+  } catch (err) {
+    // compose 抛错（如 TTS 失败且本路径禁用 say 兜底）只让该 block 失败，
+    // 不炸掉整个 show job——外层循环对 { error } 有 failCount 处理。
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: `Block ${block.role} compose failed: ${message}` };
+  }
 }
 
 function cleanArtistCandidate(raw: string): string {

@@ -46,12 +46,12 @@
 ## 设置
 
 - `GET /api/settings`：返回当前运行时设置（`SettingsSchema`）。
-- `PUT /api/settings`：部分更新设置并热应用（`applySettings` 重建 adapter snapshot，无需重启）。字段含 provider/音色/语速等 TTS 项、netease 项、`weatherCity`（天气城市，个人资料面板可编辑，支持中文城市名）等，完整清单以 `packages/shared` 的 `UpdateSettingsRequestSchema` 为准。
+- `PUT /api/settings`：部分更新设置并热应用（`applySettings` 重建 adapter snapshot，无需重启）。字段含 provider/音色/语速等 TTS 项（`ttsProvider: "grok"|"mimo"|"fish"`、`ttsVoice`、`mimoVoice`、`fishVoiceId`）、netease 项、`weatherCity`（天气城市，个人资料面板可编辑，支持中文城市名）等，完整清单以 `packages/shared` 的 `UpdateSettingsRequestSchema` 为准。
 
 ## TTS
 
-- `GET /api/tts/voices`：返回各 provider 可用音色和 Grok speech tag 风格列表，供设置页下拉。`{ mimo: [{value,label}...], grok: [{value,label}...], grokStyles: [{value,label}...] }`。
-- `POST /api/tts/preview`：用指定参数试听合成。请求体 `{ provider: "mimo"|"grok", voice, style?, rate?, text? }`，临时构造 adapter 合成示例文本（默认「欢迎收听 FakeRadio，这是当前音色的试听。」），返回 `{ audioUrl }`（音频落 TTS 缓存，复用 `/cache/tts/*` 路由 serve）。MiMo 或 Grok 未配 API key、合成失败时返回 503 + `{ error }`。
+- `GET /api/tts/voices`：返回各 provider 可用音色和 Grok speech tag 风格列表，供设置页下拉。`{ mimo: [{value,label}...], grok: [{value,label}...], grokStyles: [{value,label}...] }`。Fish Audio 没有预置音色列表（音色是用户自填的 Voice ID），不在此接口返回。
+- `POST /api/tts/preview`：用指定参数试听合成。请求体 `{ provider: "mimo"|"grok"|"fish", voice, style?, rate?, text? }`（Fish 的 `voice` 传 Voice ID），临时构造 adapter 合成示例文本（默认「欢迎收听 FakeRadio，这是当前音色的试听。」），返回 `{ audioUrl }`（音频落 TTS 缓存，复用 `/cache/tts/*` 路由 serve）。对应 provider 未配 API key、合成失败时返回 503 + `{ error }`。
 
 ## Show Production（节目制作）
 
