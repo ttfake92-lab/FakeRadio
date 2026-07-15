@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>FakeRadio</title>
+<link rel="icon" href="./favicon.png">
+<style>
+  :root{
+    --bg:#efece4; --bg2:#f4f1ea; --ink:#1b1b19; --muted:#98948b; --faint:#c3bfb5;
+    --line:#d6d2c9; --stripe:#232321; --seg-bg:#ffffff; --seg-line:#cbc7bd;
+    --bubble:#f6f3ec; --page-bg:#c9c6bd;
+    --grain:rgba(0,0,0,0.30); --deco:rgba(0,0,0,0.11);
+    --glow1:rgba(0,0,0,0); --glow2:rgba(0,0,0,0); --glowC:rgba(150,120,88,0.13);
+    --frame-border:rgba(0,0,0,0.08);
+    --frame-shadow:0 28px 74px -20px rgba(0,0,0,.5);
+  }
+  [data-theme="dark"]{
+    --bg:#060606; --bg2:#0d0d0d; --ink:#ededed; --muted:#6b6b6b; --faint:#333333;
+    --line:#212121; --stripe:#ededed; --seg-bg:#282828; --seg-line:#2c2c2c;
+    --bubble:#0f0f0f; --page-bg:#0a0a0a;
+    --grain:rgba(255,255,255,0.40); --deco:rgba(255,255,255,0.09);
+    --glow1:rgba(104,112,158,0.42); --glow2:rgba(150,110,96,0.32); --glowC:rgba(128,140,198,0.36);
+    --frame-border:rgba(255,255,255,0.12);
+    /* 深色下框体与背景几乎同色,靠这圈蓝调边缘光晕 + 细描边把播放器"抬"出来 */
+    --frame-shadow:0 0 90px -18px rgba(120,132,195,.5),0 0 30px -6px rgba(120,132,195,.28),0 28px 74px -20px rgba(0,0,0,.85);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--page-bg);-webkit-font-smoothing:antialiased;transition:background .4s ease;}
+  button{font-family:inherit;}
+  @keyframes eqbar{0%,100%{transform:scaleY(0.28)}50%{transform:scaleY(1)}}
+  @keyframes blinklive{0%,55%{opacity:1}56%,100%{opacity:0.15}}
+  @keyframes breathe{0%,100%{opacity:.5;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.18)}}
+  @keyframes glowpulse{0%,100%{opacity:.72}50%{opacity:1}}
+  /* 深色下播放器边缘的蓝调光晕缓慢呼吸 */
+  @keyframes frameBreath{
+    0%,100%{box-shadow:0 0 68px -20px rgba(120,132,195,.36),0 0 24px -8px rgba(120,132,195,.20),0 28px 74px -20px rgba(0,0,0,.85);}
+    50%{box-shadow:0 0 104px -16px rgba(120,132,195,.6),0 0 38px -4px rgba(120,132,195,.36),0 28px 74px -20px rgba(0,0,0,.85);}
+  }
+  [data-theme="dark"] #frame{animation:frameBreath 8s ease-in-out infinite;}
+  /* 口播气泡入场:淡入 + 轻微上移 */
+  @keyframes bubbleIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  /* 打字光标 */
+  @keyframes caretBlink{0%,55%{opacity:1}56%,100%{opacity:0}}
+  .fr-caret{display:inline-block;width:6px;margin-left:1px;color:var(--muted);animation:caretBlink .9s steps(1) infinite;}
+  /* 对话区滚动条:细、贴主题 */
+  #chatLog{scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+  #chatLog::-webkit-scrollbar{width:4px;}
+  #chatLog::-webkit-scrollbar-track{background:transparent;}
+  #chatLog::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+  #chatLog::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+  /* EQ 播放时运行,暂停时静止 */
+  #eq span{width:2.5px;height:100%;background:var(--ink);transform-origin:bottom;animation:eqbar 1s ease-in-out infinite;animation-play-state:paused;transform:scaleY(0.28);}
+  [data-playing="1"] #eq span{animation-play-state:running;}
+  #eq span:nth-child(1){animation-duration:.9s;animation-delay:0s;}
+  #eq span:nth-child(2){animation-duration:.7s;animation-delay:.2s;}
+  #eq span:nth-child(3){animation-duration:1.1s;animation-delay:.1s;}
+  #eq span:nth-child(4){animation-duration:.8s;animation-delay:.35s;}
+  #eq span:nth-child(5){animation-duration:1s;animation-delay:.15s;}
+</style>
+</head>
+<body>
+<div id="frame" data-playing="0" style="--mx:220px;--my:180px;width:440px;max-width:100vw;height:812px;max-height:100vh;margin:0 auto;background:var(--bg);color:var(--ink);border-radius:28px;overflow:hidden;font-family:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono','Segoe UI Mono',Menlo,Consolas,monospace;position:relative;display:flex;flex-direction:column;border:1px solid var(--frame-border);box-shadow:var(--frame-shadow);">
+
+  <!-- 环境光晕 + 颗粒噪点 -->
+  <div style="position:absolute;left:50%;top:-14%;width:130%;height:55%;transform:translateX(-50%);background:radial-gradient(50% 50% at 50% 50%,var(--glow1),transparent 68%);pointer-events:none;z-index:0;animation:breathe 8s ease-in-out infinite;"></div>
+  <div style="position:absolute;left:50%;bottom:-16%;width:140%;height:55%;transform:translateX(-50%);background:radial-gradient(50% 50% at 50% 50%,var(--glow2),transparent 68%);pointer-events:none;z-index:0;animation:breathe 11s ease-in-out infinite 2.4s;"></div>
+  <div id="glowFollow" style="position:absolute;left:var(--mx);top:var(--my);width:380px;height:380px;transform:translate(-50%,-50%);background:radial-gradient(50% 50% at 50% 50%,var(--glowC),transparent 70%);pointer-events:none;z-index:0;transition:left .35s cubic-bezier(.2,.8,.2,1),top .35s cubic-bezier(.2,.8,.2,1);animation:glowpulse 6s ease-in-out infinite;"></div>
+  <div style="position:absolute;inset:0;background-image:radial-gradient(var(--grain) 0.6px,transparent 0.6px);background-size:22px 22px;opacity:.32;pointer-events:none;"></div>
+
+  <!-- HEADER -->
+  <div style="display:flex;align-items:center;gap:11px;padding:19px 20px 16px;border-bottom:1px solid var(--line);position:relative;z-index:2;">
+    <img id="brandLogo" alt="FakeRadio" style="width:36px;height:36px;flex:none;border:1px solid var(--line);border-radius:50%;object-fit:cover;object-position:50% 30%;" src="./assets/img/dj.jpg">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:15px;font-weight:700;letter-spacing:-.5px;line-height:1;">FakeRadio</div>
+      <div style="font-size:8.5px;letter-spacing:1.3px;color:var(--muted);margin-top:5px;">[ LOCAL RADIO • 88.7 FM ]</div>
+    </div>
+    <div style="display:flex;align-items:center;border:1px solid var(--seg-line);border-radius:18px;padding:3px;gap:2px;flex:none;">
+      <button id="btnDark" type="button">DARK</button>
+      <button id="btnLight" type="button">LIGHT</button>
+    </div>
+  </div>
+
+  <!-- HERO CLOCK -->
+  <div style="position:relative;overflow:hidden;padding:20px 20px 24px;border-bottom:1px solid var(--line);z-index:2;">
+    <div style="position:absolute;left:-26px;bottom:6px;width:112px;height:112px;border-radius:50%;background:var(--deco);-webkit-mask-image:repeating-linear-gradient(180deg,#000 0 3px,transparent 3px 7px);mask-image:repeating-linear-gradient(180deg,#000 0 3px,transparent 3px 7px);z-index:0;"></div>
+    <div style="position:absolute;left:0;bottom:22px;width:180px;height:52px;background:repeating-linear-gradient(180deg,var(--deco) 0 2px,transparent 2px 9px);z-index:0;"></div>
+    <div style="position:absolute;right:24px;bottom:2px;width:96px;height:96px;border-radius:50%;background:var(--deco);-webkit-mask-image:repeating-linear-gradient(180deg,#000 0 2px,transparent 2px 8px);mask-image:repeating-linear-gradient(180deg,#000 0 2px,transparent 2px 8px);z-index:0;"></div>
+    <div style="position:absolute;right:-30px;bottom:10px;width:96px;height:96px;border-radius:50%;background:var(--deco);-webkit-mask-image:repeating-linear-gradient(180deg,#000 0 2px,transparent 2px 8px);mask-image:repeating-linear-gradient(180deg,#000 0 2px,transparent 2px 8px);z-index:0;"></div>
+
+    <div style="position:relative;z-index:1;text-align:center;">
+      <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:18px;padding:4px 12px;font-size:9px;letter-spacing:2.5px;background:var(--bg);">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--ink);animation:blinklive 2s steps(1) infinite;"></span>ON AIR
+      </div>
+      <div id="clock" style="font-size:52px;font-weight:800;line-height:.92;letter-spacing:1px;margin:12px 0 4px;background:repeating-linear-gradient(180deg,var(--stripe) 0 3px,transparent 3px 6px);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;">--:--</div>
+      <div id="dayName" style="font-size:12px;letter-spacing:4px;font-weight:500;margin-top:8px;">&nbsp;</div>
+      <div id="dateStr" style="font-size:9px;letter-spacing:3.5px;color:var(--muted);margin-top:9px;">&nbsp;</div>
+    </div>
+  </div>
+
+  <!-- PLAYER -->
+  <div style="padding:0 20px 18px;border-bottom:1px solid var(--line);position:relative;z-index:2;">
+    <div id="progress" style="position:relative;height:12px;margin:0 -20px;cursor:pointer;display:flex;align-items:center;">
+      <div style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:1px;background:var(--muted);"></div>
+      <div id="progFill" style="position:absolute;left:0;top:50%;transform:translateY(-50%);height:1px;width:0%;background:var(--ink);"></div>
+      <div id="progKnob" style="position:absolute;left:0%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:var(--bg);border:2px solid var(--ink);box-shadow:0 0 0 2px var(--bg);opacity:0;transition:opacity .18s ease;"></div>
+      <div id="progTime" style="position:absolute;left:0%;bottom:-13px;transform:translateX(-50%);font-size:9.5px;font-weight:700;letter-spacing:.5px;color:var(--ink);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .18s ease;">00:00&nbsp;/&nbsp;00:00</div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+        <div id="eq" style="display:flex;align-items:flex-end;gap:2px;height:16px;flex:none;">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div style="min-width:0;">
+          <div id="trackTitle" style="font-family:'Courier Prime','Courier New',Courier,monospace;font-size:12px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">—</div>
+          <div id="trackArtist" style="font-size:8.5px;letter-spacing:1.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">—</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:11px;flex:none;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button id="btnPrev" type="button" aria-label="prev" style="width:24px;height:24px;border:1px solid var(--line);border-radius:50%;background:none;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12h2V6zm12 0-8 6 8 6z"></path></svg>
+          </button>
+          <button id="btnPlay" type="button" aria-label="play" style="width:30px;height:30px;border:1px solid var(--line);border-radius:50%;background:none;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg id="iconPlay" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+            <svg id="iconPause" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M8 5h4v14H8zm8 0h-4v14h4z"></path></svg>
+          </button>
+          <button id="btnNext" type="button" aria-label="next" style="width:24px;height:24px;border:1px solid var(--line);border-radius:50%;background:none;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M17 6v12h-2V6zM5 6l8 6-8 6z"></path></svg>
+          </button>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:8px;letter-spacing:2px;color:var(--muted);margin-bottom:5px;">VOL</div>
+          <div id="vol" style="display:flex;gap:2.5px;align-items:center;justify-content:flex-end;cursor:pointer;">
+            <span data-level="1" style="width:8px;height:4px;background:var(--ink);border-radius:1px;"></span>
+            <span data-level="2" style="width:8px;height:4px;background:var(--ink);border-radius:1px;"></span>
+            <span data-level="3" style="width:8px;height:4px;background:var(--ink);border-radius:1px;"></span>
+            <span data-level="4" style="width:8px;height:4px;background:var(--faint);border-radius:1px;"></span>
+            <span data-level="5" style="width:8px;height:4px;background:var(--faint);border-radius:1px;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DJ 口播区:每首歌的口播作为一条新气泡往上累积,像电台对话流 -->
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 20px 6px;position:relative;z-index:2;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex:none;">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <span style="width:24px;height:24px;border-radius:50%;border:1.5px dotted var(--muted);flex:none;"></span>
+        <div>
+          <div style="font-size:10px;letter-spacing:1.5px;">RADIO AI</div>
+          <div style="font-size:8.5px;letter-spacing:1.5px;color:var(--muted);margin-top:3px;">ON AIR</div>
+        </div>
+      </div>
+      <span style="display:flex;align-items:center;gap:7px;font-size:9.5px;letter-spacing:1.5px;color:var(--muted);">[ LIVE ]
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--ink);animation:blinklive 2s steps(1) infinite;"></span>
+      </span>
+    </div>
+    <div id="chatLog" style="flex:1;min-height:0;overflow:auto;margin-top:14px;display:flex;flex-direction:column;gap:12px;padding-bottom:4px;"></div>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:9px 18px;position:relative;z-index:2;color:var(--muted);border-top:1px solid var(--line);">
+    <span style="letter-spacing:1px;opacity:.6;font-size:9px;">||||||||</span>
+    <span style="font-size:7.5px;letter-spacing:2px;">鱼亦乐</span>
+    <span style="letter-spacing:1px;opacity:.6;font-size:9px;">||||||||</span>
+  </div>
+
+  <!-- 音频元素:只用包内相对路径,绝不用 data:/blob: -->
+  <audio id="audio" preload="metadata"></audio>
+</div>
+
+<script defer src="./episode-data.js"></script>
+<script defer src="./app.js"></script>
+</body>
+</html>
