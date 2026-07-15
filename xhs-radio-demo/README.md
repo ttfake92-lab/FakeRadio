@@ -62,16 +62,21 @@ python3 -m http.server 8080
 grep -nE "fetch|XMLHttpRequest|WebSocket|EventSource|eval\(|new Function|onclick=|blob:|window\.open|\.prompt\(" index.html app.js episode-data.js
 ```
 
-## 打包与上传
+## 打包
 
-打包命令（**必须进入目录压缩「内容」**，否则解压后多套一层目录、`index.html` 不在根，容器无法加载）：
+用 `build-zip.mjs` 打包（它负责规范要求的细节：压缩目录「内容」让 `index.html` 落在 zip 根、排除非白名单文件、按曲目号挑子集并重新编号）：
 
 ```bash
-cd xhs-radio-demo
-zip -r ../build/fakeradio-minitool.zip . -x '*.DS_Store' -x '__MACOSX/*' -x 'README.md'
+# 全部 5 首
+node xhs-radio-demo/build-zip.mjs --out build/fakeradio-minitool.zip
+
+# 只要前 3 首（体积减半，用于绕开平台上传超时）
+node xhs-radio-demo/build-zip.mjs --tracks 1,2,3 --out build/fakeradio-minitool-3songs.zip
 ```
 
-`README.md` 必须排除：官方规范的文件类型白名单只允许 `.html/.css/.js/图片/字体/.json`，`.md` 不在其中。
+脚本以本目录为母版、`episode-data.js` 为唯一数据真相，子集版的数据由它生成，不另存副本。
+
+`README.md` 与 `build-zip.mjs` 不会进 zip：官方文件类型白名单只允许 `.html/.css/.js/图片/字体/.json`。
 
 验证产物：解压后顶层应**直接看到 `index.html`**，而不是先看到一个文件夹。
 
