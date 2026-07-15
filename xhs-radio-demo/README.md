@@ -64,10 +64,20 @@ grep -nE "fetch|XMLHttpRequest|WebSocket|EventSource|eval\(|new Function|onclick
 
 ## 打包与上传
 
-1. 确认目录内容完整（上面的结构），`index.html` 在包根。
-2. 将 `xhs-radio-demo/` 打成平台要求的产物包（通常 zip；`README.md` 可留可删）。
-3. 登录 PC 端小红书 →「创作服务平台 → 小工具」→ 新建小工具 → 上传产物包 → 配置提交审核。
-4. 审核通过后，在移动端发笔记时一键挂载该小工具。
+打包命令（**必须进入目录压缩「内容」**，否则解压后多套一层目录、`index.html` 不在根，容器无法加载）：
+
+```bash
+cd xhs-radio-demo
+zip -r ../build/fakeradio-minitool.zip . -x '*.DS_Store' -x '__MACOSX/*' -x 'README.md'
+```
+
+`README.md` 必须排除：官方规范的文件类型白名单只允许 `.html/.css/.js/图片/字体/.json`，`.md` 不在其中。
+
+验证产物：解压后顶层应**直接看到 `index.html`**，而不是先看到一个文件夹。
+
+上传：登录 PC 端小红书 →「创作服务平台 → 小工具」→ 新建小工具 → 上传 zip → 提交审核。审核通过后在移动端发笔记时一键挂载。
+
+> ⚠️ **体积**：官方规范推荐总包 < 2MB，本包约 33MB（5 首完整歌曲）。若上传超限或加载过慢，可降码率（`ffmpeg -b:a 96k`）或改用歌曲片段。
 
 ## 换一期节目（更新内容）
 
