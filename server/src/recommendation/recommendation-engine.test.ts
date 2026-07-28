@@ -203,4 +203,42 @@ describe("Recommendation Engine", () => {
     const rockCount = ids.filter((id) => id.startsWith("r")).length;
     expect(rockCount).toBeLessThanOrEqual(2);
   });
+
+  describe("exploration randomization", () => {
+    const manyLiked = Array.from({ length: 12 }, (_, i) =>
+      track(`liked-${i}`, `Song ${i}`, `Artist ${i % 4}`)
+    );
+    const baseInput = {
+      now: new Date("2026-07-11T10:00:00+08:00"),
+      block: { at: "10:00", label: "上午", moodHint: "morning" },
+      weather: { summary: "clear", moodHint: "clear" },
+      calendar: [],
+      userPreferences: { taste: "", routines: "", moodRules: "", playlists: [] },
+      likedSongs: manyLiked,
+      recentTrackIds: new Set<string>(),
+      queuedTrackIds: new Set<string>()
+    };
+
+    it("samples simi seeds randomly instead of always taking the first 8 liked songs", () => {
+      // random 恒为 0.99 → 采样总是换到池尾;恒为 0 → 保持原位。两者必须产出不同种子。
+      const tailBiased = buildRecommendationContext({ ...baseInput, random: () => 0.99 });
+      const headBiased = buildRecommendationContext({ ...baseInput, random: () => 0 });
+      expect(tailBiased.seedTracks).toHaveLength(8);
+      expect(headBiased.seedTracks).toHaveLength(8);
+      expect(tailBiased.seedTracks.map((t) => t.id)).not.toEqual(headBiased.seedTracks.map((t) => t.id));
+      // 采样不改变个性化来源:种子必须仍然全部来自收藏
+      const likedIds = new Set(manyLiked.map((t) => t.id));
+      for (const seed of tailBiased.seedTracks) expect(likedIds.has(seed.id)).toBe(true);
+    });
+
+    it("orders artist queries with weighted randomness rather than a fixed frequency sort", () => {
+      // Artist 0 出现频次最高(4 次)。random 恒为 0.99 时,加权抽样几乎不会先抽中它。
+      const shuffled = buildRecommendationContext({ ...baseInput, random: () => 0.99 });
+      expect(shuffled.queries[0]).not.toBe("Artist 0");
+      // 所有高频艺术家仍然都在 query 列表里,只是顺序被洗牌
+      for (const name of ["Artist 0", "Artist 1", "Artist 2", "Artist 3"]) {
+        expect(shuffled.queries).toContain(name);
+      }
+    });
+  });
 });

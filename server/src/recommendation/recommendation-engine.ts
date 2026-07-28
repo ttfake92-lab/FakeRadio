@@ -1,6 +1,7 @@
-import type { Track } from "@fakeradio/shared";
+import type { DislikedTrack, Track } from "@fakeradio/shared";
 import type { CalendarItem, MusicAdapter, WeatherSnapshot } from "../adapters/types.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
+import { collectAvoidedArtists } from "../user/disliked-songs-repository.js";
 
 export type RecommendationBlock = {
   at: string;
@@ -29,6 +30,8 @@ export type RecommendationContext = {
   queries: string[];
   signals: string[];
   intent: RecommendationIntent;
+  /** 累计 dislike >= 2 的艺术家(小写),候选阶段整体过滤 */
+  avoidedArtists?: Set<string>;
 };
 
 export type RecommendationCandidateSource = "curated" | "search" | "favorites";
@@ -51,9 +54,14 @@ export type BuildRecommendationContextInput = {
   likedSongs: Track[];
   recentTrackIds: Set<string>;
   queuedTrackIds: Set<string>;
+  /** 用户明确不喜欢的歌(负反馈事实层)。单曲永久硬排除;同艺术家 >=2 次整体降权。 */
+  dislikedSongs?: DislikedTrack[];
+  /** 测试注入用；默认 Math.random。随机只作用于"取材顺序"(种子采样/艺术家洗牌)，不动个性化来源。 */
+  random?: () => number;
 };
 
 export function buildRecommendationContext(input: BuildRecommendationContextInput): RecommendationContext {
+  const random = input.random ?? Math.random;
   const playlistSeeds = findPlaylistSeeds(input.userPreferences, input.block);
   const baseSeeds = uniqueNonEmpty([input.block.moodHint, ...playlistSeeds]);
   const weatherMood = input.weather.moodHint.trim();
@@ -62,25 +70,42 @@ export function buildRecommendationContext(input: BuildRecommendationContextInpu
     input.userPreferences.moodRules,
     input.userPreferences.routines
   ].join("\n"));
-  // 用户实际听过的艺术家名(从 likedSongs 提取 top 8)是最强的 taste 信号——
-  // 比"classic rock"这种类别词命中率高得多。让它们排在 query 列表最前。
-  const likedArtists = extractTopArtists(input.likedSongs, 8);
+  const dislikedSongs = input.dislikedSongs ?? [];
+  const dislikedTrackIds = new Set(dislikedSongs.map((entry) => entry.trackId));
+  const avoidedArtists = collectAvoidedArtists(dislikedSongs);
+  // 用户实际听过的艺术家名是最强的 taste 信号——比"classic rock"这种类别词命中率高得多。
+  // 让它们排在 query 列表最前；但用按频次加权的随机顺序,而不是频次降序固定排列,
+  // 否则最高频艺术家永远占 query #1,每次开播都是同一批熟面孔。
+  const likedArtists = extractTopArtists(input.likedSongs, 8, random)
+    .filter((artist) => !avoidedArtists.has(artist.toLocaleLowerCase()));
   const queries = buildQueries(baseSeeds, weatherMood, tasteKeywords, likedArtists);
   const excludedTrackIds = new Set<string>([
     ...input.recentTrackIds,
     ...input.queuedTrackIds,
-    ...input.likedSongs.map((track) => track.id)
+    ...input.likedSongs.map((track) => track.id),
+    // dislike 的单曲永久硬排除,不受最近播放窗口大小限制
+    ...dislikedTrackIds
   ]);
-  const seedTracks = input.likedSongs
-    .filter((track) => !input.recentTrackIds.has(track.id) && !input.queuedTrackIds.has(track.id))
-    .slice(0, 8);
+  // simi 种子从全部可用收藏里随机采样,而不是固定取文件顺序前 8 首——
+  // 固定种子意味着 /simi/song 每次返回同一批相似歌。
+  const seedTracks = sampleTracks(
+    input.likedSongs.filter((track) =>
+      !input.recentTrackIds.has(track.id) &&
+      !input.queuedTrackIds.has(track.id) &&
+      !dislikedTrackIds.has(track.id) &&
+      !isAvoidedArtist(track, avoidedArtists)
+    ),
+    8,
+    random
+  );
 
   return {
     ...input,
     excludedTrackIds,
     seedTracks,
     queries,
-    signals: buildSignals(input, tasteKeywords, likedArtists),
+    signals: buildSignals(input, tasteKeywords, likedArtists, avoidedArtists),
+    avoidedArtists,
     intent: {
       priority: "curated-radio",
       energy: inferEnergy(input.block, input.weather, input.userPreferences.moodRules),
@@ -144,7 +169,7 @@ export async function selectRecommendedCandidates(input: {
       seeds: context.seedTracks,
       excludeTrackIds: [...excluded]
     })).catch(() => []));
-    for (const track of collectFreshTracks(recommended, excluded, curatedQuota)) {
+    for (const track of collectFreshTracks(recommended, excluded, curatedQuota, context.avoidedArtists)) {
       curated.push({ track, source: "curated" as const });
     }
   }
@@ -160,7 +185,7 @@ export async function selectRecommendedCandidates(input: {
     if (collected.length >= limit) break;
     const searchResults = asTrackArray(await Promise.resolve(music.search(query)).catch(() => []));
     let addedFromThisQuery = 0;
-    for (const track of collectFreshTracks(searchResults, excluded, limit)) {
+    for (const track of collectFreshTracks(searchResults, excluded, limit, context.avoidedArtists)) {
       if (seen.has(track.id)) continue;
       if (addedFromThisQuery >= perQueryQuota) break;
       seen.add(track.id);
@@ -239,7 +264,8 @@ function buildQueries(
 function buildSignals(
   input: BuildRecommendationContextInput,
   tasteKeywords: string[],
-  likedArtists: string[]
+  likedArtists: string[],
+  avoidedArtists: Set<string>
 ): string[] {
   return uniqueNonEmpty([
     input.weather.moodHint ? `weather:${input.weather.moodHint}` : "",
@@ -247,6 +273,8 @@ function buildSignals(
     input.calendar.length > 0 ? "calendar:busy" : "calendar:open",
     input.userPreferences.playlists.length > 0 ? "playlist-seeds" : "",
     input.likedSongs.length > 0 ? "liked-song-seeds" : "",
+    (input.dislikedSongs?.length ?? 0) > 0 ? `dislike-excluded:${input.dislikedSongs!.length}` : "",
+    ...[...avoidedArtists].map((artist) => `avoid-artist:${artist}`),
     ...likedArtists.map((artist) => `artist:${artist}`),
     ...tasteKeywords.map((keyword) => `taste:${keyword}`)
   ]);
@@ -296,9 +324,10 @@ export function extractTasteKeywords(text: string): string[] {
     .map(([, keyword]) => keyword);
 }
 
-// 从用户的 liked songs 抽 top N 艺术家(按出现频次降序)。这是最强的 taste 信号:
+// 从用户的 liked songs 抽 N 个艺术家。这是最强的 taste 信号:
 // 用户真的听过这些人,网易云搜艺术家名命中率远高于搜流派词。
-function extractTopArtists(likedSongs: Track[], limit: number): string[] {
+// 顺序按频次加权随机:高频艺术家更可能靠前,但不保证永远第一——保留探索空间。
+function extractTopArtists(likedSongs: Track[], limit: number, random: () => number = Math.random): string[] {
   const counts = new Map<string, number>();
   for (const track of likedSongs) {
     const artist = track.artist?.trim();
@@ -308,22 +337,63 @@ function extractTopArtists(likedSongs: Track[], limit: number): string[] {
       counts.set(piece, (counts.get(piece) ?? 0) + 1);
     }
   }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([artist]) => artist);
+  return weightedShuffle([...counts.entries()], random).slice(0, limit);
 }
 
-function collectFreshTracks(tracks: Track[], excluded: Set<string>, limit: number): Track[] {
+// 按权重无放回抽样,返回完整洗牌序列(权重越大越可能排前)。
+function weightedShuffle(entries: Array<[string, number]>, random: () => number): string[] {
+  const pool = [...entries];
+  const result: string[] = [];
+  while (pool.length > 0) {
+    const total = pool.reduce((sum, [, weight]) => sum + weight, 0);
+    let roll = random() * total;
+    let picked = pool.length - 1;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= pool[i]![1];
+      if (roll <= 0) {
+        picked = i;
+        break;
+      }
+    }
+    result.push(pool[picked]![0]);
+    pool.splice(picked, 1);
+  }
+  return result;
+}
+
+// 无放回随机采样 n 个曲目(部分 Fisher-Yates),保持原数组不被修改。
+function sampleTracks(tracks: Track[], n: number, random: () => number): Track[] {
+  const pool = [...tracks];
+  const count = Math.min(n, pool.length);
+  for (let i = 0; i < count; i++) {
+    const j = i + Math.floor(random() * (pool.length - i));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, count);
+}
+
+function collectFreshTracks(tracks: Track[], excluded: Set<string>, limit: number, avoidedArtists?: Set<string>): Track[] {
   const seen = new Set<string>();
   const fresh: Track[] = [];
   for (const track of tracks) {
     if (excluded.has(track.id) || seen.has(track.id)) continue;
+    if (avoidedArtists && isAvoidedArtist(track, avoidedArtists)) continue;
     seen.add(track.id);
     fresh.push(track);
     if (fresh.length >= limit) break;
   }
   return fresh;
+}
+
+// 艺术家匹配用小写规范化,且兼容 "A / B" 多人合作字段。
+function isAvoidedArtist(track: Track, avoidedArtists: Set<string>): boolean {
+  if (avoidedArtists.size === 0) return false;
+  const artist = track.artist?.trim();
+  if (!artist) return false;
+  return artist
+    .split(/[\/、,&]/)
+    .map((s) => s.trim().toLocaleLowerCase())
+    .some((piece) => piece.length > 0 && avoidedArtists.has(piece));
 }
 
 function uniqueNonEmpty(values: string[]): string[] {

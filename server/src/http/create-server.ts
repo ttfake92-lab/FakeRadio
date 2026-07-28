@@ -22,8 +22,10 @@ import { createSchedulerLoop, createPrewarmScheduler, type PrewarmScheduler } fr
 import { runPrewarmForDate, type PrewarmDeps } from "../scheduler/daily-episode-prewarmer.js";
 import { createInMemoryMemoryRepository } from "../state/memory-repository.js";
 import { createStateRepository, type StateRepository } from "../state/state-repository.js";
+import { runStorageCleanup } from "../state/storage-cleanup.js";
 import { loadUserPreferences, type UserPreferences } from "../user/load-user-preference.js";
 import { createFavoritesRepository } from "../user/favorites-repository.js";
+import { createDislikedSongsRepository } from "../user/disliked-songs-repository.js";
 import { inferAndSaveTaste } from "../user/taste-inferer.js";
 import { createLikedSongsRepository } from "../user/liked-songs-repository.js";
 import { createSessionRepository } from "../user/session-repository.js";
@@ -165,6 +167,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const memory = createInMemoryMemoryRepository();
   const nowProvider = options.now ?? (() => new Date());
   const favorites = createFavoritesRepository(resolve(process.cwd(), "user/favorites.json"));
+  const dislikes = createDislikedSongsRepository(resolve(process.cwd(), "user/disliked-songs.json"));
   const likedSongs = createLikedSongsRepository(resolve(options.baseDir ?? process.cwd()));
   const sessionRepo = createSessionRepository(resolve(process.cwd(), "user/sessions"), nowProvider);
   const trackRegistry = createTrackRegistry();
@@ -178,10 +181,11 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const currentPlanBlock = getCurrentPlanBlock(currentPlan, nowProvider());
   const currentMoodHint = currentPlanBlock?.moodHint ?? "warm morning indie";
   const initialQueue = await (async () => {
-    const [weatherSnapshot, calendarItems, likedSongTracks] = await Promise.all([
+    const [weatherSnapshot, calendarItems, likedSongTracks, dislikedSongs] = await Promise.all([
       weather.current().catch(() => ({ summary: "unknown", moodHint: currentMoodHint })),
       calendar.upcoming().catch(() => []),
-      likedSongs.list().catch(() => [])
+      likedSongs.list().catch(() => []),
+      dislikes.list().catch(() => [])
     ]);
     const context = buildRecommendationContext({
       now: nowProvider(),
@@ -195,7 +199,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       userPreferences,
       likedSongs: likedSongTracks,
       recentTrackIds: new Set(lastPlayedTracks.map((track) => track.trackId)),
-      queuedTrackIds: new Set()
+      queuedTrackIds: new Set(),
+      dislikedSongs
     });
     const candidates = await selectRecommendedCandidates({ music, context, limit: 10 }).catch(() => []);
     return candidates.map((candidate) => candidate.track);
@@ -214,7 +219,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   const jobRegistry = createJobRegistry(programsDir);
   const showProjectRepo = createShowProjectRepository(showsDir);
   registerRoutes({
-    app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir,
+    app, state, stateRepo, stream, memory, favorites, dislikes, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir,
     llm, llmStatus: runtimeStatuses.llm, music, musicStatus: runtimeStatuses.music,
     ttsStatus: runtimeStatuses.tts, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, weatherStatus: runtimeStatuses.weather,
@@ -263,8 +268,13 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
             .map((e) => `[${e.role}] ${e.text}${e.storyType ? ` (${e.storyType})` : ""}`)
             .join("\n");
           const favList = (await favorites.list()).map((f) => `${f.title} - ${f.artist}`).join(", ");
+          const today = formatRadioDate(nowProvider());
+          const dislikeList = (await dislikes.list().catch(() => []))
+            .filter((d) => d.dislikedAt.startsWith(today))
+            .map((d) => `${d.title} - ${d.artist}`)
+            .join(", ");
           await inferAndSaveTaste({
-            baseDir, llm, userPreferences, sessionSummary, favList, userMessage: "日终品味推断"
+            baseDir, llm, userPreferences, sessionSummary, favList, dislikeList, userMessage: "日终品味推断"
           });
           console.log(`[prewarm] End-of-day taste inference completed.`);
         } else {
@@ -311,6 +321,8 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       } catch (err) {
         console.error(`[prewarm] Theme show scheduler failed for ${todayDate}:`, err);
       }
+
+      await runStorageCleanupSafely("daily");
     }
   });
   prewarmScheduler.start();
@@ -323,6 +335,31 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
   // 进度通过 agent-message 广播进对话框，让用户知道"正在准备"。
   if (!options.skipStartupPrewarm && initialQueue.length > 0 && currentPlanBlock) {
     void prewarmStartupEpisodes();
+  }
+
+  // 存储回收：服务不一定在每日 tick 时间点开着，启动时也跑一次。
+  // 跟随 skipStartupPrewarm 关闭，避免单测里误删 fixture。
+  if (!options.skipStartupPrewarm) {
+    void runStorageCleanupSafely("startup");
+  }
+
+  async function runStorageCleanupSafely(trigger: "startup" | "daily") {
+    try {
+      const result = await runStorageCleanup({
+        stateRepo,
+        ttsCacheDir,
+        audioDir,
+        retentionDays: env.FAKERADIO_STORAGE_RETENTION_DAYS,
+        nowProvider
+      });
+      if (result.dbRowsPruned > 0 || result.ttsFilesDeleted > 0 || result.audioFilesDeleted > 0) {
+        console.log(
+          `[cleanup] (${trigger}) pruned ${result.dbRowsPruned} db rows, deleted ${result.ttsFilesDeleted} tts + ${result.audioFilesDeleted} audio files older than ${env.FAKERADIO_STORAGE_RETENTION_DAYS}d`
+        );
+      }
+    } catch (err) {
+      console.error(`[cleanup] (${trigger}) storage cleanup failed:`, err);
+    }
   }
 
   async function prewarmStartupEpisodes() {
@@ -341,7 +378,7 @@ export async function createRadioServer(options: CreateRadioServerOptions = {}) 
       llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
       publicMetadataAdapter: defaultPublicMetadataAdapter,
       webResearchAdapter: defaultWebResearchAdapter,
-      likedSongs, stateRepo, nowProvider, audioDir, userPreferences
+      likedSongs, dislikes, stateRepo, nowProvider, audioDir, userPreferences
     };
     try {
       const results = await runPrewarmForDate(

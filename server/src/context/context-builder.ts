@@ -17,6 +17,8 @@ export type BuildContextInput = {
   moodRules: string;
   /** 个人画像(profile.md);为空就不注入 */
   profile?: string;
+  /** 用户明确不喜欢的摘要(近期单曲 + 高频雷区艺术家);为空就不注入。选歌和口播都必须避开。 */
+  dislikes?: string;
   recentMemory: string[];
   userMessage?: string;
   toolResults: string[];
@@ -33,6 +35,9 @@ export function buildContextWindow(input: BuildContextInput): ContextFragment[] 
   ];
   if (input.profile && input.profile.trim().length > 0) {
     userLines.unshift(`profile: ${input.profile.trim()}`);
+  }
+  if (input.dislikes && input.dislikes.trim().length > 0) {
+    userLines.push(`dislikes(用户明确不喜欢,选歌与口播都要避开): ${input.dislikes.trim()}`);
   }
   return [
     {

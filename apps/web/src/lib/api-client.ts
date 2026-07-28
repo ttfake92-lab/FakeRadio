@@ -222,6 +222,24 @@ export async function removeFavorite(trackId: string) {
   return response.json() as Promise<{ removed: boolean }>;
 }
 
+export async function addDislike(track: { trackId: string; title: string; artist: string; album?: string }) {
+  const response = await fetch(buildApiUrl("/api/dislikes"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(track)
+  });
+  if (!response.ok) throw new Error(`addDislike failed: ${response.status}`);
+  return response.json() as Promise<{ dislike: { trackId: string; dislikedAt: string } }>;
+}
+
+export async function removeDislike(trackId: string) {
+  const response = await fetch(buildApiUrl(`/api/dislikes/${trackId}`), {
+    method: "DELETE"
+  });
+  if (!response.ok) throw new Error(`removeDislike failed: ${response.status}`);
+  return response.json() as Promise<{ removed: boolean }>;
+}
+
 export async function getBriefs() {
   const response = await fetch(buildApiUrl("/api/briefs"));
   if (!response.ok) {

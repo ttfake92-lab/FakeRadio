@@ -50,6 +50,7 @@ agent-logs/
 build/
 output/
 exports/
+xhs-radio-demo.zip
 .claude-flow/
 .claude/
 .playwright-cli/
@@ -60,6 +61,7 @@ apps/web/src/.claude-flow/
 .scratch/*.png
 .scratch/fakeradio-code-review/
 design_handoff_*/
+fakeradio-frontend4.0/
 
 # One-off orchestration scripts & notes (not part of FakeRadio product)
 agent-manual.sh

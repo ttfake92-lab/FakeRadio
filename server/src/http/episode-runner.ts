@@ -16,6 +16,7 @@ import {
 } from "../recommendation/recommendation-engine.js";
 
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
+import { summarizeDislikesForPrompt, type DislikedSongsRepository } from "../user/disliked-songs-repository.js";
 
 export type EpisodeRunnerDeps = {
   llm: LlmAdapter;
@@ -36,6 +37,7 @@ export type EpisodeRunnerDeps = {
   currentMoodHint: string;
   nowProvider: () => Date;
   likedSongs: LikedSongsRepository;
+  dislikes: DislikedSongsRepository;
 };
 
 export type ResolveResult = {
@@ -107,7 +109,7 @@ function buildGroundedFallbackDecision(
 }
 
 export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Promise<ResolveResult> {
-  const { llm, music, weather, calendar, devices, memory, state, systemPrompt, userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs } = deps;
+  const { llm, music, weather, calendar, devices, memory, state, systemPrompt, userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs, dislikes } = deps;
   const now = nowProvider();
   const weatherSnapshot = await weather.current();
   const calendarItems = await calendar.upcoming();
@@ -127,6 +129,8 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
   }
 
   const favoritesTracks = await likedSongs.list();
+  const dislikedSongs = await dislikes.list().catch(() => []);
+  const dislikesSummary = summarizeDislikesForPrompt(dislikedSongs);
   const currentPlan = buildTodayPlan(now, userPreferences.playlists);
   const currentBlock = getCurrentPlanBlock(currentPlan, now) ?? {
     at: "runtime",
@@ -141,7 +145,8 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     userPreferences,
     likedSongs: favoritesTracks,
     recentTrackIds: recentOrCurrentTrackIds,
-    queuedTrackIds: queueIds
+    queuedTrackIds: queueIds,
+    dislikedSongs
   });
   const recommendedEntries = await selectRecommendedCandidates({
     music,
@@ -158,6 +163,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     userTaste: userPreferences.taste,
     routines: userPreferences.routines,
     moodRules: userPreferences.moodRules,
+    dislikes: dislikesSummary,
     recentMemory: recentMemoryEntries.map((entry) => entry.content),
     toolResults: [],
     executionState: currentTrack ? `now playing: ${currentTrack.title}` : "idle",
@@ -232,6 +238,7 @@ export async function resolveNextTrackAndDecision(deps: EpisodeRunnerDeps): Prom
     userTaste: userPreferences.taste,
     routines: userPreferences.routines,
     moodRules: userPreferences.moodRules,
+    dislikes: dislikesSummary,
     recentMemory: recentMemoryEntries.map((entry) => entry.content),
     toolResults: [
       `music.provider: ${musicStatus}`,

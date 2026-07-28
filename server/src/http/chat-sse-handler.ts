@@ -106,6 +106,7 @@ export type ChatSSEHandlerDeps = Pick<
   | "nowProvider"
   | "systemPrompt"
   | "favorites"
+  | "dislikes"
   | "likedSongs"
   | "memory"
   | "musicStatus"
@@ -267,10 +268,14 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
         // avoid 是 LLM 看上下文后给的"这次别推"列表(用户说"别再来 X"或最近重复推过)。
         // avoid 是名字片段(artist 或 title),作为字符串包含匹配。
         const avoidLower = plan.avoid.map((a) => a.toLowerCase());
+        const { collectAvoidedArtists } = await import("../user/disliked-songs-repository.js");
+        const dislikedSongs = await deps.dislikes.list().catch(() => []);
         const excluded = new Set([
           ...deps.state.getRecentlySelectedTrackIds(),
           ...(currentTrack ? [currentTrack.id] : []),
-          ...queue.map((t) => t.id)
+          ...queue.map((t) => t.id),
+          // dislike 的单曲即使在风格切换场景也永久排除
+          ...dislikedSongs.map((d) => d.trackId)
         ]);
         const currentPlan = buildTodayPlan(now, deps.userPreferences.playlists);
         const currentBlock = getCurrentPlanBlock(currentPlan, now) ?? {
@@ -298,7 +303,8 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
             energy: "medium" as const,
             daypart: currentBlock.label,
             weatherMood: "neutral"
-          }
+          },
+          avoidedArtists: collectAvoidedArtists(dislikedSongs)
         };
 
         const rawCandidates = await selectRecommendedCandidates({
@@ -419,6 +425,7 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
           moodHint: deps.currentMoodHint
         };
         const likedSongTracks = await deps.likedSongs.list().catch(() => []);
+        const dislikedSongs = await deps.dislikes.list().catch(() => []);
         const context = buildRecommendationContext({
           now,
           block: currentBlock,
@@ -427,7 +434,8 @@ export function buildChatSSEHandler(deps: ChatSSEHandlerDeps) {
           userPreferences: deps.userPreferences,
           likedSongs: likedSongTracks,
           recentTrackIds: excluded,
-          queuedTrackIds: new Set(queue.map((t) => t.id))
+          queuedTrackIds: new Set(queue.map((t) => t.id)),
+          dislikedSongs
         });
 
         // 用户消息里明确提到的实体名(艺术家/歌曲/专辑)，是比 LLM playQuery 更强的信号。

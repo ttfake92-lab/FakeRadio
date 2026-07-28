@@ -30,7 +30,7 @@ const EnvSchema = z.object({
   FAKERADIO_FISH_TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   FAKERADIO_BRAVE_API_KEY: z.string().optional(),
   FAKERADIO_DEEPSEEK_API_KEY: z.string().optional(),
-  FAKERADIO_DEEPSEEK_MODEL: z.string().min(1).default("deepseek-chat"),
+  FAKERADIO_DEEPSEEK_MODEL: z.string().min(1).default("deepseek-v4-flash"),
   FAKERADIO_DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com/v1"),
   FAKERADIO_PREWARM_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   FAKERADIO_PREWARM_TIME: z.string().min(1).default("23:30"),
@@ -40,6 +40,9 @@ const EnvSchema = z.object({
   FAKERADIO_PREWARM_STARTUP_EPISODES: z.coerce.number().int().positive().default(10),
   // prepared_episodes 的低水位：当前 block 剩余 ready 数低于此值时触发后台补生成。
   FAKERADIO_PREWARM_LOW_WATER_MARK: z.coerce.number().int().positive().default(2),
+  // 存储回收保留期：超过 N 天的 TTS 口播缓存、歌曲音频文件和 DB 历史记录会被清理
+  //（仍被 ready 预热集引用的文件除外）。启动时和每日 prewarm tick 各跑一次。
+  FAKERADIO_STORAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   FAKERADIO_OPENWEATHER_API_KEY: z.string().optional(),
   FAKERADIO_WEATHER_CITY: z.string().min(1).default("Shanghai"),
   // auto: 有 OpenWeatherMap key 用它,否则走免 key 的 Open-Meteo。

@@ -53,6 +53,7 @@ export type StateRepository = {
     latestPrefs: PrefsUpdate[];
   }>;
   pruneOldData(beforeIso: string): Promise<number>;
+  getReadyEpisodeJsons(): Promise<string[]>;
   savePreparedEpisode(record: Omit<PreparedEpisodeRecord, "id" | "createdAt" | "updatedAt">): Promise<PreparedEpisodeRecord>;
   claimPreparedEpisode(radioDate: string, blockAt: string, excludedTrackIds?: string[]): Promise<{ record: PreparedEpisodeRecord; episode: RadioEpisode } | null>;
   getPrewarmStatus(radioDate: string): Promise<{ ready: number; consumed: number; failed: number; preparing: number }>;
@@ -248,8 +249,23 @@ export function createStateRepository(dbPath: string): StateRepository {
     },
 
     pruneOldData(beforeIso: string): Promise<number> {
-      const result = db.prepare(`DELETE FROM played_tracks WHERE played_at < ?`).run(beforeIso);
-      return Promise.resolve(result.changes);
+      const beforeDate = beforeIso.slice(0, 10);
+      const playedTracks = db.prepare(`DELETE FROM played_tracks WHERE played_at < ?`).run(beforeIso);
+      const djMessages = db.prepare(`DELETE FROM dj_messages WHERE created_at < ?`).run(beforeIso);
+      // 最新一条快照始终保留，服务长期停机后重启仍能恢复队列
+      const queueSnapshots = db.prepare(
+        `DELETE FROM queue_snapshots WHERE created_at < ? AND id NOT IN (SELECT id FROM queue_snapshots ORDER BY created_at DESC LIMIT 1)`
+      ).run(beforeIso);
+      // claim 只按当天 radio_date 查，旧日期的 prepared episodes 永远不会被消费
+      const preparedEpisodes = db.prepare(`DELETE FROM prepared_episodes WHERE radio_date < ?`).run(beforeDate);
+      return Promise.resolve(
+        playedTracks.changes + djMessages.changes + queueSnapshots.changes + preparedEpisodes.changes
+      );
+    },
+
+    getReadyEpisodeJsons(): Promise<string[]> {
+      const rows = db.prepare(`SELECT episode_json FROM prepared_episodes WHERE status = 'ready' AND episode_json IS NOT NULL`).all();
+      return Promise.resolve(rows.map((row) => (row as Record<string, unknown>).episode_json as string));
     },
 
     savePreparedEpisode(record: Omit<PreparedEpisodeRecord, "id" | "createdAt" | "updatedAt">): Promise<PreparedEpisodeRecord> {

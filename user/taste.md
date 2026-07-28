@@ -1,5 +1,5 @@
 ```markdown
-taste: 你的品味在经典摇滚（Queen、Beatles、Pink Floyd、Led Zeppelin、Rolling Stones）和后摇之间频繁切换，同时保留对独立民谣和梦泡/自赏的喜爱（如 Chromatics）。今天你密集点播了多期经典摇滚主题节目（Queen、Beatles、Pink Floyd 重复出现，以及 David Bowie、Led Zeppelin、U2、Coldplay、Radiohead、Muse、Bee Gees、ABBA、Rolling Stones），显示出对经典摇滚的深度依赖和探索欲。后摇和轻盈背景音乐（如《Morning Signal》《Quiet Compiler》）依然作为工作专注伴侣被反复调用。今天特别强调了经典摇滚的怀旧与能量需求，同时多次要求“更安静，不要鼓”，显示出对安静、无打击乐版本的需求——无论是经典摇滚的轻柔一面（Beatles、Simon & Garfunkel）还是后摇的极简版本（Sigur Rós）。夜间对灵魂乐（Al Green）和 Bee Gees 的温柔曲目有需求，作为入睡前的铺垫。整体上，你的音乐内核是情绪共鸣与功能性并重，经典摇滚占据主导地位，后摇作为心流开关的地位稳固，且越来越倾向于在经典摇滚中寻找安静版本。今天你首次明确表达了“喜欢 Bee Gees”，并主动要求“放点安静的钢琴曲”，显示出对柔和、器乐化经典摇滚延伸的兴趣，以及对钢琴作为安静媒介的偏好。今日对话中，你在工作时段主动表达了愉悦心情，并接受了轻盈独立民谣（Never Shout Never）作为提神选择，同时收藏了后摇器乐作品《Morning Signal》和《Quiet Compiler》，以及 Chromatics 的《Into The Black》，显示出对无鼓点、氛围化声音的持续偏爱，以及独立民谣作为心情调节的新入口。今日你反复点播 Queen、Beatles、Pink Floyd、Rolling Stones 主题节目，并新增对 Bee Gees 和 ABBA 的密集探索，同时收藏了 David Gilmour 的《High Hopes (Live In Gdansk)》，显示你对经典摇滚的延伸（尤其是 Pink Floyd 成员的个人作品）保持开放，且对现场版、器乐化演绎有持续兴趣。
+taste: 你的品味延续了对经典摇滚的深度依赖，今日密集点播了 Led Zeppelin、Pink Floyd、U2、Coldplay、Radiohead、Muse、Bee Gees、ABBA、Queen、Beatles、Rolling Stones 等主题节目，且 Queen、Beatles、Pink Floyd 被多次重复点播，显示出对这些乐队的持续探索欲和熟悉感。你明确表达了“我喜欢 Bee Gees”，并继续点播 Bee Gees 和 ABBA 主题节目，表明对经典流行/迪斯科的接纳度提升，不再局限于硬摇滚范畴。今日新增了对陈奕迅的探索请求，显示你愿意在经典摇滚之外，拓展至华语流行领域，尤其是注重情感表达和叙事性的歌手。收藏记录中，除了延续对后摇器乐（《Morning Signal》《Quiet Compiler》）和梦泡（Chromatics《Into The Black》）的偏好外，新增了独立民谣（Briston Maroney《Freakin' Out On the Interstate》）以及华语现场版（张靓颖、陈楚生《巴拉莱卡》Live版），显示出你对声音质感的多样性需求——从经典摇滚的能量到后摇的宁静，再到独立民谣的叙事感和华语现场的即时情感。整体上，你的音乐内核仍是情绪共鸣与功能性并重，经典摇滚占据主导，但探索边界正在拓宽：向经典流行/迪斯科（Bee Gees、ABBA）、华语流行（陈奕迅）和独立民谣延伸，同时后摇作为心流伴侣的地位稳固。今日的收藏还显示你对现场版、器乐化演绎和跨语言情感表达有持续兴趣。今日新增的对话中，你两次要求“讲讲这首歌的感觉”，分别指向 Dave Koz 的萨克斯版《Yesterday》和 Lene Marlin 的《A Place Nearby》，表明你对器乐化改编和北欧清冷民谣的细腻情感有明确兴趣，进一步确认了你对无鼓点、管乐主导的改编版本以及空灵人声叙事的偏好。你还主动要求“做一期门尼的节目”，显示你对这位艺人有明确的探索意愿，品味正在向更多元化的叙事性音乐延伸。
 
 routines: # FakeRadio 日常节奏
 
@@ -29,5 +29,11 @@ moodRules: # FakeRadio Mood Rules
 - 用户要求纯器乐（如“安静的钢琴曲”）时：可结合经典摇滚的钢琴版本、后摇的钢琴曲、极简钢琴作品，构建无鼓点的舒缓序列。
 - 用户心情愉悦时：可融入轻盈独立民谣、温暖人声曲目，作为经典摇滚与后摇之间的情绪过渡，保持整体明亮感。
 - 用户反复点播同一艺人/乐队时：视为深度探索信号，可优先推荐该艺人/乐队的专辑曲目、现场版或成员个人作品，尤其是器乐化、慢板版本。
-- 用户收藏现场版曲目（如 David Gilmour 的《High Hopes (Live In Gdansk)》）时：表明对经典摇滚的现场演绎和延长版本有偏好，后续可纳入同类现场录音作为心流或安神素材。
+- 用户收藏现场版曲目（如 David Gilmour 的《High Hopes (Live In Gdansk)》、张靓颖与陈楚生的《巴拉莱卡》Live版）时：表明对经典摇滚的现场演绎和延长版本有偏好，也接受华语现场的情感即时性，后续可纳入同类现场录音作为心流或安神素材。
+- 用户点播非经典摇滚艺人（如陈奕迅）时：视为跨语言/跨流派探索信号，可优先推荐其情感叙事性强、器乐编排丰富的曲目，并与经典摇滚的安静版本或独立民谣衔接。
+- 用户收藏独立民谣（如 Briston Maroney）时：表明对叙事性歌词的持续兴趣，可作为经典摇滚与后摇之间的情绪过渡。
+- 用户主动要求“讲讲这首歌的感觉”时：表明对音乐细节和情感描述有深度需求，可提供器乐编排、人声质感、情绪氛围等细腻分析，并推荐同类风格曲目。
+- 用户点播非主流/新兴艺人（如门尼）时：视为主动拓展品味的信号，可优先制作专题节目，结合其现有偏好（经典摇滚、后摇、独立民谣）进行衔接编排。
+- 用户对北欧民谣/清冷人声（如 Lene Marlin）表现出兴趣时：可纳入同类北欧艺人（如 Ane Brun、Kings of Convenience）作为情绪过渡或深夜安神素材。
+- 用户对器乐化经典改编（如 Dave Koz 的萨克斯版《Yesterday》）表现出兴趣时：可纳入更多经典歌曲的器乐改编版本（如萨克斯、钢琴、弦乐四重奏），作为无鼓点、低刺激的专注或安神素材。
 ```

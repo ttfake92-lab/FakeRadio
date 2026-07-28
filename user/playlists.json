@@ -3,7 +3,7 @@
     "id": "midnight-quiet",
     "name": "午夜静谧",
     "description": "极低密度、舒缓、适合入睡。",
-    "seeds": ["ambient sleep", "dark ambient", "soft drone"]
+    "seeds": ["soft piano sleep", "calm instrumental", "gentle acoustic night"]
   },
   {
     "id": "morning-soft-start",
@@ -26,13 +26,13 @@
   {
     "id": "afternoon-deep-focus",
     "name": "下午专注",
-    "description": "深度沉浸、电子氛围、适合深度工作。",
-    "seeds": ["deep focus electronic", "ambient techno", "minimal synth"]
+    "description": "深度沉浸、稳定电子、适合深度工作。",
+    "seeds": ["deep focus electronic", "minimal synth", "concentration instrumental"]
   },
   {
     "id": "night-downshift",
     "name": "晚间降速",
     "description": "低密度、空间感、适合收尾。",
-    "seeds": ["ambient pop night", "soft piano electronic", "dreamy downtempo"]
+    "seeds": ["soft pop night", "soft piano electronic", "dreamy downtempo"]
   }
 ]

@@ -1,5 +1,6 @@
 import type { RadioEpisode, Track } from "@fakeradio/shared";
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
+import { summarizeDislikesForPrompt, type DislikedSongsRepository } from "../user/disliked-songs-repository.js";
 import type { StateRepository } from "../state/state-repository.js";
 import type { LlmAdapter, MusicAdapter, TtsAdapter, StorySourceAdapter, WeatherAdapter, CalendarAdapter, DeviceAdapter } from "../adapters/types.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
@@ -25,6 +26,7 @@ export type PrewarmDeps = {
   publicMetadataAdapter?: StorySourceAdapter | undefined;
   webResearchAdapter?: StorySourceAdapter | undefined;
   likedSongs: LikedSongsRepository;
+  dislikes: DislikedSongsRepository;
   stateRepo: StateRepository;
   nowProvider(): Date;
   audioDir: string;
@@ -63,6 +65,8 @@ async function generatePrewarmEpisode(
   const now = nowProvider();
 
   const favoritesTracks = await likedSongs.list();
+  const dislikedSongs = await deps.dislikes.list().catch(() => []);
+  const dislikesSummary = summarizeDislikesForPrompt(dislikedSongs);
 
   // Get weather/calendar/devices for context
   const [weatherSnapshot, calendarItems, playbackDevices] = await Promise.all([
@@ -82,7 +86,8 @@ async function generatePrewarmEpisode(
     userPreferences: deps.userPreferences,
     likedSongs: favoritesTracks,
     recentTrackIds: excludedTrackIds,
-    queuedTrackIds: new Set()
+    queuedTrackIds: new Set(),
+    dislikedSongs
   });
   const recommendedEntries = await selectRecommendedCandidates({
     music,
@@ -99,6 +104,7 @@ async function generatePrewarmEpisode(
     userTaste: deps.userPreferences.taste,
     routines: deps.userPreferences.routines,
     moodRules: deps.userPreferences.moodRules,
+    dislikes: dislikesSummary,
     recentMemory: [],
     toolResults: [],
     executionState: "prewarm-episode",
@@ -175,7 +181,9 @@ export async function runPrewarmForDate(
   const { stateRepo, nowProvider } = deps;
   const results: PrewarmResult[] = [];
 
-  const recentPlayed = await stateRepo.getRecentlyPlayed(30);
+  // 与 live 路径的 recentlySelected 窗口(200)对齐——预热批次是用户开播最先听到的,
+  // 排重窗口太小会让几天前的高频歌轮回到"开头几首"。
+  const recentPlayed = await stateRepo.getRecentlyPlayed(200);
   const recentlyPlayedTrackIds = new Set(recentPlayed.map((p) => p.trackId));
   const dateSelectedTrackIds = new Set<string>();
 

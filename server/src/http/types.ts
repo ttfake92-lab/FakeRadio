@@ -5,6 +5,7 @@ import type { MemoryRepository } from "../state/memory-repository.js";
 import type { StateRepository } from "../state/state-repository.js";
 import type { UserPreferences } from "../user/load-user-preference.js";
 import type { FavoritesRepository } from "../user/favorites-repository.js";
+import type { DislikedSongsRepository } from "../user/disliked-songs-repository.js";
 import type { LikedSongsRepository } from "../user/liked-songs-repository.js";
 import type { SessionRepository } from "../user/session-repository.js";
 import type { TrackRegistry } from "../audio/track-registry.js";
@@ -26,6 +27,7 @@ export type RegisterRoutesDeps = {
   stream: StreamBroadcaster;
   memory: MemoryRepository;
   favorites: FavoritesRepository;
+  dislikes: DislikedSongsRepository;
   likedSongs: LikedSongsRepository;
   sessionRepo: SessionRepository;
   trackRegistry: TrackRegistry;

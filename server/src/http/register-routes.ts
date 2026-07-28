@@ -4,6 +4,8 @@ import {
   EpisodePlayingRequestSchema,
   FavoriteRequestSchema,
   FavoritesResponseSchema,
+  DislikeRequestSchema,
+  DislikesResponseSchema,
   InsertNextRequestSchema,
   HealthResponseSchema,
   LikedSongsDiagnosticsSchema,
@@ -59,7 +61,7 @@ function getCorsHeadersForOrigin(origin: unknown): Record<string, string> {
 
 export function registerRoutes(deps: RegisterRoutesDeps) {
   const {
-    app, state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
+    app, state, stateRepo, stream, memory, favorites, dislikes, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, llmStatus, music, musicStatus, ttsStatus, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, weatherStatus, calendar, calendarStatus, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider,
     storySourceStatus, webResearchStatus, neteaseAuth, runtimeManager, baseDir, programBriefRepo,
@@ -81,7 +83,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   const episodeRunnerDeps: EpisodeRunnerDeps = {
     llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, memory, state, systemPrompt,
-    userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs
+    userPreferences, musicStatus, currentMoodHint, nowProvider, likedSongs, dislikes
   };
 
   const composeEpisodeDeps: ComposeEpisodeDeps = {
@@ -92,7 +94,7 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   const prewarmDeps: PrewarmDeps = {
     llm, music, tts, ttsCacheDir, weather, calendar, devices, storySource,
-    publicMetadataAdapter, webResearchAdapter, likedSongs, stateRepo, nowProvider, audioDir, userPreferences
+    publicMetadataAdapter, webResearchAdapter, likedSongs, dislikes, stateRepo, nowProvider, audioDir, userPreferences
   };
 
   // 后台补生成 prepared episodes：当前 block 剩余 ready 低于低水位时，
@@ -140,10 +142,11 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
 
   async function recommendTracksForQueue(block: { at: string; label: string; moodHint: string } | null, limit: number) {
     const currentTrack = state.getCurrentTrack();
-    const [weatherSnapshot, calendarItems, likedSongTracks] = await Promise.all([
+    const [weatherSnapshot, calendarItems, likedSongTracks, dislikedSongs] = await Promise.all([
       weather.current().catch(() => ({ summary: "unknown", moodHint: block?.moodHint ?? currentMoodHint })),
       calendar.upcoming().catch(() => []),
-      likedSongs.list().catch(() => [])
+      likedSongs.list().catch(() => []),
+      dislikes.list().catch(() => [])
     ]);
     const context = buildRecommendationContext({
       now: nowProvider(),
@@ -160,7 +163,8 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
         ...state.getRecentlySelectedTrackIds(),
         ...(currentTrack ? [currentTrack.id] : [])
       ]),
-      queuedTrackIds: new Set(state.getQueue().map((track) => track.id))
+      queuedTrackIds: new Set(state.getQueue().map((track) => track.id)),
+      dislikedSongs
     });
     const candidates = await selectRecommendedCandidates({ music: deps.music, context, limit });
     return candidates.map((candidate) => candidate.track);
@@ -573,9 +577,13 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
       .map((e) => `[${e.role}] ${e.text}${e.storyType ? ` (${e.storyType})` : ""}`)
       .join("\n");
     const favList = (await favorites.list()).map((f) => `${f.title} - ${f.artist}`).join(", ");
+    const dislikeList = (await dislikes.list().catch(() => []))
+      .filter((d) => d.dislikedAt.startsWith(formatRadioDate(nowProvider())))
+      .map((d) => `${d.title} - ${d.artist}`)
+      .join(", ");
 
     const inferredTaste = await inferAndSaveTaste({
-      baseDir, llm, userPreferences, sessionSummary, favList, userMessage: "分析今天的品味变化"
+      baseDir, llm, userPreferences, sessionSummary, favList, dislikeList, userMessage: "分析今天的品味变化"
     });
 
     return { updated: true, taste: inferredTaste };
@@ -808,6 +816,24 @@ export function registerRoutes(deps: RegisterRoutesDeps) {
   app.delete("/api/favorites/:trackId", async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
     const removed = await favorites.remove(trackId);
+    if (!removed) return reply.status(404).send({ error: "not found" });
+    return { removed: true };
+  });
+
+  app.get("/api/dislikes", async () => {
+    const list = await dislikes.list();
+    return DislikesResponseSchema.parse({ dislikes: list });
+  });
+
+  app.post("/api/dislikes", async (request) => {
+    const body = DislikeRequestSchema.parse(request.body);
+    const entry = await dislikes.save(body);
+    return { dislike: entry };
+  });
+
+  app.delete("/api/dislikes/:trackId", async (request, reply) => {
+    const { trackId } = request.params as { trackId: string };
+    const removed = await dislikes.remove(trackId);
     if (!removed) return reply.status(404).send({ error: "not found" });
     return { removed: true };
   });

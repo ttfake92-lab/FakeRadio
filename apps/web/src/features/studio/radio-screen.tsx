@@ -230,6 +230,7 @@ export function RadioScreen({
   onPlayPause,
   onNext,
   onToggleFavorite,
+  onDislike,
   musicRef,
   audio,
   queue,
@@ -256,6 +257,7 @@ export function RadioScreen({
   onPlayPause: () => void;
   onNext: () => void;
   onToggleFavorite: () => void;
+  onDislike: () => void;
   musicRef: React.RefObject<HTMLAudioElement | null>;
   audio: AudioEngine;
   queue: Track[];
@@ -352,6 +354,7 @@ export function RadioScreen({
               onPrev={handlePrev}
               onNext={onNext}
               onToggleFavorite={onToggleFavorite}
+              onDislike={onDislike}
               audio={audio}
             />
             <QueueBar queue={queue} />

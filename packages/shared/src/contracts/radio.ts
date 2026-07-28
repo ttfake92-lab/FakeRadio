@@ -251,6 +251,25 @@ export const FavoritesResponseSchema = z.object({
   favorites: z.array(FavoriteTrackSchema)
 });
 
+export const DislikedTrackSchema = z.object({
+  trackId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  album: z.string().optional(),
+  dislikedAt: z.string().datetime()
+});
+
+export const DislikeRequestSchema = z.object({
+  trackId: z.string().min(1),
+  title: z.string().min(1),
+  artist: z.string().min(1),
+  album: z.string().optional()
+});
+
+export const DislikesResponseSchema = z.object({
+  dislikes: z.array(DislikedTrackSchema)
+});
+
 export const NeteaseLoginStatusSchema = z.object({
   status: z.enum(["logged-in", "cookie-invalid", "logged-out", "service-error"]),
   loggedIn: z.boolean(),
@@ -320,6 +339,9 @@ export type PrewarmStatus = z.infer<typeof PrewarmStatusSchema>;
 export type FavoriteTrack = z.infer<typeof FavoriteTrackSchema>;
 export type FavoriteRequest = z.infer<typeof FavoriteRequestSchema>;
 export type FavoritesResponse = z.infer<typeof FavoritesResponseSchema>;
+export type DislikedTrack = z.infer<typeof DislikedTrackSchema>;
+export type DislikeRequest = z.infer<typeof DislikeRequestSchema>;
+export type DislikesResponse = z.infer<typeof DislikesResponseSchema>;
 export type NeteaseLoginStatus = z.infer<typeof NeteaseLoginStatusSchema>;
 export type NeteaseQrLoginChallenge = z.infer<typeof NeteaseQrLoginChallengeSchema>;
 export type NeteaseQrLoginCheck = z.infer<typeof NeteaseQrLoginCheckSchema>;

@@ -366,7 +366,7 @@ export async function handleChat(
   deps: RegisterRoutesDeps
 ): Promise<ReturnType<typeof ChatResponseSchema.parse>> {
   const {
-    state, stateRepo, stream, memory, favorites, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, tts, ttsCacheDir,
+    state, stateRepo, stream, memory, favorites, dislikes, likedSongs, sessionRepo, trackRegistry, audioDir, exportDir, llm, tts, ttsCacheDir,
     systemPrompt, userPreferences, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, currentMoodHint, nowProvider, baseDir, programBriefRepo,
     showPlanRepo, showPlanGenerator
@@ -380,7 +380,7 @@ export async function handleChat(
   const episodeRunnerDeps: EpisodeRunnerDeps = {
     llm, music: deps.music, tts, ttsCacheDir, weather, calendar, devices, storySource,
     publicMetadataAdapter, webResearchAdapter, memory, state, systemPrompt,
-    userPreferences, musicStatus: deps.runtimeManager?.getStatuses().music ?? deps.musicStatus, currentMoodHint, nowProvider, likedSongs
+    userPreferences, musicStatus: deps.runtimeManager?.getStatuses().music ?? deps.musicStatus, currentMoodHint, nowProvider, likedSongs, dislikes
   };
 
   const userEntry: { timestamp: string; role: "user"; text: string; trackId?: string } = { timestamp: now, role: "user", text: msg };
@@ -525,8 +525,12 @@ export async function handleChat(
 
     const sessionSummary = todaySession.map((e) => `[${e.role}] ${e.text}`).join("\n");
     const favList = (await favorites.list()).map((f) => `${f.title} - ${f.artist}`).join(", ");
+    const dislikeList = (await dislikes.list().catch(() => []))
+      .filter((d) => d.dislikedAt.startsWith(formatRadioDate(nowProvider ? nowProvider() : new Date())))
+      .map((d) => `${d.title} - ${d.artist}`)
+      .join(", ");
 
-    const inferredTaste = await inferAndSaveTaste({ baseDir, llm, userPreferences, sessionSummary, favList, userMessage: msg });
+    const inferredTaste = await inferAndSaveTaste({ baseDir, llm, userPreferences, sessionSummary, favList, dislikeList, userMessage: msg });
     userPreferences.taste = inferredTaste;
 
     const confirmMsg = `已根据今天的互动更新品味偏好。`;
